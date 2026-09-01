@@ -134,21 +134,30 @@ def init_db():
         conn.execute("ALTER TABLE meesho_accounts ADD COLUMN instance_id TEXT DEFAULT ''")
     except Exception:
         pass
-    for col, tbl, default in [
-        ("supplier_id", "cart", "0"), ("variation_id", "cart", "0"),
-        ("variation_name", "cart", "''"), ("mrp", "cart", "0"),
-        ("meesho_order_num", "orders", "''"), ("payment_method", "orders", "'COD'"),
-        ("meesho_amount", "orders", "0"),
-        ("cart_session", "users", "''"),
-        ("meesho_address_id", "addresses", "0"),
-        ("app_session_id", "meesho_accounts", "''"),
-        ("shield_session_id", "meesho_accounts", "''"),
-        ("gaid", "meesho_accounts", "''"),
+    # (col, table, "<TYPE> DEFAULT <value>") -- the type is REQUIRED. It used to be
+    # missing, which made every one of these ALTERs a syntax error that the bare
+    # except silently ate, so pre-existing DBs never got the columns at all
+    # (cart adds then died with "table cart has no column named supplier_id").
+    for col, tbl, decl in [
+        ("supplier_id", "cart", "INTEGER DEFAULT 0"),
+        ("variation_id", "cart", "INTEGER DEFAULT 0"),
+        ("variation_name", "cart", "TEXT DEFAULT ''"),
+        ("mrp", "cart", "INTEGER DEFAULT 0"),
+        ("meesho_order_num", "orders", "TEXT DEFAULT ''"),
+        ("payment_method", "orders", "TEXT DEFAULT 'COD'"),
+        ("meesho_amount", "orders", "INTEGER DEFAULT 0"),
+        ("cart_session", "users", "TEXT DEFAULT ''"),
+        ("meesho_address_id", "addresses", "INTEGER DEFAULT 0"),
+        ("app_session_id", "meesho_accounts", "TEXT DEFAULT ''"),
+        ("shield_session_id", "meesho_accounts", "TEXT DEFAULT ''"),
+        ("gaid", "meesho_accounts", "TEXT DEFAULT ''"),
     ]:
         try:
-            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {default}")
-        except Exception:
-            pass
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {decl}")
+        except sqlite3.OperationalError as e:
+            # Already there is the normal case; anything else is a real problem.
+            if "duplicate column" not in str(e).lower():
+                print(f"[DB] migration failed: {tbl}.{col}: {e}", flush=True)
     conn.commit()
     conn.close()
 
@@ -434,13 +443,39 @@ def get_wallet_tx(user_id):
 
 def save_meesho_account(user_id, phone, meesho_user_id, xo, xo_exp=0, instance_id="", is_first_order=1,
                         app_session_id="", shield_session_id="", gaid=""):
+    """Upsert a Meesho account. Re-logging in with the same meesho_user_id updates
+    the existing row instead of inserting a duplicate (duplicates made
+    get_active_meesho_account pick a half-populated row)."""
     conn = get_db()
-    conn.execute(
-        """INSERT INTO meesho_accounts (user_id, phone, meesho_user_id, xo, xo_exp, instance_id,
-           is_first_order, app_session_id, shield_session_id, gaid, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (user_id, phone, str(meesho_user_id), xo, xo_exp, instance_id, int(is_first_order),
-         app_session_id, shield_session_id, gaid, time.time()))
+    meesho_user_id = str(meesho_user_id)
+    existing = None
+    if meesho_user_id:
+        existing = conn.execute(
+            "SELECT * FROM meesho_accounts WHERE user_id=? AND meesho_user_id=?",
+            (user_id, meesho_user_id)).fetchone()
+    if existing:
+        old = dict(existing)
+        # Blank incoming values must not wipe data an earlier (richer) save stored.
+        conn.execute(
+            """UPDATE meesho_accounts SET phone=?, xo=?, xo_exp=?, instance_id=?,
+               is_first_order=?, app_session_id=?, shield_session_id=?, gaid=?, created_at=?
+               WHERE id=?""",
+            (phone or old.get("phone", ""),
+             xo or old.get("xo", ""),
+             xo_exp or old.get("xo_exp", 0),
+             instance_id or old.get("instance_id", ""),
+             int(is_first_order),
+             app_session_id or old.get("app_session_id", ""),
+             shield_session_id or old.get("shield_session_id", ""),
+             gaid or old.get("gaid", ""),
+             time.time(), old["id"]))
+    else:
+        conn.execute(
+            """INSERT INTO meesho_accounts (user_id, phone, meesho_user_id, xo, xo_exp, instance_id,
+               is_first_order, app_session_id, shield_session_id, gaid, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (user_id, phone, meesho_user_id, xo, xo_exp, instance_id, int(is_first_order),
+             app_session_id, shield_session_id, gaid, time.time()))
     conn.commit()
     conn.close()
 

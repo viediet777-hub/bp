@@ -285,45 +285,84 @@ def api_place_order():
     if not addr:
         return jsonify({"error": "no address found. Add address first."}), 400
 
+    # Display subtotal is local sum, but real payable is Meesho effective_total
+    # ORDER_FEE is NOT added to product price. It's a backend-only per-order
+    # deduction from wallet (Rs.5 in paid mode, 0 in free). User pays Meesho
+    # directly via COD/UPI; we just charge the tiny service fee.
     subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
     user_mode = get_global_mode()
     fee = 0 if user_mode == "free" else ORDER_FEE
-    our_total = subtotal + fee
-    w = user.get("wallet", 0)
+    w = (user.get("wallet", 0) if user else 0)
 
     if user_mode == "paid":
-        if w < our_total:
-            return jsonify({"error": "insufficient wallet", "needed": our_total - w, "balance": w}), 400
-        deduct_wallet(uid, our_total)
+        if w < fee:
+            return jsonify({"error": "insufficient wallet", "needed": fee - w, "balance": w}), 400
+        deduct_wallet(uid, fee)
 
     # Get persisted cart_session, or sync local cart to real Meesho cart
     cart_session = get_cart_session(uid)
 
     # Push local cart to real Meesho cart via multi-item add
+    # If no session yet, start fresh (Meesho expects null, not stale string)
     valid_items = [c for c in cart if c.get("product_id")]
     if valid_items:
-        # Clear any existing real cart items first
-        existing_review = real_cart_review(acc, cart_session)
-        if existing_review.get("ok") and existing_review.get("items"):
-            for ei in existing_review["items"]:
-                if ei.get("identifier") and existing_review.get("cart_session"):
-                    real_cart_remove(acc, ei["identifier"], existing_review["cart_session"])
-        # Push the full bag in one call
+        # Clear any existing real cart items first so stale items don't mix
+        try:
+            existing_review = real_cart_review(acc, cart_session)
+            if existing_review.get("ok") and existing_review.get("items"):
+                cs_for_remove = existing_review.get("cart_session") or cart_session
+                for ei in existing_review["items"]:
+                    ident = ei.get("identifier")
+                    if ident and cs_for_remove:
+                        real_cart_remove(acc, ident, cs_for_remove)
+                # After clearing, start with empty session (captured flow uses "" for new cart)
+                cart_session = ""
+        except Exception as e:
+            print(f"[PLACE_ORDER] clear_existing failed: {e}", flush=True)
+        # Push the full bag in one call (tries pdp then pdl, plus basic price fallback)
         add_r = real_cart_add_many(acc, valid_items, cart_session or "")
+        print(f"[PLACE_ORDER] add_many result: {str(add_r)[:400]}", flush=True)
         if add_r.get("ok"):
             cart_session = add_r.get("cart_session", cart_session)
             if cart_session:
                 set_cart_session(uid, cart_session)
+        else:
+            # If multi-add fails, try single adds as fallback
+            print(f"[PLACE_ORDER] add_many failed, trying single adds", flush=True)
+            for it in valid_items:
+                sr = real_cart_add(acc, it.get("product_id"), it.get("supplier_id"),
+                                   it.get("variation_id"), it.get("variation_name") or "Free Size",
+                                   it.get("qty", 1), cart_session or "")
+                if sr.get("ok") and sr.get("cart_session"):
+                    cart_session = sr["cart_session"]
+                    set_cart_session(uid, cart_session)
+            # Verify at least one item made it
+            verify = real_cart_review(acc, cart_session)
+            print(f"[PLACE_ORDER] verify after single adds: {str(verify)[:400]}", flush=True)
+            if not verify.get("ok") or not verify.get("items"):
+                if user_mode == "paid":
+                    add_wallet(uid, fee)
+                return jsonify({"error": "Cart sync failed. Meesho rejected items - check supplier/variation ids.",
+                                "details": add_r}), 400
 
     # Use fresh_checkout_state to run review -> bind -> paymentinfo in one flow
     st = fresh_checkout_state(acc, cart_session, need_paymentinfo=(payment_method != "COD"))
     if not st:
         if user_mode == "paid":
-            add_wallet(uid, our_total)
-        return jsonify({"error": "Could not load the live Meesho cart."}), 400
+            add_wallet(uid, fee)
+        # Give actionable error: show review raw for debugging
+        dbg_review = real_cart_review(acc, cart_session)
+        return jsonify({"error": "Could not load the live Meesho cart.",
+                        "hint": "Check Meesho login valid, address covers pincode, items in stock.",
+                        "cart_session": cart_session,
+                        "review": dbg_review}), 400
 
     cart_session = st["cs"]
-    meesho_amount = st["order_total"] or subtotal
+    # For COD use effective_total (69), for UPI use upi_amount (41) - captured diff is 28 prepaid discount
+    if payment_method == "COD":
+        meesho_amount = st.get("effective_total") or st.get("order_total") or subtotal
+    else:
+        meesho_amount = st.get("upi_amount") or st.get("order_total") or subtotal
     meesho_addr_id = st["addr"].get("id")
     set_cart_session(uid, cart_session)
 
@@ -333,13 +372,14 @@ def api_place_order():
 
     if not order_r.get("ok"):
         if user_mode == "paid":
-            add_wallet(uid, our_total)
+            add_wallet(uid, fee)
         return jsonify({"error": f"Order failed: {order_r.get('error')}",
                         "message": order_r.get("message", ""), "details": order_r}), 400
 
     meesho_order_num = order_r.get("order_num", "")
     items_str = ", ".join([f"{c.get('name', '?')}x{c.get('qty', 1)}" for c in cart])
-    oid = create_order(uid, items_str, our_total, fee, addr.get("address_line_1", ""),
+    # total stored = actual Meesho payable (what user pays Meesho), fee is our backend cut
+    oid = create_order(uid, items_str, meesho_amount, fee, addr.get("address_line_1", ""),
                        meesho_order_num=meesho_order_num, payment_method=payment_method,
                        meesho_amount=meesho_amount)
 
@@ -362,7 +402,8 @@ def api_place_order():
 
     return jsonify({
         "ok": True, "order_id": oid, "meesho_order_num": meesho_order_num,
-        "total": our_total, "meesho_amount": meesho_amount,
+        "total": meesho_amount, "meesho_amount": meesho_amount,
+        "fee_charged": fee,
         "payment_method": payment_method, "mode": user_mode,
         "qr_base64": qr_base64,
         "upi_intent_url": upi_intent_url,
@@ -385,8 +426,8 @@ def api_checkout_summary():
 
     subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
     user_mode = get_global_mode()
+    # fee is backend-only per order, NOT added to product total
     fee = 0 if user_mode == "free" else ORDER_FEE
-    total = subtotal + fee
     balance = user.get("wallet", 0) if user else 0
 
     addr = get_default_address(uid)
@@ -395,35 +436,71 @@ def api_checkout_summary():
     cod_amount = subtotal
     upi_amount = subtotal
     payinfo_ok = False
+    real_effective_total = None
+    real_with_ppd = None
 
-    # Try to get real Meesho prices via cart review + paymentinfo
+    # Try to get real Meesho prices via cart review
+    # Captured API: COD = effective_total (69), UPI = effective_total_with_ppd / ForUpiPlugin (41)
+    # We DON'T add fee to these - fee is separate wallet deduction.
     if acc:
         cs = get_cart_session(uid)
         if not cs:
-            # Push local cart to real Meesho cart first
             valid_items = [c for c in cart if c.get("product_id")]
             if valid_items:
                 add_r = real_cart_add_many(acc, valid_items, "")
                 if add_r.get("ok"):
                     cs = add_r.get("cart_session")
+                    if cs:
+                        set_cart_session(uid, cs)
         if cs:
-            # Get real cart review
             review = real_cart_review(acc, cs)
             if review.get("ok"):
                 cs = review.get("cart_session", cs)
                 set_cart_session(uid, cs)
-                real_subtotal = review.get("effective_total") or subtotal
-                cod_amount = real_subtotal
-                upi_amount = review.get("effective_total_for_upi_plugin") or real_subtotal
+                # COD = effective_total, UPI = with_ppd / for_upi_plugin (captured: 69 vs 41)
+                cod_amount = review.get("effective_total") or subtotal
+                real_effective_total = review.get("effective_total")
+                # Try multiple fields for UPI price
+                upi_amount = (review.get("effective_total_for_upi_plugin")
+                              or review.get("effective_total_with_ppd")
+                              or cod_amount)
+                # If with_ppd is 0 (ATC flow), fallback to paymentinfo
+                if not upi_amount or upi_amount == cod_amount:
+                    # Only call paymentinfo if review didn't give distinct UPI price
+                    # Captured: payment_modes [] => COD, ["juspay"] => UPI
+                    pay_cod = real_paymentinfo(acc, cs, [])
+                    if pay_cod.get("ok"):
+                        cod_amount = pay_cod.get("effective_total", cod_amount)
+                    pay_upi = real_paymentinfo(acc, cs, ["juspay"])
+                    if pay_upi.get("ok"):
+                        upi_candidate = (pay_upi.get("effective_total_for_upi_plugin")
+                                         or pay_upi.get("effective_total")
+                                         or pay_upi.get("effective_total_with_ppd"))
+                        if upi_candidate:
+                            upi_amount = upi_candidate
+                # Final fallback: if still same, try to deduct known prepaid discount (28) for demo
+                # but real API should have returned different values
                 payinfo_ok = True
-                # Get real COD amount
-                pay_cod = real_paymentinfo(acc, cs, ["cod"])
-                if pay_cod.get("ok"):
-                    cod_amount = pay_cod.get("effective_total", cod_amount)
-                # Get real UPI amount
-                pay_upi = real_paymentinfo(acc, cs, ["upi_qr"])
-                if pay_upi.get("ok"):
-                    upi_amount = pay_upi.get("effective_total_for_upi_plugin") or pay_upi.get("effective_total", upi_amount)
+                # Update is_first_order in DB from user_meta so FOD status stays correct
+                try:
+                    is_first = review.get("is_first_order")
+                    if is_first is not None:
+                        from database import get_db
+                        conn = get_db()
+                        conn.execute("UPDATE meesho_accounts SET is_first_order=? WHERE id=?",
+                                     (1 if is_first else 0, acc.get("id")))
+                        conn.commit()
+                        conn.close()
+                except Exception:
+                    pass
+            else:
+                # Review failed - keep local subtotal as fallback
+                cod_amount = subtotal
+                upi_amount = subtotal
+
+    # total is the Meesho payable (COD default), NOT subtotal+fee
+    # Frontend shows cod_amount / upi_amount separately; fee is shown as wallet deduction hint
+    total = cod_amount
 
     return jsonify({
         "items": cart,
@@ -589,7 +666,18 @@ def api_offers():
         result = get_meesho_offer()
         if result.get("ok") and result.get("offer"):
             _meesho_offer = result["offer"]
-    return jsonify({"offer": _meesho_offer})
+    # Only new accounts get the First-Order banner/off. Old accounts see nothing
+    # so the "always 180 OFF" illusion disappears for them.
+    offer = _meesho_offer
+    uid = get_uid()
+    if uid and offer:
+        try:
+            acc = get_active_meesho_account(uid)
+            if acc is not None and int(acc.get("is_first_order", 1)) == 0:
+                return jsonify({"offer": None, "reason": "not_first_order"})
+        except Exception:
+            pass
+    return jsonify({"offer": offer})
 
 
 @app.route("/api/search", methods=["POST"])
@@ -807,7 +895,21 @@ def api_json_login():
     gaid = data.get("gaid") or data.get("identity", {}).get("gaid", "")
     phone = data.get("phone", "")
     phone_last4 = data.get("phone_last4", "")
-    is_first = data.get("is_first_order", 1)
+    # is_first_order: if caller explicitly says 0 we trust it (old account).
+    # If caller says 1 or omits it, we default to 1 but will auto-correct
+    # via Meesho's real user_meta on next cart review.
+    raw_first = data.get("is_first_order")
+    if raw_first is None:
+        # No field supplied -> default NEW for FOD, but mark for verification
+        is_first = 1
+        need_verify = True
+    else:
+        try:
+            is_first = int(raw_first)
+            is_first = 1 if is_first else 0
+        except Exception:
+            is_first = 1 if str(raw_first).lower() in ("1","true","yes") else 0
+        need_verify = False
 
     if not user_id or not xo:
         return jsonify({"ok": False, "error": "user_id and xo are required"})
@@ -821,8 +923,36 @@ def api_json_login():
                         shield_session_id=shield_session_id,
                         gaid=gaid)
 
-    print(f"[JSON_LOGIN] Saved account: user_id={user_id} instance_id={instance_id}", flush=True)
-    return jsonify({"ok": True, "user_id": user_id, "message": "Account logged in successfully!"})
+    print(f"[JSON_LOGIN] Saved account: user_id={user_id} instance_id={instance_id} is_first={is_first}", flush=True)
+
+    # Try to verify is_first_order against live Meesho user_meta so old accounts
+    # don't show the 180 OFF / prepaid discount. Fail silently - checkout will correct it.
+    verified_first = None
+    if need_verify:
+        try:
+            tmp_acc = {"meesho_user_id": str(user_id), "user_id": str(user_id),
+                       "phone": phone, "xo": xo, "instance_id": instance_id,
+                       "app_session_id": app_session_id, "shield_session_id": shield_session_id,
+                       "gaid": gaid, "is_first_order": is_first}
+            vr = real_cart_review(tmp_acc, None)
+            if vr.get("ok"):
+                vm = vr.get("user_meta") or {}
+                if "is_first_order" in vm:
+                    verified_first = 1 if vm.get("is_first_order") else 0
+                    save_meesho_account(uid, phone, str(user_id), xo, 0, instance_id,
+                                        is_first_order=verified_first,
+                                        app_session_id=app_session_id,
+                                        shield_session_id=shield_session_id,
+                                        gaid=gaid)
+                    is_first = verified_first
+                    print(f"[JSON_LOGIN] Verified is_first_order={is_first} via review", flush=True)
+        except Exception as e:
+            print(f"[JSON_LOGIN] verify failed: {e}", flush=True)
+
+    resp = {"ok": True, "user_id": user_id, "message": "Account logged in successfully!", "is_first_order": bool(is_first)}
+    if verified_first is not None:
+        resp["verified"] = True
+    return jsonify(resp)
 
 
 @app.route("/api/auth/me")

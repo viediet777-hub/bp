@@ -526,52 +526,95 @@ def logged_in_headers(acc, location=None):
     return h
 
 
-def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, cart_session=None):
-    """Add product to real Meesho cart via /api/1.0/cart/add"""
-    pid = int(product_id) if product_id else 0
-    vid = _pos_int(variation_id)
-    sid = _pos_int(supplier_id)
-    body = {
-        "context": "pdl",
-        "identifier": "buy_now",
-        "cart_session": cart_session or None,
-        "replaceable": False,
-        "items": [{
-            "identifier": "buy_now",
-            "product_id": pid,
-            "supplier_id": sid,
-            "variation_id": vid,
-            "variation": variation or "",
-            "quantity": int(qty) if qty else 1,
-            "selected_price_type_id": "premium_return_price",
-            "client_metadata": None,
-        }],
-        "address_id": None,
-        "user_id": _acc_uid(acc),
-    }
+def _cart_add_once(acc, body):
+    """Single POST to /api/1.0/cart/add, returns parsed result."""
     try:
         with httpx.Client(timeout=20.0) as client:
             resp = client.post(f"{MEESHO_API}/1.0/cart/add",
                                headers=logged_in_headers(acc), json=body)
             data = resp.json() or {}
-            print(f"[CART_ADD] resp={resp.status_code} data={str(data)[:500]}", flush=True)
             if data.get("success") or data.get("status") == "SUCCESS":
                 result = data.get("result", {})
+                return {"ok": True, "data": data, "result": result, "status": resp.status_code}
+            return {"ok": False, "data": data, "status": resp.status_code}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "data": {}}
+
+
+def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, cart_session=None):
+    """Add product to real Meesho cart via /api/1.0/cart/add.
+    Captured real app uses context='pdp' (folder 56). We try pdp first,
+    then pdl fallback, and also retry with basic_return_price on CART_OOS."""
+    pid = int(product_id) if product_id else 0
+    vid = _pos_int(variation_id)
+    sid = _pos_int(supplier_id)
+    base_item = {
+        "identifier": "buy_now",
+        "product_id": pid,
+        "supplier_id": sid,
+        "variation_id": vid,
+        "variation": variation or "",
+        "quantity": int(qty) if qty else 1,
+        "selected_price_type_id": "premium_return_price",
+        "client_metadata": None,
+    }
+    for context in ("pdp", "pdl"):
+        body = {
+            "context": context,
+            "identifier": "buy_now",
+            "cart_session": cart_session or None,
+            "replaceable": False,
+            "items": [dict(base_item)],
+            "address_id": None,
+            "user_id": _acc_uid(acc),
+        }
+        r = _cart_add_once(acc, body)
+        if r.get("ok"):
+            data = r["data"]
+            result = r["result"]
+            print(f"[CART_ADD] ok context={context} cs={str(data.get('cart_session'))[:30]}", flush=True)
+            return {
+                "ok": True,
+                "cart_session": data.get("cart_session"),
+                "effective_total": result.get("effective_total"),
+                "effective_total_for_upi_plugin": result.get("effective_total_for_upi_plugin"),
+                "total_quantity": result.get("total_quantity"),
+                "splits": result.get("splits", []),
+                "price_break_up": result.get("price_break_up", []),
+            }
+        data = r.get("data", {})
+        err_type = data.get("error_type") or data.get("message") or data.get("error") or r.get("error") or ""
+        # CART_OOS -> retry with basic price
+        ecode = (data.get("error") or {}).get("code") if isinstance(data.get("error"), dict) else None
+        if ecode == "CART_OOS" or "CART_OOS" in str(data):
+            base_item["selected_price_type_id"] = "basic_return_price"
+            body["items"] = [dict(base_item)]
+            r2 = _cart_add_once(acc, body)
+            if r2.get("ok"):
+                data2 = r2["data"]
+                result2 = r2["result"]
+                print(f"[CART_ADD] ok after CART_OOS retry context={context}", flush=True)
                 return {
                     "ok": True,
-                    "cart_session": data.get("cart_session"),
-                    "effective_total": result.get("effective_total"),
-                    "effective_total_for_upi_plugin": result.get("effective_total_for_upi_plugin"),
-                    "total_quantity": result.get("total_quantity"),
-                    "splits": result.get("splits", []),
-                    "price_break_up": result.get("price_break_up", []),
+                    "cart_session": data2.get("cart_session"),
+                    "effective_total": result2.get("effective_total"),
+                    "effective_total_for_upi_plugin": result2.get("effective_total_for_upi_plugin"),
+                    "total_quantity": result2.get("total_quantity"),
+                    "splits": result2.get("splits", []),
+                    "price_break_up": result2.get("price_break_up", []),
                 }
-            err = data.get("error_type") or data.get("message") or data.get("error") or str(data)[:200]
-            print(f"[CART_ADD] FAILED: {err}", flush=True)
-            return {"ok": False, "error": err, "raw": data}
-    except Exception as e:
-        print(f"[CART_ADD] EXCEPTION: {e}", flush=True)
-        return {"ok": False, "error": str(e)}
+            data = r2.get("data", data)
+            err_type = data.get("error_type") or str(data)[:300]
+        print(f"[CART_ADD] FAILED context={context}: {err_type} raw={str(data)[:400]}", flush=True)
+        # If context-specific error (e.g. invalid context), try next context
+        if "context" in str(err_type).lower() or "identifier" in str(err_type).lower():
+            continue
+        # Non-context error -> don't retry other context, just return
+        if context == "pdp":
+            # still try pdl fallback for generic failures
+            continue
+        return {"ok": False, "error": err_type, "raw": data}
+    return {"ok": False, "error": "cart add failed (both pdp/pdl)", "raw": {}}
 
 
 def real_cart_review(acc, cart_session=None):
@@ -809,7 +852,7 @@ def real_address_create(acc, name, mobile, pin, city, state, line1, line2="", la
 
 def real_cart_add_many(acc, items, cart_session=""):
     """Add multiple items to real Meesho cart in ONE call via /api/1.0/cart/add.
-    CRITICAL: identifier='buy_now' so items land in the checkout/review cart."""
+    Captured uses context='pdp' for buy_now (folder 56). Try pdp then pdl."""
     h = logged_in_headers(acc)
     its = []
     for li in items:
@@ -823,46 +866,53 @@ def real_cart_add_many(acc, items, cart_session=""):
             "selected_price_type_id": li.get("price_type_id") or "premium_return_price",
             "client_metadata": None,
         })
-    body = {
-        "context": "pdl", "identifier": "buy_now",
-        # Captured app traffic sends null (not "") for the first add of a session.
-        "cart_session": cart_session or None,
-        "replaceable": False, "items": its,
-        "address_id": None, "user_id": _acc_uid(acc),
-    }
-    try:
-        with httpx.Client(timeout=25.0) as client:
-            resp = client.post(f"{MEESHO_API}/1.0/cart/add", headers=h, json=body)
-            data = resp.json() or {}
-            print(f"[CART_ADD_MANY] resp={resp.status_code} data={str(data)[:500]}", flush=True)
-            if data.get("success"):
-                new_cs = data.get("cart_session") or cart_session
-                result = data.get("result", {})
-                return {
-                    "ok": True, "success": True,
-                    "cart_session": new_cs,
-                    "effective_total": result.get("effective_total"),
-                    "total_quantity": result.get("total_quantity"),
-                    "splits": result.get("splits", []),
-                }
-            ecode = (data.get("error") or {}).get("code") if isinstance(data.get("error"), dict) else None
-            if ecode == "CART_OOS" and resp.status_code == 200:
-                for li in its:
-                    li["selected_price_type_id"] = "basic_return_price"
-                body["items"] = its
-                resp2 = client.post(f"{MEESHO_API}/1.0/cart/add", headers=h, json=body)
-                data2 = resp2.json() or {}
-                if data2.get("success"):
-                    new_cs = data2.get("cart_session") or cart_session
-                    result = data2.get("result", {})
-                    return {"ok": True, "success": True, "cart_session": new_cs,
-                            "effective_total": result.get("effective_total"),
-                            "total_quantity": result.get("total_quantity"),
-                            "splits": result.get("splits", [])}
-            return {"ok": False, "error": data.get("error_type", "add_failed"), "raw": data}
-    except Exception as e:
-        print(f"[CART_ADD_MANY] EXCEPTION: {e}", flush=True)
-        return {"ok": False, "error": str(e)}
+    for context in ("pdp", "pdl"):
+        body = {
+            "context": context, "identifier": "buy_now",
+            "cart_session": cart_session or None,
+            "replaceable": False, "items": [dict(x) for x in its],
+            "address_id": None, "user_id": _acc_uid(acc),
+        }
+        try:
+            with httpx.Client(timeout=25.0) as client:
+                resp = client.post(f"{MEESHO_API}/1.0/cart/add", headers=h, json=body)
+                data = resp.json() or {}
+                print(f"[CART_ADD_MANY] context={context} resp={resp.status_code} data={str(data)[:400]}", flush=True)
+                if data.get("success"):
+                    new_cs = data.get("cart_session") or cart_session
+                    result = data.get("result", {})
+                    return {
+                        "ok": True, "success": True,
+                        "cart_session": new_cs,
+                        "effective_total": result.get("effective_total"),
+                        "total_quantity": result.get("total_quantity"),
+                        "splits": result.get("splits", []),
+                    }
+                ecode = (data.get("error") or {}).get("code") if isinstance(data.get("error"), dict) else None
+                if ecode == "CART_OOS" and resp.status_code == 200:
+                    for li in body["items"]:
+                        li["selected_price_type_id"] = "basic_return_price"
+                    resp2 = client.post(f"{MEESHO_API}/1.0/cart/add", headers=h, json=body)
+                    data2 = resp2.json() or {}
+                    if data2.get("success"):
+                        new_cs = data2.get("cart_session") or cart_session
+                        result = data2.get("result", {})
+                        return {"ok": True, "success": True, "cart_session": new_cs,
+                                "effective_total": result.get("effective_total"),
+                                "total_quantity": result.get("total_quantity"),
+                                "splits": result.get("splits", [])}
+                err_s = str(data.get("error_type") or data.get("message") or data)[:400]
+                if "context" in err_s.lower():
+                    continue
+                if context == "pdp":
+                    continue
+                return {"ok": False, "error": data.get("error_type", "add_failed"), "raw": data}
+        except Exception as e:
+            print(f"[CART_ADD_MANY] EXCEPTION context={context}: {e}", flush=True)
+            if context == "pdp":
+                continue
+            return {"ok": False, "error": str(e)}
+    return {"ok": False, "error": "cart add failed (both pdp/pdl)", "raw": {}}
 
 
 def real_fetch_addresses(acc):
@@ -901,12 +951,26 @@ def real_fetch_addresses(acc):
 
 def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True):
     """Run review -> bind address -> (paymentinfo) with fresh sessions.
-    Returns dict(cs, addr, amt, order_total, upi_amount) or None."""
+    Returns dict(cs, addr, amt, order_total, upi_amount) or None.
+    Uses correct payment_modes per captured API: [] for COD, ["juspay"] for UPI."""
     review = real_cart_review(acc, cart_session)
     if not review.get("ok") or not review.get("cart_session"):
-        print(f"[FRESH_CHECKOUT] review_failed: {review}", flush=True)
-        return None
+        print(f"[FRESH_CHECKOUT] review_failed cs={cart_session} review={review}", flush=True)
+        # Retry with empty session (stale session expired)
+        if cart_session:
+            print(f"[FRESH_CHECKOUT] retrying review with empty session", flush=True)
+            review = real_cart_review(acc, "")
+            if not review.get("ok") or not review.get("cart_session"):
+                print(f"[FRESH_CHECKOUT] retry_failed: {review}", flush=True)
+                return None
+        else:
+            return None
     cs = review["cart_session"]
+    # Also handle case where review succeeds but items empty (cart not synced)
+    items = review.get("items") or []
+    if not items:
+        print(f"[FRESH_CHECKOUT] review_ok_but_empty_items: {review}", flush=True)
+        return None
     addr = review.get("address") or {}
     if not addr.get("id") and addr.get("address_id"):
         addr["id"] = addr["address_id"]
@@ -914,39 +978,68 @@ def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True):
         acc_addrs = real_fetch_addresses(acc)
         if acc_addrs:
             addr = acc_addrs[0]
+            print(f"[FRESH_CHECKOUT] using fetched address id={addr.get('id')}", flush=True)
         else:
-            print(f"[FRESH_CHECKOUT] no_address", flush=True)
+            print(f"[FRESH_CHECKOUT] no_address and no fetched addrs", flush=True)
             return None
+    # Bind address - log but don't fail hard if already bound (some flows return ok even if same)
     bind_result = real_bind_address(acc, cs, addr["id"], addr.get("pin"))
     if not bind_result.get("ok"):
-        print(f"[FRESH_CHECKOUT] bind_failed: {bind_result}", flush=True)
-        return None
-    cs = bind_result.get("cart_session") or cs
+        print(f"[FRESH_CHECKOUT] bind_failed: {bind_result} - retrying review to see if already bound", flush=True)
+        # Re-review to see if bind was actually not needed
+        re = real_cart_review(acc, cs)
+        if re.get("ok") and re.get("address") and re["address"].get("id"):
+            cs = re.get("cart_session", cs)
+            print(f"[FRESH_CHECKOUT] re-review after bind fail got addr {re['address'].get('id')}", flush=True)
+        else:
+            return None
+    else:
+        cs = bind_result.get("cart_session") or cs
     order_total = upi_amount = None
+    # COD vs UPI amounts: review already has both (69 vs 41). Use them directly.
+    # For UPI we also want with_ppd / for_upi_plugin.
+    review_cod = review.get("effective_total")
+    review_upi = review.get("effective_total_for_upi_plugin") or review.get("effective_total_with_ppd")
     if need_paymentinfo:
-        pi = real_paymentinfo(acc, cs, ["upi_qr"])
+        # Use correct modes per capture: ["juspay"] for UPI
+        pi = real_paymentinfo(acc, cs, ["juspay"])
         if pi.get("ok"):
             order_total = pi.get("effective_total")
-            upi_amount = pi.get("effective_total_for_upi_plugin") or order_total
+            upi_amount = pi.get("effective_total_for_upi_plugin") or pi.get("effective_total_with_ppd") or order_total
+            # UPI amount should be the with_ppd one (41), COD is without (69)
             new_cs = pi.get("cart_session")
             if new_cs:
                 cs = new_cs
+            print(f"[FRESH_CHECKOUT] paymentinfo UPI ok total={order_total} upi={upi_amount}", flush=True)
         if order_total is None or order_total <= 0:
-            order_total = review.get("effective_total")
+            order_total = review_upi or review_cod
+            upi_amount = review_upi or order_total
+        if upi_amount is None:
+            upi_amount = order_total
     else:
-        order_total = review.get("effective_total")
+        # COD: use effective_total (69) directly, no paymentinfo needed
+        order_total = review_cod
+        upi_amount = review_upi or review_cod
+        print(f"[FRESH_CHECKOUT] COD mode using review_cod={review_cod} upi={upi_amount}", flush=True)
     if order_total is None or order_total <= 0:
-        order_total = review.get("effective_total")
-    if order_total is None or order_total <= 0:
-        items = review.get("items") or []
+        order_total = review_cod
+    if order_total is None or order_total <= 0 and items:
         order_total = sum(float(it.get("price", 0)) * int(it.get("quantity", 1)) for it in items) or 1
     if order_total is None or order_total <= 0:
-        print(f"[FRESH_CHECKOUT] zero_amt: {order_total}", flush=True)
+        print(f"[FRESH_CHECKOUT] zero_amt: {order_total} review={review}", flush=True)
         return None
+    # Update is_first_order flag from live user_meta
+    try:
+        vm = review.get("user_meta") or {}
+        if "is_first_order" in vm:
+            # don't write DB here (caller does), just include in return
+            pass
+    except Exception:
+        pass
     return {"cs": cs, "addr": addr, "amt": int(round(order_total)),
-            "order_total": order_total, "upi_amount": upi_amount,
-            "items": review.get("items") or [], "total_quantity": review.get("total_quantity"),
-            "effective_total": review.get("effective_total")}
+            "order_total": order_total, "upi_amount": upi_amount or order_total,
+            "items": items, "total_quantity": review.get("total_quantity"),
+            "effective_total": review_cod, "effective_upi": review_upi}
 
 
 def real_preorder(acc, cart_session, address_id, payment_method="COD",

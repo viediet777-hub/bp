@@ -133,6 +133,7 @@ input,button{font-family:inherit;outline:none;border:none}
 .pmodal-sizes{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
 .size-chip{padding:8px 16px;border-radius:10px;background:var(--bg);border:2px solid var(--border);font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
 .size-chip.selected{border-color:var(--accent);background:#f0eefc;color:var(--accent)}
+.size-chip.oos{opacity:.4;cursor:not-allowed;text-decoration:line-through}
 .close-modal{position:absolute;top:16px;right:16px;width:32px;height:32px;border-radius:50%;background:rgba(0,0,0,.06);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;color:var(--text2);z-index:5}
 </style>
 </head>
@@ -430,15 +431,25 @@ async function openProduct(pid){
     var supplierId=d.supplier_id||0;
     var sizesHtml='';
     if(sizes.length){
-      sizesHtml='<div class="pmodal-sizes">'+sizes.map(function(s,i){
-        var vid=0,vname='';
+      var firstOk=-1;
+      var chips=sizes.map(function(s,i){
+        var vid=0,vname='',oos=false;
         if(typeof s==='string'){vname=s}
         else if(s&&typeof s==='object'){
           vid=s.id||s.variation_id||0;
           vname=(typeof s.name==='string'?s.name:'')||(typeof s.size==='string'?s.size:'')||(typeof s.variation_name==='string'?s.variation_name:'')||(typeof s.variation==='string'?s.variation:'')||s.label||'';
+          oos=(s.in_stock===false);
         }
         if(!vname)vname='Free Size';
-        return '<div class="size-chip'+(i===0?' selected':'')+'" onclick="selectSize(this)" data-vid="'+vid+'" data-vname="'+vname+'">'+vname+'</div>'
+        // Meesho rejects an out-of-stock variation, so it must never be the
+        // default pick; remember the first in-stock chip instead.
+        if(!oos&&firstOk<0)firstOk=i;
+        return {vid:vid,vname:vname,oos:oos};
+      });
+      if(firstOk<0)firstOk=0;
+      sizesHtml='<div class="pmodal-sizes">'+chips.map(function(c,i){
+        if(c.oos)return '<div class="size-chip oos" title="Out of stock" data-vid="'+c.vid+'" data-vname="'+c.vname+'">'+c.vname+'</div>';
+        return '<div class="size-chip'+(i===firstOk?' selected':'')+'" onclick="selectSize(this)" data-vid="'+c.vid+'" data-vname="'+c.vname+'">'+c.vname+'</div>';
       }).join('')+'</div>';
     }
     var mrpHtml=mrp?'<div class="pmodal-mrp">Rs.'+mrp+'</div>':'';
@@ -466,7 +477,15 @@ async function addToCartFromModal(){
       supplier_id:p.supplierId,variation_id:vid,variation_name:vname,mrp:parseFloat(p.price)
     })});
     var d=await r.json();
-    if(d.ok){toast('Added to cart!');closeProductModal();loadCart()}
+    if(d.ok){
+      // The local row always saves; only the real Meesho push can fail, and a
+      // silent "Added to cart!" there is what made lost items hard to spot.
+      if(d.real_cart_synced===false&&d.real_cart_error&&d.real_cart_error!=='no_account'){
+        toast('Added locally, Meesho cart failed');
+        console.warn('[CART] real cart not synced:',d.real_cart_error);
+      }else toast('Added to cart!');
+      closeProductModal();loadCart()
+    }
     else toast('Failed to add');
   }catch(e){toast('Failed to add to cart')}
 }
@@ -572,10 +591,17 @@ function selectPay(method){
 function updatePayDetail(){
   var codA=window._ckData?window._ckData.cod_amount:0;
   var upiA=window._ckData?window._ckData.upi_amount:0;
+  var amt = selectedPayment==='COD'?codA:upiA;
   if(selectedPayment==='COD'){
     $('payDetail').innerHTML='Pay Rs.'+codA+' when delivered';
   }else{
-    $('payDetail').innerHTML='Pay Rs.'+upiA+' via UPI (extra discount!)';
+    var save = codA>upiA?(' (save Rs.'+(codA-upiA)+')'):'';
+    $('payDetail').innerHTML='Pay Rs.'+upiA+' via UPI'+save;
+  }
+  // Update totals to reflect actual selected payment price (fee NOT added)
+  if(amt){
+    $('ckTotal').textContent='Rs.'+amt;
+    $('cartTotal').textContent='Rs.'+amt;
   }
 }
 
@@ -590,29 +616,45 @@ async function loadCheckoutSummary(){
     }else{
       $('checkoutAddr').innerHTML='<span style="color:var(--accent2)">No address saved. </span><span style="color:var(--accent);cursor:pointer" onclick="openAddAddress()">Add one now</span>';
     }
-    $('ckSubtotal').textContent='Rs.'+(d.subtotal||0);
+    // subtotal = local sum (reference), but real payable is cod/upi from Meesho
+    // fee is backend-only (Rs.5 wallet deduction per order in paid mode) - NOT added to total
+    var realCod = d.cod_amount||0;
+    var realUpi = d.upi_amount||0;
+    var isRealPrice = !!(d.payinfo_ok || realCod !== d.subtotal);
+    $('ckSubtotal').textContent='Rs.'+ (isRealPrice ? realCod : (d.subtotal||0));
+    // Fee row: show hint, never added to ckTotal
     if(d.fee>0){
-      $('ckFee').textContent='Rs.'+d.fee;
+      $('ckFee').textContent='Rs.'+d.fee+' (wallet)';
+      $('ckFee').parentElement.querySelector('span').textContent='Service fee';
       showEl('ckFreeRow',false);
     }else{
-      $('ckFee').textContent='Rs.0';
       if(d.mode==='free'){
+        $('ckFee').textContent='Rs.0';
         showEl('ckFreeRow',true);
         $('ckFreeRow').style.display='flex';
+      }else{
+        $('ckFee').textContent='Rs.0';
+        showEl('ckFreeRow',false);
       }
     }
-    $('ckTotal').textContent='Rs.'+(d.total||0);
-    $('cartTotal').textContent='Rs.'+(d.total||0);
-    if(d.cod_amount!==d.upi_amount){
-      $('ckMeeshoPrice').textContent='COD: Rs.'+d.cod_amount+' | UPI: Rs.'+d.upi_amount+' (extra Rs.'+(d.cod_amount-d.upi_amount)+' off!)';
+    // Total = selected payment's Meesho amount (updated by selectPay)
+    var initTotal = (selectedPayment==='UPI'?realUpi:realCod) || d.total || realCod || d.subtotal||0;
+    $('ckTotal').textContent='Rs.'+initTotal;
+    $('cartTotal').textContent='Rs.'+initTotal;
+    if(realCod!==realUpi){
+      $('ckMeeshoPrice').textContent='COD: Rs.'+realCod+' | UPI: Rs.'+realUpi+' (extra Rs.'+(realCod-realUpi)+' off!)';
+    }else if(isRealPrice){
+      $('ckMeeshoPrice').textContent='Meesho payable: Rs.'+realCod;
     }else{
-      $('ckMeeshoPrice').textContent='Meesho price: Rs.'+d.cod_amount;
+      $('ckMeeshoPrice').textContent='Meesho price: Rs.'+realCod;
     }
     if(d.mode==='paid'){
-      $('ckBalance').textContent='Wallet: Rs.'+(d.balance||0);
+      var feeHint = d.fee>0 ? ' | Fee Rs.'+d.fee+'/order from wallet' : '';
+      $('ckBalance').textContent='Wallet: Rs.'+(d.balance||0)+feeHint;
     }else{
-      $('ckBalance').textContent='FREE mode — no wallet needed';
+      $('ckBalance').textContent='FREE mode \u2014 no wallet needed';
     }
+    // keep payDetail in sync
     updatePayDetail();
   }catch(e){}
 }
@@ -638,9 +680,9 @@ async function placeOrder(){
     if(d.ok){
       var msg='Order placed! #'+d.order_id;
       if(d.meesho_order_num)msg+=' (Meesho #'+d.meesho_order_num+')';
-      if(d.qr_base64){
+      if(d.qr_base64||d.qr_url||d.upi_intent_url){
         msg+=' — Scan QR to pay Rs.'+d.meesho_amount;
-        showQRModal(d.qr_base64,d.upi_intent_url);
+        showQRModal(d.qr_base64,d.upi_intent_url,d.qr_url);
       }
       toast(msg);loadCart();switchTab(3);
     }else if(d.error==='insufficient wallet'){
@@ -653,14 +695,18 @@ async function placeOrder(){
   btn.disabled=false;btn.textContent='Place Order';
 }
 
-function showQRModal(qrBase64,upiUrl){
+function showQRModal(qrBase64,upiUrl,qrUrl){
   var existing=document.getElementById('qrModalOverlay');
   if(existing)existing.remove();
+  // Meesho's own QR (JusPay, base64) is preferred; qrUrl is the gateway fallback
+  // image the backend builds from the UPI intent link when Meesho returns none.
+  var imgSrc=qrBase64?('data:image/png;base64,'+qrBase64):(qrUrl||'');
   var html='<div class="modal-overlay show" id="qrModalOverlay"><div class="modal" style="text-align:center">';
   html+='<h2>Scan QR to Pay</h2>';
   html+='<p>Pay via any UPI app</p>';
-  if(qrBase64)html+='<img src="data:image/png;base64,'+qrBase64+'" style="width:250px;height:250px;margin:16px auto;border-radius:14px;border:2px solid var(--border)">';
+  if(imgSrc)html+='<img src="'+imgSrc+'" alt="UPI payment QR code" style="width:250px;height:250px;margin:16px auto;border-radius:14px;border:2px solid var(--border)">';
   if(upiUrl)html+='<a href="'+upiUrl+'" style="display:inline-block;margin:12px 0;padding:12px 24px;border-radius:12px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;text-decoration:none">Open UPI App</a>';
+  if(!imgSrc&&!upiUrl)html+='<p style="color:var(--text3);font-size:12px;margin:12px 0">Payment link unavailable — open the Meesho app to pay for this order.</p>';
   html+='<button class="cancel-btn" onclick="document.getElementById(\'qrModalOverlay\').remove()">Close</button>';
   html+='</div></div>';
   document.body.insertAdjacentHTML('beforeend',html);
@@ -722,18 +768,24 @@ async function loadAccount(){
   try{
     var r=await fetch(API+'/api/accounts',{headers:headers()});
     var accs=await r.json();
-    var list=Array.isArray(accs)?accs:[];
-    if(!list.length){$('accountsList').innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">No accounts linked. Login above to link your Meesho account.</div>';return}
-    $('accountsList').innerHTML=list.map(function(a){
-      var statusCls=a.meesho_user_id?'active':'inactive';
-      var statusText=a.meesho_user_id?'Active':'Inactive';
-      var phone=a.phone_display||a.phone||'Unknown';
-      var userId=a.meesho_user_id||a.id||'';
-      var isFod=a.is_first_order?'First Order':'Regular';
-      var sessInfo=a.app_session_id?'Session: Active':'';
-      return '<div class="acc-card fade-up"><h4>'+phone+'</h4><p>User ID: '+userId+'</p><p style="font-size:11px;color:var(--text3)">'+isFod+(sessInfo?' | '+sessInfo:'')+'</p><div class="status '+statusCls+'">'+statusText+'</div></div>';
-    }).join('');
-  }catch(e){}
+    var list=Array.isArray(accs)?accs:(accs&&Array.isArray(accs.accounts)?accs.accounts:[]);
+    if(!list.length){
+      $('accountsList').innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">No accounts linked. Login above to link your Meesho account.</div>';
+    }else{
+      $('accountsList').innerHTML=list.map(function(a){
+        var statusCls=a.meesho_user_id?'active':'inactive';
+        var statusText=a.meesho_user_id?'Active':'Inactive';
+        var phone=a.phone_display||a.phone||'Unknown';
+        var mUserId=a.meesho_user_id||a.id||'';
+        var isFod=a.is_first_order?'First Order':'Regular';
+        var sessInfo=a.instance_id?'Session: Active':'';
+        return '<div class="acc-card fade-up"><h4>'+phone+'</h4><p>User ID: '+mUserId+'</p><p style="font-size:11px;color:var(--text3)">'+isFod+(sessInfo?' | '+sessInfo:'')+'</p><div class="status '+statusCls+'">'+statusText+'</div></div>';
+      }).join('');
+    }
+  }catch(e){
+    $('accountsList').innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">Could not load linked accounts. Pull to refresh.</div>';
+    console.error('[ACCOUNTS]',e);
+  }
   loadAddresses();
 }
 
@@ -819,15 +871,9 @@ async function handleLogin(){
         // Save phone + referral to user profile
         var refLink=$('loginRef').value.trim()||DEFAULT_REF;
         await fetch(API+'/api/user',{method:'POST',headers:headers(),body:JSON.stringify({phone:loginPhone,referral_link:refLink})});
-        // Save account from OTP result
-        if(d.account){
-          await fetch(API+'/api/accounts/add',{method:'POST',headers:headers(),body:JSON.stringify({
-            phone:loginPhone,
-            meesho_user_id:d.account.user_id||'',
-            xo:d.account.xo||'',
-            instance_id:d.account.instance_id||''
-          })});
-        }
+        // NOTE: the account row is already persisted server-side by
+        // /api/auth/otp_verify (with instance/session ids). Posting to
+        // /api/accounts/add here created a second, half-populated row.
         toast('Logged in!');closeLogin();loadAccount();
       } else toast(d.error||'Invalid OTP');
     }catch(e){toast('Invalid OTP')}
