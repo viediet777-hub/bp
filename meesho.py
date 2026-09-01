@@ -112,6 +112,12 @@ def _safe_int(v):
     except (ValueError, TypeError):
         return None
 
+def _pos_int(v):
+    """Like _safe_int but 0 also means 'absent' (our DB defaults ids to 0 and
+    Meesho expects null there, not 0)."""
+    n = _safe_int(v)
+    return n if n else None
+
 # ============================================================ DEVICE / FOD
 def _random_device():
     dev = dict(random.choice(DEVICE_POOL))
@@ -266,18 +272,22 @@ def meesho_product_sync(product_id, offer=None):
             images = [im.get("url") if isinstance(im, dict) else str(im) for im in imgs[:6] if im]
             sizes = []
             for it in (sup.get("inventory") or []):
-                raw_name = it.get("variation_name") or it.get("variation") or ""
-                if isinstance(raw_name, dict):
-                    name = str(raw_name.get("name") or raw_name.get("size") or raw_name.get("value") or "")
-                else:
-                    name = str(raw_name)
-                raw_vid = it.get("variation_id") or it.get("id")
+                # Live shape is {"supplierId":..,"variation":{"id":809,"name":"M",..},"in_stock":..}
+                # so the variation id is nested; only older/other shapes have it top-level.
+                # Missing ids make app.py skip the real-cart push (it needs variation_id).
+                var = it.get("variation")
+                var = var if isinstance(var, dict) else {}
+                raw_name = it.get("variation_name") or var.get("name") or var.get("size") \
+                    or var.get("value") or (it.get("variation") if not var else "") or ""
+                name = str(raw_name)
+                raw_vid = it.get("variation_id") or var.get("id") or it.get("id")
                 if isinstance(raw_vid, dict):
                     vid = raw_vid.get("id")
                 else:
                     vid = raw_vid
                 if name.strip():
-                    sizes.append({"name": name.strip(), "id": vid})
+                    sizes.append({"name": name.strip(), "id": _safe_int(vid) or None,
+                                  "in_stock": bool(it.get("in_stock", True))})
             fod_price, sav, pct = _apply_fod(final, offer)
             return {"product_id": int(p.get("id") or product_id), "name": p.get("name") or "Product",
                 "price": fod_price, "fod_price": fod_price if fod_price != final else None, "fod_savings": sav,
@@ -467,10 +477,31 @@ def check_number_registered_sync(phone):
 
 # ============================================================ REAL MEESHO CART/CHECKOUT/ORDER API
 
+def _acc_uid(acc):
+    """Meesho's numeric user id for an account row.
+
+    meesho_accounts rows store the TELEGRAM id in 'user_id' and the Meesho id in
+    'meesho_user_id'. Every cart/checkout call (and the app-user-id header) needs
+    the Meesho one — sending the Telegram id makes Meesho treat the request as a
+    different user, so adds land nowhere and review comes back empty.
+    """
+    if not isinstance(acc, dict):
+        return 0
+    for key in ("meesho_user_id", "user_id"):
+        v = acc.get(key)
+        if v in (None, "", 0, "0"):
+            continue
+        try:
+            return int(str(v).strip())
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
 def logged_in_headers(acc, location=None):
     """Build headers for logged-in Meesho API calls"""
     phone = acc.get("phone", "")
-    uid = str(acc.get("user_id", ""))
+    uid = str(_acc_uid(acc))
     instance_id = acc.get("instance_id", "")
     xo = acc.get("xo", "")
     app_sid = acc.get("app_session_id") or uuid.uuid4().hex
@@ -498,12 +529,12 @@ def logged_in_headers(acc, location=None):
 def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, cart_session=None):
     """Add product to real Meesho cart via /api/1.0/cart/add"""
     pid = int(product_id) if product_id else 0
-    vid = _safe_int(variation_id)
-    sid = _safe_int(supplier_id)
+    vid = _pos_int(variation_id)
+    sid = _pos_int(supplier_id)
     body = {
-        "context": "pdp",
+        "context": "pdl",
         "identifier": "buy_now",
-        "cart_session": cart_session,
+        "cart_session": cart_session or None,
         "replaceable": False,
         "items": [{
             "identifier": "buy_now",
@@ -516,7 +547,7 @@ def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, 
             "client_metadata": None,
         }],
         "address_id": None,
-        "user_id": int(acc.get("user_id", 0)),
+        "user_id": _acc_uid(acc),
     }
     try:
         with httpx.Client(timeout=20.0) as client:
@@ -555,7 +586,7 @@ def real_cart_review(acc, cart_session=None):
         "payment_instrument": None, "bank_offers": None,
         "filter_products": True, "is_self_pickup": None,
         "self_pickup_address": None, "is_emi": None,
-        "user_id": int(acc.get("user_id", 0)),
+        "user_id": _acc_uid(acc),
     }
     try:
         with httpx.Client(timeout=25.0) as client:
@@ -632,7 +663,7 @@ def real_cart_remove(acc, item_identifier, cart_session):
         "context": "atc_cart_v2", "identifier": "buy_now",
         "cart_session": cart_session,
         "items": [item_identifier] if isinstance(item_identifier, str) else item_identifier,
-        "user_id": int(acc.get("user_id", 0)),
+        "user_id": _acc_uid(acc),
     }
     try:
         with httpx.Client(timeout=20.0) as client:
@@ -691,7 +722,7 @@ def real_bind_address(acc, cart_session, address_id, dest_pin=None):
         "is_self_pickup": None,
         "self_pickup_address": None,
         "is_emi": None,
-        "user_id": int(acc.get("user_id", 0)),
+        "user_id": _acc_uid(acc),
     }
     try:
         with httpx.Client(timeout=20.0) as client:
@@ -721,7 +752,7 @@ def real_paymentinfo(acc, cart_session, payment_modes=None):
         "is_self_pickup": None,
         "self_pickup_address": None,
         "is_emi": None,
-        "user_id": int(acc.get("user_id", 0)),
+        "user_id": _acc_uid(acc),
     }
     try:
         with httpx.Client(timeout=20.0) as client:
@@ -761,7 +792,7 @@ def real_address_create(acc, name, mobile, pin, city, state, line1, line2="", la
         "landmark": landmark,
         "coordinates": {"latitude": "0", "longitude": "0", "accuracy": "41"},
         "country_id": 1,
-        "user_id": int(acc.get("user_id", 0)),
+        "user_id": _acc_uid(acc),
     }
     try:
         with httpx.Client(timeout=20.0) as client:
@@ -785,18 +816,19 @@ def real_cart_add_many(acc, items, cart_session=""):
         its.append({
             "identifier": "buy_now",
             "product_id": int(li.get("product_id") or 0),
-            "supplier_id": int(li["supplier_id"]) if li.get("supplier_id") else None,
-            "variation_id": li.get("variation_id"),
+            "supplier_id": _pos_int(li.get("supplier_id")),
+            "variation_id": _pos_int(li.get("variation_id")),
             "variation": li.get("variation") or li.get("variation_name") or "Free Size",
             "quantity": int(li.get("quantity") or li.get("qty") or 1),
             "selected_price_type_id": li.get("price_type_id") or "premium_return_price",
             "client_metadata": None,
         })
     body = {
-        "context": "pdp", "identifier": "buy_now",
-        "cart_session": cart_session or "",
+        "context": "pdl", "identifier": "buy_now",
+        # Captured app traffic sends null (not "") for the first add of a session.
+        "cart_session": cart_session or None,
         "replaceable": False, "items": its,
-        "address_id": None, "user_id": int(acc.get("user_id", 0)),
+        "address_id": None, "user_id": _acc_uid(acc),
     }
     try:
         with httpx.Client(timeout=25.0) as client:
@@ -836,7 +868,7 @@ def real_cart_add_many(acc, items, cart_session=""):
 def real_fetch_addresses(acc):
     """Fetch real address list from Meesho GET /api/3.0/addresses"""
     try:
-        uid = int(acc.get("user_id", 0))
+        uid = _acc_uid(acc)
         with httpx.Client(timeout=15.0) as client:
             resp = client.get(
                 f"{MEESHO_API}/3.0/addresses?offset=0&limit=50&check_pin=true"
@@ -935,7 +967,7 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
         "processor_id": "in.juspay.hyperapi" if is_upi else None,
         "payment_method": "UPI" if is_upi else "COD",
         "enable_price_unbundling": True,
-        "user_id": int(acc.get("user_id", 0)),
+        "user_id": _acc_uid(acc),
     }
     try:
         with httpx.Client(timeout=25.0) as client:
@@ -981,7 +1013,7 @@ def real_preorder_status(acc, order_num, cart_session):
         "order_num": order_num,
         "retry_in_sec": 0,
         "cart_session": cart_session,
-        "user_id": int(acc.get("user_id", 0)),
+        "user_id": _acc_uid(acc),
     }
     try:
         with httpx.Client(timeout=15.0) as client:
@@ -1003,7 +1035,7 @@ def real_payment_options(acc, cart_session, order_total=0):
         "order_total": order_total,
         "available_upi_apps": [],
         "skip_bnpl_eligibility": True,
-        "user_id": int(acc.get("user_id", 0)),
+        "user_id": _acc_uid(acc),
     }
     try:
         with httpx.Client(timeout=15.0) as client:

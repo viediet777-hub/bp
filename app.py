@@ -29,7 +29,7 @@ from meesho import (
     real_cart_add, real_cart_add_many, real_cart_review, real_cart_clear, real_cart_sync, real_cart_remove,
     real_bind_address, real_paymentinfo, real_address_create, real_fetch_addresses,
     real_preorder, real_payment_status, real_preorder_status, real_payment_options,
-    fresh_checkout_state,
+    fresh_checkout_state, roll_fod_sync,
 )
 
 app = Flask(__name__)
@@ -50,6 +50,14 @@ def get_uid():
         return int(uid)
     except (ValueError, TypeError):
         return uid
+
+
+def _int0(v):
+    """Coerce a JSON value to int, treating null/''/garbage as 0."""
+    try:
+        return int(float(v))
+    except (ValueError, TypeError):
+        return 0
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -196,8 +204,8 @@ def api_cart_add():
     price = int(data.get("price", 0))
     image = data.get("image", "")
     source = data.get("source", "local")
-    supplier_id = int(data.get("supplier_id", 0))
-    variation_id = int(data.get("variation_id", 0))
+    supplier_id = _int0(data.get("supplier_id"))
+    variation_id = _int0(data.get("variation_id"))
     variation_name = data.get("variation_name", "Free Size")
     mrp = int(data.get("mrp", price))
     add_to_cart(uid, pid, qty, name=name, price=price, image=image, source=source,
@@ -205,12 +213,23 @@ def api_cart_add():
                 variation_name=variation_name, mrp=mrp)
     # Sync to real Meesho cart immediately
     acc = get_active_meesho_account(uid)
-    if acc and supplier_id and variation_id:
+    synced, reason = False, ""
+    if not acc:
+        reason = "no_account"
+    elif not supplier_id or not variation_id:
+        # Without both ids Meesho rejects the item, so the local cart row would
+        # never have a real counterpart. Surface it instead of failing silently.
+        reason = "missing_supplier_or_variation"
+    else:
         cs = get_cart_session(uid)
         r = real_cart_add(acc, pid, supplier_id, variation_id, variation_name, qty, cs)
         if r.get("ok"):
-            set_cart_session(uid, r["cart_session"])
-    return jsonify({"ok": True})
+            synced = True
+            if r.get("cart_session"):
+                set_cart_session(uid, r["cart_session"])
+        else:
+            reason = str(r.get("error") or "cart_add_failed")[:200]
+    return jsonify({"ok": True, "real_cart_synced": synced, "real_cart_error": reason})
 
 
 @app.route("/api/cart/update", methods=["POST"])
@@ -330,12 +349,16 @@ def api_place_order():
     # QR generation: use Meesho's QR first, fallback to our gateway QR
     qr_base64 = order_r.get("qr_base64")
     upi_intent_url = order_r.get("upi_intent_url")
-    if not qr_base64 and not upi_intent_url and payment_method.upper() in ("UPI", "PREPAID"):
-        txn_id = generate_txn_id(uid)
-        upi_intent_url = create_upi_link(txn_id, meesho_amount)
-        qr_url = get_qr_url(upi_intent_url)
-    else:
-        qr_url = ""
+    qr_url = ""
+    if payment_method.upper() in ("UPI", "PREPAID") and not qr_base64:
+        if upi_intent_url:
+            # Meesho returned the intent link but no image (the real app renders
+            # the QR client-side via JusPay) -> render it ourselves.
+            qr_url = get_qr_url(upi_intent_url)
+        else:
+            txn_id = generate_txn_id(uid)
+            upi_intent_url = create_upi_link(txn_id, meesho_amount)
+            qr_url = get_qr_url(upi_intent_url)
 
     return jsonify({
         "ok": True, "order_id": oid, "meesho_order_num": meesho_order_num,
@@ -412,7 +435,7 @@ def api_checkout_summary():
         "balance": balance,
         "mode": user_mode,
         "address": addr,
-        "account": {"phone": acc.get("phone"), "user_id": acc.get("user_id")} if acc else None,
+        "account": {"phone": acc.get("phone"), "user_id": acc.get("meesho_user_id") or acc.get("user_id")} if acc else None,
         "payinfo_ok": payinfo_ok,
     })
 
@@ -834,8 +857,14 @@ def api_accounts():
     accs = get_meesho_accounts(uid)
     for a in accs:
         a.pop("xo", None)
-        a["phone_display"] = a.get("phone", "xxxx") if a.get("phone") and not a["phone"].startswith("xxxx") else "xxxx" + (a.get("phone", "")[-4:] if a.get("phone") else "????")
-    return jsonify(accs)
+        phone = a.get("phone") or ""
+        if phone and not phone.startswith("xxxx"):
+            a["phone_display"] = phone
+        elif phone:
+            a["phone_display"] = "xxxx" + phone[-4:]
+        else:
+            a["phone_display"] = "xxxx"
+    return jsonify({"accounts": accs})
 
 
 @app.route("/api/accounts/add", methods=["POST"])
