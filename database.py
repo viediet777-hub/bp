@@ -179,6 +179,13 @@ def delete_user(user_id):
     conn.close()
 
 
+def get_all_users():
+    conn = get_db()
+    rows = conn.execute("SELECT user_id, name, phone, wallet, mode, created_at FROM users ORDER BY created_at DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def toggle_user_mode(user_id):
     conn = get_db()
     row = conn.execute("SELECT mode FROM users WHERE user_id=?", (user_id,)).fetchone()
@@ -407,11 +414,11 @@ def get_wallet_tx(user_id):
 
 # ─── MEESHO ACCOUNTS ───
 
-def save_meesho_account(user_id, phone, meesho_user_id, xo, xo_exp=0, instance_id=""):
+def save_meesho_account(user_id, phone, meesho_user_id, xo, xo_exp=0, instance_id="", is_first_order=1):
     conn = get_db()
     conn.execute(
-        "INSERT INTO meesho_accounts (user_id, phone, meesho_user_id, xo, xo_exp, instance_id, created_at) VALUES (?,?,?,?,?,?,?)",
-        (user_id, phone, str(meesho_user_id), xo, xo_exp, instance_id, time.time()))
+        "INSERT INTO meesho_accounts (user_id, phone, meesho_user_id, xo, xo_exp, instance_id, is_first_order, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        (user_id, phone, str(meesho_user_id), xo, xo_exp, instance_id, int(is_first_order), time.time()))
     conn.commit()
     conn.close()
 

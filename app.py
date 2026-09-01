@@ -20,6 +20,7 @@ from database import (
     delete_address, set_default_address, get_default_address,
     toggle_user_mode, get_user_mode, get_order_count,
     get_cart_session, set_cart_session,
+    get_all_users,
 )
 from gateway import generate_txn_id, create_upi_link, get_qr_url, verify_payment
 from config import ORDER_FEE, WALLET_MIN, WALLET_MAX, GW_UPI_ID, GW_UPI_NAME, ADMIN_IDS
@@ -448,6 +449,28 @@ def api_wallet_verify():
 # ADMIN API
 # ═══════════════════════════════════════════════════════════════
 
+@app.route("/api/admin/users")
+def api_admin_users():
+    uid = get_uid()
+    if uid not in ADMIN_IDS:
+        return jsonify({"error": "admin only"}), 403
+    users = get_all_users()
+    return jsonify({"users": users})
+
+
+@app.route("/api/admin/mode/toggle", methods=["POST"])
+def api_admin_toggle_mode():
+    uid = get_uid()
+    if uid not in ADMIN_IDS:
+        return jsonify({"error": "admin only"}), 403
+    data = request.json or {}
+    target_uid = data.get("user_id")
+    if not target_uid:
+        return jsonify({"error": "user_id required"}), 400
+    new_mode = toggle_user_mode(target_uid)
+    return jsonify({"ok": True, "user_id": target_uid, "mode": new_mode})
+
+
 @app.route("/api/admin/products", methods=["POST"])
 def api_admin_add_product():
     data = request.json
@@ -496,6 +519,11 @@ def api_meesho_search():
     if not query:
         return jsonify({"catalogs": []})
     offer = _meesho_offer
+    uid = get_uid()
+    if uid and offer:
+        acc = get_active_meesho_account(uid)
+        if acc and not acc.get("is_first_order", 1):
+            offer = None
     result = search_meesho(query, offer=offer)
     return jsonify(result or {"catalogs": []})
 
@@ -526,6 +554,11 @@ def api_product_by_link():
         return jsonify({"error": "bad_link", "message": "Not a valid Meesho product link"})
     pid = m.group(1)
     offer = _meesho_offer
+    uid = get_uid()
+    if uid and offer:
+        acc = get_active_meesho_account(uid)
+        if acc and not acc.get("is_first_order", 1):
+            offer = None
     result = get_meesho_product(pid, offer=offer)
     if result:
         return jsonify(result)
@@ -538,6 +571,11 @@ def api_meesho_product():
     if not pid:
         return jsonify({"error": "no product_id"}), 400
     offer = _meesho_offer
+    uid = get_uid()
+    if uid and offer:
+        acc = get_active_meesho_account(uid)
+        if acc and not acc.get("is_first_order", 1):
+            offer = None
     result = get_meesho_product(pid, offer=offer)
     if result:
         return jsonify(result)
@@ -648,14 +686,20 @@ def api_otp_verify():
     result = verify_otp(phone, otp, session)
     if result.get("ok"):
         _meesho_otp_sessions.pop(phone, None)
+        is_first = 1 if result.get("is_new") else 0
+        save_meesho_account(uid, phone,
+            result.get("user_id", ""),
+            result.get("xo", ""),
+            0,
+            result.get("instance_id", ""),
+            is_first_order=is_first)
         acc = {
             "id": str(int(time.time() * 1000))[-8:],
             "mobile": phone,
             "user_id": result.get("user_id"),
             "xo": result.get("xo"),
             "instance_id": result.get("instance_id"),
-            "is_first_order": True,
-            "order_placed": False,
+            "is_first_order": result.get("is_new", False),
         }
         return jsonify({"ok": True, "account": acc})
     return jsonify({"ok": False, "error": result.get("error") or "Wrong OTP"})

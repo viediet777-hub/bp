@@ -485,31 +485,28 @@ def logged_in_headers(acc, location=None):
 
 
 def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, cart_session=None):
-    """Add product to real Meesho cart via /api/1.0/cart/add"""
+    """Add product to real Meesho cart via /api/1.0/user/cart/add"""
+    pid = int(product_id) if product_id else 0
+    vid = _safe_int(variation_id)
+    sid = _safe_int(supplier_id)
     body = {
-        "context": "pdp",
-        "identifier": "buy_now",
-        "cart_session": cart_session,
-        "replaceable": False,
+        "context": "cart",
         "items": [{
-            "identifier": "buy_now",
-            "product_id": int(product_id),
-            "supplier_id": int(supplier_id) if supplier_id else None,
-            "variation_id": variation_id,
-            "variation": variation,
-            "quantity": int(qty),
-            "selected_price_type_id": "premium_return_price",
-            "client_metadata": None,
+            "identifier": f"{pid}:{vid}",
+            "product_id": pid,
+            "supplier_id": sid,
+            "variation_id": vid,
+            "variation": variation or "",
+            "quantity": int(qty) if qty else 1,
         }],
-        "address_id": None,
-        "user_id": int(acc.get("user_id", 0)),
     }
     try:
         with httpx.Client(timeout=20.0) as client:
-            resp = client.post(f"{MEESHO_API}/1.0/cart/add",
+            resp = client.post(f"{MEESHO_API}/1.0/user/cart/add",
                                headers=logged_in_headers(acc), json=body)
             data = resp.json() or {}
-            if data.get("success"):
+            print(f"[CART_ADD] resp={resp.status_code} data={str(data)[:500]}", flush=True)
+            if data.get("success") or data.get("status") == "SUCCESS":
                 result = data.get("result", {})
                 return {
                     "ok": True,
@@ -520,8 +517,11 @@ def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, 
                     "splits": result.get("splits", []),
                     "price_break_up": result.get("price_break_up", []),
                 }
-            return {"ok": False, "error": data.get("error_type", "cart_add_failed"), "raw": data}
+            err = data.get("error_type") or data.get("message") or data.get("error") or str(data)[:200]
+            print(f"[CART_ADD] FAILED: {err}", flush=True)
+            return {"ok": False, "error": err, "raw": data}
     except Exception as e:
+        print(f"[CART_ADD] EXCEPTION: {e}", flush=True)
         return {"ok": False, "error": str(e)}
 
 
