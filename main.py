@@ -5,6 +5,7 @@ Mini App = shopping UI
 """
 import json
 import logging
+import os
 import threading
 import time
 import urllib.parse
@@ -701,8 +702,18 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_router))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg_router))
 
-    print("Bot running!")
-    app.run_polling(drop_pending_updates=True)
+    port = int(os.environ.get("PORT", 0))
+    if port:
+        WEBHOOK_URL = WEBAPP_URL.rstrip("/") + "/webhook"
+        print(f"Webhook mode: {WEBHOOK_URL}")
+        app.run_webhook(
+            listen="0.0.0.0", port=port,
+            url_path=BOT_TOKEN.split(":")[1],
+            webhook_url=WEBHOOK_URL + "/" + BOT_TOKEN.split(":")[1],
+        )
+    else:
+        print("Polling mode (local)")
+        app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
