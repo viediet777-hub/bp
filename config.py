@@ -11,7 +11,7 @@ DATA_DIR.mkdir(exist_ok=True)
 DB_PATH = DATA_DIR / "bot.db"
 
 ORDER_FEE = 5
-WALLET_MIN = 5
+WALLET_MIN = 1
 WALLET_MAX = 500
 
 # VC Payment Gateway
