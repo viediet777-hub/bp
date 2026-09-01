@@ -393,7 +393,7 @@ async function addToCartFromModal(pid,name,price,img){
   }catch(e){toast('Failed to add to cart')}
 }
 
-async function loadHome(){console.log('[DEBUG] loadHome called');loadBanner();loadProducts('homeProdGrid')}
+async function loadHome(){loadBanner();loadProducts('homeProdGrid')}
 
 async function loadBanner(){
   try{
@@ -413,18 +413,16 @@ async function loadBanner(){
 
 async function loadProducts(gridId){
   try{
-    console.log('[DEBUG] loadProducts called, API='+API+', gridId='+gridId);
     var r=await fetch(API+'/api/products',{headers:headers()});
     var prods=await r.json();
     var arr=Array.isArray(prods)?prods:[];
-    console.log('[DEBUG] /api/products returned '+arr.length+' items');
     if(arr.length>0){renderProducts(arr,gridId);return}
-    console.log('[DEBUG] Falling back to /api/search...');
     var r2=await fetch(API+'/api/search',{method:'POST',headers:headers(),body:JSON.stringify({query:'fashion trending',limit:20,offset:0})});
     var d2=await r2.json();
-    console.log('[DEBUG] /api/search returned:', JSON.stringify(d2).substring(0,500));
-    renderProducts(d2.catalogs||[],gridId);
-  }catch(e){console.error('[ERROR] loadProducts failed:',e);toast('Failed to load products: '+e.message)}
+    var items=d2.catalogs||[];
+    if(items.length>0){renderProducts(items,gridId)}
+    else{$(gridId).innerHTML='<div style="text-align:center;padding:40px;color:#999"><p>No products found</p><p style="font-size:12px;margin-top:8px">Try: <a href="'+API+'/api/debug" target="_blank" style="color:var(--accent)">Debug Check</a></p></div>'}
+  }catch(e){$(gridId).innerHTML='<div style="text-align:center;padding:40px;color:#999"><p>Failed to load products</p><p style="font-size:12px;margin-top:8px">'+e.message+'</p><p style="font-size:12px">Check: <a href="'+API+'/api/debug" target="_blank" style="color:var(--accent)">Debug</a></p></div>'}
 }
 
 var homeTimer,exploreTimer;

@@ -724,6 +724,39 @@ def api_address_default():
     return jsonify({"address": addr})
 
 
+@app.route("/api/debug")
+def api_debug():
+    """Debug endpoint - test Meesho API connectivity"""
+    import traceback
+    results = {}
+    
+    # Test 1: Meesho search
+    try:
+        r = search_meesho("fashion trending", offer=_meesho_offer)
+        count = len(r.get("catalogs", []))
+        results["search"] = {"ok": True, "count": count, "first_name": r["catalogs"][0]["name"] if count else "none"}
+    except Exception as e:
+        results["search"] = {"ok": False, "error": str(e), "traceback": traceback.format_exc()}
+    
+    # Test 2: Meesho offer
+    try:
+        r = get_meesho_offer()
+        results["offer"] = {"ok": r.get("ok"), "offer": r.get("offer", {}).get("display_text") if r.get("offer") else None}
+    except Exception as e:
+        results["offer"] = {"ok": False, "error": str(e)}
+    
+    # Test 3: Check outbound connectivity
+    try:
+        import httpx
+        with httpx.Client(timeout=10) as c:
+            r = c.get("https://httpbin.org/ip")
+            results["internet"] = {"ok": True, "ip": r.json().get("origin")}
+    except Exception as e:
+        results["internet"] = {"ok": False, "error": str(e)}
+    
+    return jsonify(results)
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
