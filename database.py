@@ -21,6 +21,7 @@ def init_db():
             address TEXT DEFAULT '',
             upi_id TEXT DEFAULT '',
             wallet INTEGER DEFAULT 0,
+            referral_link TEXT DEFAULT '',
             created_at REAL DEFAULT 0
         );
 

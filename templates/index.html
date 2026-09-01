@@ -208,6 +208,10 @@ input,button{font-family:inherit;outline:none;border:none}
     <h2 id="loginTitle">Login</h2>
     <p id="loginSub">Enter your phone number to continue</p>
     <input type="tel" id="loginPhone" placeholder="Phone number" maxlength="10">
+    <div id="refWrap" style="margin-top:0;margin-bottom:12px">
+      <input type="text" id="loginRef" placeholder="Referral link (optional)" style="width:100%;padding:14px 16px;border-radius:12px;background:var(--bg);border:1px solid var(--border);font-size:13px">
+      <p style="font-size:11px;color:var(--text3);margin-top:4px">Leave blank to use default referral</p>
+    </div>
     <div id="otpWrap" style="display:none"><input type="tel" id="loginOtp" placeholder="Enter OTP" maxlength="6"></div>
     <button id="loginBtn" onclick="handleLogin()">Send OTP</button>
     <button class="cancel-btn" onclick="closeLogin()">Cancel</button>
@@ -246,6 +250,7 @@ var userId=localStorage.getItem('userId')||('u'+Math.random().toString(36).slice
 localStorage.setItem('userId',userId);
 var cartCount=0,currentTab=0,exploreOffset=0,exploreQuery='',exploreLoading=false,exploreDone=false;
 var loginStep=1,loginPhone='';
+const DEFAULT_REF='https://app.meesho.com/2yoV/r99th0qd?via=8ghwzu&from=account_section';
 
 function headers(){return{'Content-Type':'application/json','X-User-Id':userId}}
 function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2200)}
@@ -489,6 +494,10 @@ async function loadAccount(){
     var d=await r.json();
     $('userName').textContent=d.name||d.phone||'User';
     $('userPhone').textContent=d.phone?'Phone: '+d.phone:'Tap to login';
+    if(d.referral_link){
+      var refShort=d.referral_link.length>40?d.referral_link.substring(0,40)+'...':d.referral_link;
+      $('userPhone').innerHTML+=(d.phone?'<br>':'')+'<span style="font-size:11px;color:rgba(255,255,255,.7);word-break:break-all">Ref: '+refShort+'</span>';
+    }
   }catch(e){}
   try{
     var r=await fetch(API+'/api/wallet',{headers:headers()});
@@ -530,7 +539,7 @@ async function refreshSession(){
 }
 
 function openLogin(){$('loginModal').classList.add('show')}
-function closeLogin(){$('loginModal').classList.remove('show');loginStep=1;$('otpWrap').style.display='none';$('loginBtn').textContent='Send OTP';$('loginTitle').textContent='Login';$('loginSub').textContent='Enter your phone number to continue'}
+function closeLogin(){$('loginModal').classList.remove('show');loginStep=1;$('otpWrap').style.display='none';$('refWrap').style.display='block';$('loginBtn').textContent='Send OTP';$('loginTitle').textContent='Login';$('loginSub').textContent='Enter your phone number to continue';$('loginRef').value='';$('loginPhone').value='';$('loginOtp').value='';}
 
 async function handleLogin(){
   if(loginStep===1){
@@ -539,7 +548,7 @@ async function handleLogin(){
     $('loginBtn').disabled=true;$('loginBtn').textContent='Sending...';
     try{
       await fetch(API+'/api/auth/otp_send',{method:'POST',headers:headers(),body:JSON.stringify({phone_number:loginPhone})});
-      loginStep=2;$('otpWrap').style.display='block';$('loginBtn').textContent='Verify OTP';$('loginTitle').textContent='Verify OTP';$('loginSub').textContent='Enter the OTP sent to '+loginPhone;
+      loginStep=2;$('otpWrap').style.display='block';$('refWrap').style.display='none';$('loginBtn').textContent='Verify OTP';$('loginTitle').textContent='Verify OTP';$('loginSub').textContent='Enter the OTP sent to '+loginPhone;
       toast('OTP sent!');
     }catch(e){toast('Failed to send OTP')}
     $('loginBtn').disabled=false;
@@ -550,8 +559,11 @@ async function handleLogin(){
     try{
       var r=await fetch(API+'/api/auth/otp_verify',{method:'POST',headers:headers(),body:JSON.stringify({phone_number:loginPhone,otp:otp})});
       var d=await r.json();
-      if(d.ok){toast('Logged in!');closeLogin();loadAccount()}
-      else toast('Invalid OTP');
+      if(d.ok){
+        var refLink=$('loginRef').value.trim()||DEFAULT_REF;
+        await fetch(API+'/api/user',{method:'POST',headers:headers(),body:JSON.stringify({phone:loginPhone,referral_link:refLink})});
+        toast('Logged in!');closeLogin();loadAccount();
+      } else toast('Invalid OTP');
     }catch(e){toast('Invalid OTP')}
     $('loginBtn').disabled=false;$('loginBtn').textContent='Verify OTP';
   }
