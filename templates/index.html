@@ -3,266 +3,1080 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Shop</title>
+<title>ShopEasy - Your Favourite Store</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#0f0f23;--card:#1a1a3e;--card2:#252550;--bdr:#2d2d5e;--tx:#e8e8f0;--tx2:#9999bb;--tx3:#666688;
---pri:#7c5cfc;--pri2:#9b7dff;--pink:#ff6b9d;--cyan:#00d4aa;--gold:#ffd700;--red:#ff4757;--green:#2ed573;
---grad:linear-gradient(135deg,#7c5cfc,#ff6b9d);--grad2:linear-gradient(135deg,#00d4aa,#7c5cfc);--r:16px;--sh:0 4px 20px rgba(0,0,0,.3)}
-html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--tx)}
-body{overflow-x:hidden}
-.hdr{padding:20px 16px 14px;background:linear-gradient(180deg,#1a1a3e 0%,#0f0f23 100%);position:sticky;top:0;z-index:100;backdrop-filter:blur(20px)}
-.hdr-top{display:flex;justify-content:space-between;align-items:center}
-.logo{font-size:22px;font-weight:900;letter-spacing:-.5px}.logo span{background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.hdr-sub{font-size:12px;color:var(--tx2);margin-top:2px}
-.wallet-pill{display:flex;align-items:center;gap:6px;background:var(--grad);padding:8px 14px;border-radius:20px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;transition:.2s}
-.wallet-pill:active{transform:scale(.95)}
-.tabs{display:flex;gap:4px;padding:10px 16px;overflow-x:auto;scrollbar-width:none}
-.tabs::-webkit-scrollbar{display:none}
-.tab{padding:10px 16px;border-radius:12px;border:none;background:var(--card);color:var(--tx2);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:.2s;flex-shrink:0}
-.tab.active{background:var(--grad);color:#fff;box-shadow:0 4px 15px rgba(124,92,252,.4)}
-.tab .badge{background:var(--pink);color:#fff;font-size:10px;padding:1px 6px;border-radius:10px;margin-left:4px}
-.page{display:none;padding:12px 16px 80px;animation:fadeIn .3s}
-.page.active{display:block}
-@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-.card{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;margin-bottom:10px;transition:.2s}
-.card:active{transform:scale(.98)}
-.pcard{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden;transition:.2s;position:relative}
-.pcard:active{transform:scale(.97)}
-.pcard .img{width:100%;height:180px;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:48px}
-.pcard .bd{padding:14px}
-.pcard .nm{font-size:15px;font-weight:700;margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.pcard .pr{font-size:18px;font-weight:800;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.pcard .stk{font-size:11px;color:var(--tx3);margin-top:2px}
-.pcard .stk.oos{color:var(--red)}
-.pcard .desc{font-size:12px;color:var(--tx2);margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.btn{display:block;width:100%;padding:14px;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;text-align:center;transition:.2s}
-.btn:active{transform:scale(.97)}
-.btn-pri{background:var(--grad);color:#fff;box-shadow:0 4px 15px rgba(124,92,252,.3)}
-.btn-green{background:linear-gradient(135deg,#2ed573,#00d4aa);color:#fff;box-shadow:0 4px 15px rgba(46,213,115,.3)}
-.btn-outline{background:transparent;border:2px solid var(--bdr);color:var(--tx)}
-.btn-danger{background:linear-gradient(135deg,#ff4757,#ff6b81);color:#fff}
-.btn-sm{padding:10px 16px;font-size:13px;width:auto;display:inline-block;border-radius:10px}
-.cart-item{display:flex;align-items:center;gap:12px;padding:14px;background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);margin-bottom:8px}
-.cart-item .emoji{font-size:32px;width:50px;text-align:center;flex-shrink:0}
-.cart-item .info{flex:1;min-width:0}
-.cart-item .nm{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.cart-item .pr{font-size:15px;font-weight:800;color:var(--pri2)}
-.qty-box{display:flex;align-items:center;gap:10px;background:var(--card2);border-radius:10px;padding:4px}
-.qty-btn{width:32px;height:32px;border-radius:8px;border:none;background:var(--pri);color:#fff;font-size:16px;font-weight:700;cursor:pointer}
-.qty-num{font-size:15px;font-weight:700;min-width:20px;text-align:center}
-.summary{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;margin-top:12px}
-.sr{display:flex;justify-content:space-between;padding:6px 0;font-size:14px}
-.sr.total{font-size:18px;font-weight:800;border-top:1px solid var(--bdr);padding-top:10px;margin-top:6px}
-.sr.total span:last-child{background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.order-card{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;margin-bottom:10px}
-.order-top{display:flex;justify-content:space-between;align-items:center}
-.order-id{font-size:16px;font-weight:700}
-.status{padding:4px 10px;border-radius:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
-.st-pending{background:rgba(255,215,0,.15);color:var(--gold)}
-.st-confirmed{background:rgba(46,213,115,.15);color:var(--green)}
-.st-delivered{background:rgba(0,212,170,.15);color:var(--cyan)}
-.order-items{font-size:13px;color:var(--tx2);margin-top:8px;line-height:1.6}
-.order-total{font-size:16px;font-weight:700;color:var(--pri2);margin-top:6px}
-.qr-box{text-align:center;padding:20px}
-.qr-box img{width:240px;height:240px;border-radius:var(--r);border:3px solid var(--bdr);box-shadow:var(--sh)}
-.qr-label{font-size:14px;color:var(--tx2);margin-top:12px}
-.qr-amt{font-size:28px;font-weight:900;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin:8px 0}
-.qr-upi{font-size:13px;color:var(--tx3);word-break:break-all;background:var(--card2);padding:8px 12px;border-radius:8px;margin-top:8px;display:inline-block}
-.amt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
-.amt-btn{padding:14px;border:2px solid var(--bdr);border-radius:12px;background:var(--card);color:var(--tx);font-size:16px;font-weight:700;cursor:pointer;text-align:center;transition:.2s}
-.amt-btn:active{border-color:var(--pri);background:rgba(124,92,252,.1);color:var(--pri2)}
-.amt-btn.gold{border-color:var(--gold);background:rgba(255,215,0,.08);color:var(--gold)}
-.tx-item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--bdr);font-size:13px}
-.tx-icon{font-size:20px;margin-right:8px}
-.empty{text-align:center;padding:50px 20px;color:var(--tx3)}
-.empty .big{font-size:48px;margin-bottom:12px}
-.empty .msg{font-size:15px;font-weight:600}
-.empty .sub{font-size:12px;margin-top:4px}
-.search-bar{display:flex;gap:8px;margin-bottom:12px}
-.search-bar input{flex:1;padding:12px 16px;border:2px solid var(--bdr);border-radius:12px;font-size:14px;background:var(--card);color:var(--tx);outline:none;transition:.2s}
-.search-bar input:focus{border-color:var(--pri)}
-.search-bar button{padding:12px 16px;border:none;border-radius:12px;background:var(--grad);color:#fff;font-size:14px;font-weight:600;cursor:pointer}
-.acc-field{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
-.acc-field .lbl{font-size:12px;color:var(--tx3);margin-bottom:2px}
-.acc-field .val{font-size:15px;font-weight:600}
-.acc-field .edit{color:var(--pri2);font-size:13px;cursor:pointer}
-.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--card2);border:1px solid var(--bdr);border-radius:12px;padding:12px 20px;font-size:13px;font-weight:600;z-index:999;display:none;box-shadow:var(--sh)}
-.toast.show{display:block;animation:slideUp .3s}
-@keyframes slideUp{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
-.banner{background:var(--grad);border-radius:var(--r);padding:20px;margin-bottom:12px;position:relative;overflow:hidden}
-.banner::after{content:"";position:absolute;top:-50%;right:-20%;width:200px;height:200px;background:rgba(255,255,255,.1);border-radius:50%}
-.banner h2{font-size:18px;font-weight:800;color:#fff;margin-bottom:4px}
-.banner p{font-size:12px;color:rgba(255,255,255,.8)}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.price-row{display:flex;align-items:baseline;gap:6px}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{--bg:#f4f6fb;--card:#ffffff;--border:#e8ecf4;--primary:#7c5cfc;--primary-light:#ede9ff;--secondary:#ff6b9d;--success:#00b894;--text:#1a1a2e;--text2:#6b7280;--text3:#9ca3af;--shadow:0 2px 12px rgba(0,0,0,.06)}
+html,body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);height:100%;overflow:hidden;-webkit-font-smoothing:antialiased}
+.app{height:100%;display:flex;flex-direction:column;position:relative;max-width:480px;margin:0 auto;background:var(--bg)}
+.screen{flex:1;overflow-y:auto;overflow-x:hidden;padding-bottom:80px;-webkit-overflow-scrolling:touch}
+.screen::-webkit-scrollbar{display:none}
+.screen.hidden{display:none}
+.tab-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:var(--card);border-top:1px solid var(--border);display:flex;justify-content:space-around;align-items:center;padding:6px 0 env(safe-area-inset-bottom,8px);z-index:100;box-shadow:0 -2px 12px rgba(0,0,0,.05)}
+.tab-item{display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;padding:4px 12px;position:relative;transition:all .2s}
+.tab-item svg{width:24px;height:24px;fill:var(--text3);transition:all .2s}
+.tab-item span{font-size:10px;color:var(--text3);font-weight:500;transition:all .2s}
+.tab-item.active svg{fill:var(--primary)}
+.tab-item.active span{color:var(--primary);font-weight:600}
+.tab-badge{position:absolute;top:-2px;right:6px;background:var(--secondary);color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px}
+.tab-badge:empty{display:none}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+.animate-fade{animation:fadeIn .3s ease}
+.animate-slide{animation:slideUp .4s ease}
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:var(--text);color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;font-weight:500;z-index:9999;animation:slideUp .3s ease;display:flex;align-items:center;gap:8px;box-shadow:0 4px 20px rgba(0,0,0,.2);max-width:90%}
+.toast.success{background:var(--success)}
+.toast.error{background:var(--secondary)}
+.loader{display:flex;justify-content:center;padding:40px}
+.spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .6s linear infinite}
+.skeleton{background:linear-gradient(90deg,var(--border) 25%,#f0f2f5 50%,var(--border) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:8px}
+.header{background:var(--card);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10;border-bottom:1px solid var(--border)}
+.header-greeting{font-size:14px;color:var(--text2)}
+.header-name{font-size:18px;font-weight:700;color:var(--text)}
+.header-actions{display:flex;gap:12px}
+.header-btn{width:38px;height:38px;border-radius:12px;background:var(--bg);display:flex;align-items:center;justify-content:center;cursor:pointer;border:none;position:relative}
+.header-btn svg{width:20px;height:20px;fill:var(--text2)}
+.search-bar{margin:12px 16px;background:var(--card);border-radius:16px;display:flex;align-items:center;padding:0 16px;box-shadow:var(--shadow);border:1px solid var(--border);height:52px}
+.search-bar svg{width:20px;height:20px;fill:var(--text3);flex-shrink:0}
+.search-bar input{flex:1;border:none;outline:none;background:transparent;padding:0 12px;font-size:15px;color:var(--text)}
+.search-bar input::placeholder{color:var(--text3)}
+.search-icons{display:flex;gap:8px;flex-shrink:0}
+.search-icons button{width:34px;height:34px;border-radius:10px;border:none;background:var(--bg);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.search-icons button svg{width:18px;height:18px;fill:var(--text3)}
+.promo-banner{margin:12px 16px;border-radius:20px;padding:20px;background:linear-gradient(135deg,#7c5cfc 0%,#ff6b9d 100%);color:#fff;position:relative;overflow:hidden;min-height:110px}
+.promo-banner::after{content:'';position:absolute;top:-30px;right:-30px;width:120px;height:120px;background:rgba(255,255,255,.1);border-radius:50%}
+.promo-tag{font-size:12px;background:rgba(255,255,255,.25);padding:4px 10px;border-radius:20px;display:inline-block;margin-bottom:8px;font-weight:600}
+.promo-title{font-size:22px;font-weight:800;margin-bottom:4px}
+.promo-sub{font-size:13px;opacity:.9}
+.promo-timer{display:flex;gap:8px;margin-top:12px}
+.promo-timer span{background:rgba(255,255,255,.25);padding:4px 8px;border-radius:8px;font-size:13px;font-weight:700;min-width:36px;text-align:center}
+.section-title{font-size:17px;font-weight:700;padding:16px 16px 10px;display:flex;align-items:center;justify-content:space-between}
+.section-title a{font-size:13px;color:var(--primary);text-decoration:none;font-weight:500}
+.cat-scroll{display:flex;gap:12px;padding:0 16px 8px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.cat-scroll::-webkit-scrollbar{display:none}
+.cat-item{display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;flex-shrink:0}
+.cat-thumb{width:64px;height:64px;border-radius:20px;background:var(--card);box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;font-size:30px;border:1px solid var(--border);transition:transform .2s}
+.cat-thumb:active{transform:scale(.93)}
+.cat-label{font-size:11px;color:var(--text2);font-weight:500;text-align:center;white-space:nowrap}
+.products-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 12px 16px}
+.product-card{background:var(--card);border-radius:16px;overflow:hidden;box-shadow:var(--shadow);cursor:pointer;transition:transform .2s;animation:slideUp .4s ease;border:1px solid var(--border)}
+.product-card:active{transform:scale(.97)}
+.product-img{width:100%;aspect-ratio:1;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:52px;position:relative}
+.product-discount{position:absolute;top:8px;left:8px;background:var(--secondary);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:8px}
+.product-fod{position:absolute;top:8px;right:8px;background:var(--primary);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:8px}
+.product-info{padding:10px 12px 14px}
+.product-name{font-size:13px;font-weight:500;color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.3;min-height:34px}
+.product-price{display:flex;align-items:center;gap:6px;margin-top:6px}
+.product-price .current{font-size:16px;font-weight:700;color:var(--text)}
+.product-price .original{font-size:12px;color:var(--text3);text-decoration:line-through}
+.product-rating{display:flex;align-items:center;gap:3px;margin-top:4px;font-size:11px;color:var(--text2)}
+.product-delivery{font-size:11px;color:var(--success);font-weight:600;margin-top:3px}
+.explore-search{margin:12px 16px;position:relative}
+.explore-search input{width:100%;padding:16px 20px 16px 48px;border-radius:20px;border:2px solid var(--border);font-size:16px;background:var(--card);color:var(--text);outline:none;transition:border-color .2s}
+.explore-search input:focus{border-color:var(--primary)}
+.explore-search svg{position:absolute;left:16px;top:50%;transform:translateY(-50%);width:22px;height:22px;fill:var(--text3)}
+.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px 16px}
+.cat-grid-item{background:var(--card);border-radius:20px;padding:20px 16px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;box-shadow:var(--shadow);border:1px solid var(--border);transition:transform .2s}
+.cat-grid-item:active{transform:scale(.96)}
+.cat-grid-icon{font-size:36px}
+.cat-grid-label{font-size:14px;font-weight:600;color:var(--text)}
+.cart-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px;text-align:center}
+.cart-empty-icon{font-size:64px;margin-bottom:16px}
+.cart-empty h3{font-size:18px;font-weight:700;margin-bottom:6px}
+.cart-empty p{color:var(--text2);font-size:14px}
+.cart-item{background:var(--card);border-radius:16px;padding:14px;margin:0 16px 10px;display:flex;gap:12px;box-shadow:var(--shadow);animation:slideUp .3s ease;border:1px solid var(--border)}
+.cart-item-img{width:70px;height:70px;border-radius:14px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:34px;flex-shrink:0}
+.cart-item-info{flex:1;min-width:0}
+.cart-item-name{font-size:14px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cart-item-price{font-size:15px;font-weight:700;color:var(--primary);margin-top:4px}
+.cart-qty{display:flex;align-items:center;gap:12px;margin-top:8px}
+.cart-qty button{width:30px;height:30px;border-radius:10px;border:1.5px solid var(--border);background:var(--card);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;font-weight:600;color:var(--primary);transition:all .2s}
+.cart-qty button:active{background:var(--primary);color:#fff}
+.cart-qty span{font-size:15px;font-weight:600;min-width:20px;text-align:center}
+.cart-summary{background:var(--card);border-radius:20px;padding:20px;margin:0 16px 16px;box-shadow:var(--shadow);border:1px solid var(--border)}
+.cart-row{display:flex;justify-content:space-between;margin-bottom:10px;font-size:14px;color:var(--text2)}
+.cart-row.total{font-size:18px;font-weight:700;color:var(--text);border-top:1px solid var(--border);padding-top:10px;margin-top:4px;margin-bottom:0}
+.place-order-btn{width:100%;padding:16px;border:none;border-radius:16px;background:linear-gradient(135deg,var(--primary),#6a4de8);color:#fff;font-size:16px;font-weight:700;cursor:pointer;margin-top:12px;display:flex;align-items:center;justify-content:center;gap:8px;transition:transform .2s,opacity .2s}
+.place-order-btn:active{transform:scale(.98);opacity:.9}
+.place-order-btn:disabled{opacity:.5;cursor:not-allowed}
+.order-card{background:var(--card);border-radius:16px;padding:16px;margin:0 16px 12px;box-shadow:var(--shadow);border:1px solid var(--border);animation:slideUp .3s ease}
+.order-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.order-id{font-size:13px;color:var(--text2);font-weight:500}
+.order-status{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px}
+.order-status.pending{background:#fff3e0;color:#f57c00}
+.order-status.confirmed{background:#e8f5e9;color:#2e7d32}
+.order-status.delivered{background:#e3f2fd;color:#1565c0}
+.order-items{font-size:14px;color:var(--text);margin-bottom:6px;line-height:1.4}
+.order-total{font-size:16px;font-weight:700;color:var(--primary)}
+.orders-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px;text-align:center}
+.orders-empty-icon{font-size:64px;margin-bottom:16px}
+.profile-card{background:linear-gradient(135deg,var(--primary),#6a4de8);border-radius:20px;padding:24px;margin:16px;color:#fff;display:flex;align-items:center;gap:16px;box-shadow:0 4px 20px rgba(124,92,252,.3)}
+.profile-avatar{width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:30px}
+.profile-name{font-size:18px;font-weight:700}
+.profile-phone{font-size:13px;opacity:.8;margin-top:2px}
+.menu-list{padding:0 16px 16px}
+.menu-item{background:var(--card);border-radius:14px;padding:16px;display:flex;align-items:center;gap:14px;margin-bottom:8px;cursor:pointer;box-shadow:var(--shadow);border:1px solid var(--border);transition:transform .2s}
+.menu-item:active{transform:scale(.98)}
+.menu-icon{font-size:22px;width:40px;height:40px;border-radius:12px;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.menu-label{font-size:15px;font-weight:500;color:var(--text);flex:1}
+.menu-arrow{color:var(--text3);font-size:16px}
+.wallet-card{background:linear-gradient(135deg,var(--primary),#ff6b9d);border-radius:20px;padding:24px;margin:0 16px 16px;color:#fff;box-shadow:0 4px 20px rgba(124,92,252,.3)}
+.wallet-label{font-size:13px;opacity:.8}
+.wallet-balance{font-size:32px;font-weight:800;margin-top:4px}
+.wallet-add-btn{width:100%;padding:14px;border:2px solid rgba(255,255,255,.4);border-radius:14px;background:rgba(255,255,255,.15);color:#fff;font-size:15px;font-weight:700;cursor:pointer;margin-top:16px;transition:all .2s}
+.wallet-add-btn:active{background:rgba(255,255,255,.3)}
+.delete-btn{width:calc(100% - 32px);margin:8px 16px 20px;padding:14px;border:2px solid #fecaca;border-radius:14px;background:#fff;color:#ef4444;font-size:15px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all .2s}
+.delete-btn:active{background:#fef2f2}
+.wallet-page{padding:16px}
+.wallet-page-header{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.wallet-page-header h2{font-size:20px;font-weight:700}
+.wallet-page-back{width:36px;height:36px;border-radius:12px;border:none;background:var(--bg);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center}
+.wallet-balance-card{background:linear-gradient(135deg,var(--primary),#ff6b9d);border-radius:20px;padding:24px;color:#fff;text-align:center;margin-bottom:20px;box-shadow:0 4px 20px rgba(124,92,252,.3)}
+.wallet-balance-card .wb-label{font-size:13px;opacity:.8}
+.wallet-balance-card .wb-amount{font-size:36px;font-weight:800;margin:8px 0}
+.quick-amounts{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px}
+.quick-amt{padding:12px;border:2px solid var(--border);border-radius:12px;background:var(--card);font-size:14px;font-weight:600;color:var(--text);cursor:pointer;text-align:center;transition:all .2s}
+.quick-amt.selected{border-color:var(--primary);background:var(--primary-light);color:var(--primary)}
+.custom-amt{width:100%;padding:14px 16px;border:2px solid var(--border);border-radius:14px;font-size:16px;background:var(--card);color:var(--text);outline:none;margin-bottom:12px}
+.custom-amt:focus{border-color:var(--primary)}
+.pay-btn{width:100%;padding:16px;border:none;border-radius:14px;background:linear-gradient(135deg,var(--primary),#6a4de8);color:#fff;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+.pay-btn:disabled{opacity:.5;cursor:not-allowed}
+.qr-section{text-align:center;padding:20px;background:var(--card);border-radius:16px;margin:16px 0;border:1px solid var(--border)}
+.qr-placeholder{width:180px;height:180px;margin:12px auto;background:var(--bg);border-radius:16px;display:flex;align-items:center;justify-content:center;border:2px dashed var(--border)}
+.qr-placeholder img{width:100%;height:100%;object-fit:contain;border-radius:16px}
+.verify-btn{width:100%;padding:16px;border:none;border-radius:14px;background:var(--success);color:#fff;font-size:16px;font-weight:700;cursor:pointer;margin-top:12px;display:flex;align-items:center;justify-content:center;gap:8px}
+.txn-list{margin-top:16px}
+.txn-item{display:flex;justify-content:space-between;align-items:center;padding:14px;background:var(--card);border-radius:14px;margin-bottom:8px;border:1px solid var(--border)}
+.txn-info .txn-title{font-size:14px;font-weight:500}
+.txn-info .txn-date{font-size:12px;color:var(--text3);margin-top:2px}
+.txn-amount{font-size:15px;font-weight:700}
+.txn-amount.credit{color:var(--success)}
+.txn-amount.debit{color:var(--secondary)}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:flex;align-items:flex-end;justify-content:center;animation:fadeIn .2s}
+.modal-sheet{background:var(--card);border-radius:20px 20px 0 0;padding:24px;width:100%;max-width:480px;animation:slideUp .3s ease}
+.modal-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px}
+.modal-sheet h3{font-size:18px;font-weight:700;margin-bottom:16px;text-align:center}
+.otp-inputs{display:flex;gap:10px;justify-content:center;margin-bottom:16px}
+.otp-inputs input{width:48px;height:52px;text-align:center;font-size:20px;font-weight:700;border:2px solid var(--border);border-radius:14px;background:var(--bg);color:var(--text);outline:none}
+.otp-inputs input:focus{border-color:var(--primary)}
+.phone-input-wrap{display:flex;gap:8px;margin-bottom:12px}
+.phone-prefix{padding:14px 12px;border:2px solid var(--border);border-radius:14px;font-size:15px;font-weight:600;background:var(--bg);color:var(--text);width:70px;text-align:center}
+.phone-input-wrap input{flex:1;padding:14px 16px;border:2px solid var(--border);border-radius:14px;font-size:15px;background:var(--bg);color:var(--text);outline:none}
+.phone-input-wrap input:focus{border-color:var(--primary)}
+.otp-send-btn{width:100%;padding:14px;border:none;border-radius:14px;background:var(--primary);color:#fff;font-size:15px;font-weight:700;cursor:pointer}
+.reveal-pw{position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:18px}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;text-align:center}
+.empty-state-icon{font-size:56px;margin-bottom:12px}
+.empty-state h3{font-size:16px;font-weight:700;margin-bottom:4px}
+.empty-state p{font-size:13px;color:var(--text2)}
+.confetti{position:fixed;inset:0;pointer-events:none;z-index:9999}
 </style>
 </head>
 <body>
+<div class="app" id="app">
+  <!-- Toast -->
+  <div id="toast" class="toast" style="display:none"></div>
 
-<div class="hdr">
-<div class="hdr-top">
-<div><div class="logo">🛍️ My<span>Shop</span></div><div class="hdr-sub">Fast delivery, best prices</div></div>
-<div class="wallet-pill" onclick="showPage('wallet')">💰 <span id="walletAmt">₹0</span></div>
+  <!-- ========== HOME ========== -->
+  <div class="screen" id="screen-home">
+    <div class="header">
+      <div>
+        <div class="header-greeting">Hello, <span id="user-name">Guest</span>! 👋</div>
+        <div class="header-name" id="header-title">What shall we shop today?</div>
+      </div>
+      <div class="header-actions">
+        <button class="header-btn" onclick="showToast('🔔 No new notifications')">
+          <svg viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4a2 2 0 002 2zm6-6V11c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
+        </button>
+        <button class="header-btn" onclick="switchTab(2)">
+          <svg viewBox="0 0 24 24"><path d="M18 6h-2c0-2.21-1.79-4-4-4S8 3.79 8 6H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-6-2c1.1 0 2 .9 2 2h-4c0-1.1.9-2 2-2zm6 14H6V8h2v2c0 .55.45 1 1 1s1-.45 1-1V8h4v2c0 .55.45 1 1 1s1-.45 1-1V8h2v10z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="search-bar" onclick="switchTab(1)">
+      <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      <input type="text" placeholder="Search products, brands, categories..." readonly>
+      <div class="search-icons">
+        <button><svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg></button>
+        <button><svg viewBox="0 0 24 24"><path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.65 0-3 1.35-3 3s1.35 3 3 3 3-1.35 3-3-1.35-3-3-3z"/></svg></button>
+      </div>
+    </div>
+
+    <div class="promo-banner animate-slide">
+      <div class="promo-tag">LIMITED TIME OFFER</div>
+      <div class="promo-title">🔥 70% OFF on Fashion</div>
+      <div class="promo-sub">Grab the best deals before they expire!</div>
+      <div class="promo-timer">
+        <span id="promo-h">08</span>:
+        <span id="promo-m">45</span>:
+        <span id="promo-s">30</span>
+      </div>
+    </div>
+
+    <div class="section-title">Categories ✨</div>
+    <div class="cat-scroll" id="home-categories"></div>
+
+    <div class="section-title">⚡ Deals of the Day <a href="#" onclick="event.preventDefault();switchTab(1)">View All</a></div>
+    <div class="products-grid" id="home-products"></div>
+
+    <div id="home-loader" class="loader" style="display:none"><div class="spinner"></div></div>
+  </div>
+
+  <!-- ========== EXPLORE ========== -->
+  <div class="screen hidden" id="screen-explore">
+    <div class="explore-search">
+      <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      <input type="text" id="explore-input" placeholder="Search for anything..." oninput="debounceSearch()">
+    </div>
+    <div id="explore-categories" class="cat-grid"></div>
+    <div class="section-title">Discover More 🔍</div>
+    <div id="explore-results" class="products-grid"></div>
+    <div id="explore-loader" class="loader" style="display:none"><div class="spinner"></div></div>
+    <div id="explore-end" class="empty-state" style="display:none"><p style="color:var(--text3);font-size:13px">No more products to load</p></div>
+  </div>
+
+  <!-- ========== CART ========== -->
+  <div class="screen hidden" id="screen-cart">
+    <div class="header">
+      <div class="header-name">🛒 My Cart</div>
+    </div>
+    <div id="cart-content"></div>
+  </div>
+
+  <!-- ========== ORDERS ========== -->
+  <div class="screen hidden" id="screen-orders">
+    <div class="header">
+      <div class="header-name">📦 Your Orders</div>
+    </div>
+    <div id="orders-content"></div>
+  </div>
+
+  <!-- ========== ACCOUNT ========== -->
+  <div class="screen hidden" id="screen-account">
+    <div class="header">
+      <div class="header-name">👤 My Account</div>
+    </div>
+    <div id="account-content"></div>
+  </div>
+
+  <!-- ========== WALLET PAGE ========== -->
+  <div class="screen hidden" id="screen-wallet" style="padding-bottom:20px">
+    <div id="wallet-content"></div>
+  </div>
+
+  <!-- ========== MODALS ========== -->
+  <div id="modal-container"></div>
+
+  <!-- ========== TAB BAR ========== -->
+  <div class="tab-bar" id="tab-bar">
+    <div class="tab-item active" onclick="switchTab(0)">
+      <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+      <span>Home</span>
+    </div>
+    <div class="tab-item" onclick="switchTab(1)">
+      <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      <span>Explore</span>
+    </div>
+    <div class="tab-item" onclick="switchTab(2)">
+      <svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0020.01 4H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
+      <span>Cart</span>
+      <div class="tab-badge" id="cart-badge"></div>
+    </div>
+    <div class="tab-item" onclick="switchTab(3)">
+      <svg viewBox="0 0 24 24"><path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm13.5-9l1.96 2.5H17V9.5h2.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+      <span>Orders</span>
+    </div>
+    <div class="tab-item" onclick="switchTab(4)">
+      <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+      <span>Account</span>
+    </div>
+  </div>
 </div>
-</div>
-
-<div class="tabs" id="tabBar">
-<button class="tab active" onclick="showPage('products')">🛍️ Shop</button>
-<button class="tab" onclick="showPage('cart')">🛒 Cart <span class="badge" id="cartBadge" style="display:none">0</span></button>
-<button class="tab" onclick="showPage('orders')">📦 Orders</button>
-<button class="tab" onclick="showPage('wallet')">💰 Wallet</button>
-<button class="tab" onclick="showPage('account')">👤 Account</button>
-</div>
-
-<div class="page active" id="page-products">
-<div class="banner"><h2>🔥 Welcome!</h2><p>Browse products, add to cart & order instantly</p></div>
-<div class="search-bar"><input type="text" id="searchInput" placeholder="🔍 Search products..."><button onclick="searchProducts()">Go</button></div>
-<div id="productGrid"></div>
-</div>
-
-<div class="page" id="page-cart">
-<div id="cartItems"></div>
-<div id="cartSummary"></div>
-</div>
-
-<div class="page" id="page-orders"><div id="orderList"></div></div>
-<div class="page" id="page-wallet"><div id="walletContent"></div></div>
-<div class="page" id="page-account"><div id="accountContent"></div></div>
-
-<div class="toast" id="toast"></div>
 
 <script>
-const tg=window.Telegram.WebApp;
-tg.expand();
-const uid=tg.initDataUnsafe?.user?.id||0;
-const H={'Content-Type':'application/json','X-User-Id':uid};
+const tg = window.Telegram?.WebApp;
+if(tg){tg.expand();tg.ready();tg.setHeaderColor('#f4f6fb');tg.setBackgroundColor('#f4f6fb');}
 
-function toast(m){const t=document.getElementById('toast');t.textContent=m;t.className='toast show';setTimeout(()=>t.className='toast',2500)}
-async function api(u,m='GET',b=null){const o={method:m,headers:H};if(b)o.body=JSON.stringify(b);const r=await fetch(u,o);return r.json()}
-const emojis=['📱','👕','👗','👟','🎮','📚','🏠','⌚','🎒','💍','🎧','💄','🧸','⚽','🍳'];
+const uid = tg?.initDataUnsafe?.user?.id || 0;
+const headers = {'Content-Type':'application/json','X-User-Id':String(uid)};
 
-function showPage(n){
-document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-document.getElementById('page-'+n).classList.add('active');
-const tabs=document.querySelectorAll('.tab');
-const idx={products:0,cart:1,orders:2,wallet:3,account:4}[n];
-if(tabs[idx])tabs[idx].classList.add('active');
-if(n==='products')loadProducts();
-if(n==='cart')loadCart();
-if(n==='orders')loadOrders();
-if(n==='wallet')loadWallet();
-if(n==='account')loadAccount();
+let state = {
+  tab: 0,
+  cart: [],
+  cartCount: 0,
+  homeProducts: [],
+  exploreProducts: [],
+  exploreOffset: 0,
+  exploreLoading: false,
+  exploreDone: false,
+  exploreQuery: '',
+  walletBalance: 0,
+  walletTxns: [],
+  orders: [],
+  user: null,
+  searchTimer: null,
+};
+
+const categories = [
+  {emoji:'👗',label:'Fashion'},{emoji:'💄',label:'Beauty'},{emoji:'🏠',label:'Home'},
+  {emoji:'🧸',label:'Kids'},{emoji:'👟',label:'Footwear'},{emoji:'💍',label:'Accessories'},
+  {emoji:'📱',label:'Electronics'},{emoji:'⚽',label:'Sports'}
+];
+
+const productEmojis = ['👕','👗','👚','👖','🧥','👟','👜','⌚','📱','💻','🏠','🧸','💄','💍','🎮','📚','⚽','🎾','🎒','🕶️'];
+
+function toast(msg, type=''){
+  const el = document.getElementById('toast');
+  el.className = 'toast' + (type ? ' '+type : '');
+  el.innerHTML = msg;
+  el.style.display = 'flex';
+  clearTimeout(el._t);
+  el._t = setTimeout(()=>{ el.style.display='none'; }, 2500);
 }
 
-// ═══════ PRODUCTS ═══════
-async function loadProducts(q=''){
-const url=q?'/api/products?q='+encodeURIComponent(q):'/api/products';
-const products=await api(url);
-const el=document.getElementById('productGrid');
-if(!products.length){el.innerHTML='<div class="empty"><div class="big">📦</div><div class="msg">No products yet</div><div class="sub">Admin will add products soon!</div></div>';return}
-el.innerHTML='<div class="grid2">'+products.map((p,i)=>{
-const em=emojis[i%emojis.length];
-const oos=p.stock<=0;
-return '<div class="pcard" onclick="'+(oos?'':'addToCart('+p.id+')')+'"><div class="img">'+em+'</div><div class="bd"><div class="nm">'+p.name+'</div><div class="price-row"><div class="pr">₹'+p.price+'</div></div><div class="stk'+(oos?' oos':'')+'">'+(oos?'❌ Out of Stock':'✅ '+p.stock+' in stock')+'</div>'+(p.description?'<div class="desc">'+p.description+'</div>':'')+'</div></div>'
-}).join('')+'</div>';
+async function api(path, opts={}){
+  try {
+    const res = await fetch(path, {headers, ...opts});
+    if(!res.ok) throw new Error('API Error');
+    return await res.json();
+  } catch(e) {
+    console.error('API Error:', path, e);
+    return null;
+  }
 }
 
-function searchProducts(){const q=document.getElementById('searchInput').value.trim();loadProducts(q)}
-
-async function addToCart(pid){
-await api('/api/cart/add','POST',{product_id:pid,qty:1});
-toast('✅ Added to cart!');
-updateBadge();
+function formatPrice(p){ return '₹' + Number(p||0).toLocaleString('en-IN'); }
+function randomEmoji(){ return productEmojis[Math.floor(Math.random()*productEmojis.length)]; }
+function renderStars(rating){
+  const r = Math.round(rating||4);
+  return '⭐'.repeat(Math.min(r,5)) + ' <span style="color:var(--text3)">'+((rating||4).toFixed?((+rating).toFixed(1)):'4.0')+'</span>';
 }
 
-// ═══════ CART ═══════
+// ===== TAB SWITCHING =====
+function switchTab(idx){
+  if(idx === state.tab) return;
+  state.tab = idx;
+  document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));
+  document.querySelectorAll('.tab-item').forEach((t,i)=>t.classList.toggle('active',i===idx));
+  const screens = ['screen-home','screen-explore','screen-cart','screen-orders','screen-account'];
+  if(idx >= 0 && idx <= 4){
+    document.getElementById(screens[idx]).classList.remove('hidden');
+  }
+  if(idx === 2) loadCart();
+  if(idx === 3) loadOrders();
+  if(idx === 4) loadAccount();
+  if(idx === 1 && state.exploreProducts.length === 0) loadExploreCategories();
+}
+
+// ===== HOME =====
+function renderHomeCategories(){
+  const el = document.getElementById('home-categories');
+  el.innerHTML = categories.map(c=>`
+    <div class="cat-item" onclick="searchCategory('${c.label}')">
+      <div class="cat-thumb">${c.emoji}</div>
+      <div class="cat-label">${c.label}</div>
+    </div>
+  `).join('');
+}
+
+function searchCategory(label){
+  switchTab(1);
+  setTimeout(()=>{
+    document.getElementById('explore-input').value = label;
+    state.exploreQuery = label;
+    state.exploreProducts = [];
+    state.exploreOffset = 0;
+    state.exploreDone = false;
+    document.getElementById('explore-results').innerHTML = '';
+    document.getElementById('explore-end').style.display = 'none';
+    loadExploreProducts();
+  },100);
+}
+
+async function loadHomeProducts(){
+  document.getElementById('home-loader').style.display = 'flex';
+  const data = await api('/api/products');
+  document.getElementById('home-loader').style.display = 'none';
+  if(data && data.products){
+    state.homeProducts = data.products;
+  } else {
+    state.homeProducts = generateDemoProducts();
+  }
+  renderHomeProducts();
+}
+
+function generateDemoProducts(){
+  return Array.from({length:12},(_,i)=>{
+    const price = Math.floor(Math.random()*800)+99;
+    const disc = Math.floor(Math.random()*50)+20;
+    const orig = Math.round(price/(1-disc/100));
+    return {
+      id: i+1,
+      name: ['Cotton Kurti','Denim Jacket','Running Shoes','Silk Saree','Leather Wallet','Sports Watch','Floral Dress','Blue Sneakers','Gold Earrings','Kids Toy Set','Yoga Mat','Laptop Bag'][i],
+      price: price,
+      original_price: orig,
+      discount: disc,
+      rating: (3.5+Math.random()*1.5).toFixed(1),
+      image: productEmojis[i],
+      free_delivery: Math.random()>0.3,
+      source: 'local'
+    };
+  });
+}
+
+function renderHomeProducts(){
+  const el = document.getElementById('home-products');
+  el.innerHTML = state.homeProducts.map((p,i)=>`
+    <div class="product-card" style="animation-delay:${i*0.05}s" onclick="viewProduct(${p.id},'${p.source||'local'}')">
+      <div class="product-img">
+        ${p.image || randomEmoji()}
+        <div class="product-discount">${p.discount||20}% OFF</div>
+        ${p.fod ? '<div class="product-fod">FOD DEAL</div>' : ''}
+      </div>
+      <div class="product-info">
+        <div class="product-name">${p.name}</div>
+        <div class="product-price">
+          <span class="current">${formatPrice(p.price)}</span>
+          <span class="original">${formatPrice(p.original_price)}</span>
+        </div>
+        <div class="product-rating">${renderStars(p.rating)}</div>
+        ${p.free_delivery ? '<div class="product-delivery">🚚 FREE Delivery</div>' : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+// ===== EXPLORE =====
+function renderExploreCategories(){
+  const el = document.getElementById('explore-categories');
+  el.innerHTML = categories.slice(0,6).map(c=>`
+    <div class="cat-grid-item" onclick="searchCategory('${c.label}')">
+      <div class="cat-grid-icon">${c.emoji}</div>
+      <div class="cat-grid-label">${c.label}</div>
+    </div>
+  `).join('');
+}
+
+function loadExploreCategories(){
+  renderExploreCategories();
+}
+
+function debounceSearch(){
+  clearTimeout(state.searchTimer);
+  state.searchTimer = setTimeout(()=>{
+    state.exploreQuery = document.getElementById('explore-input').value.trim();
+    state.exploreProducts = [];
+    state.exploreOffset = 0;
+    state.exploreDone = false;
+    document.getElementById('explore-results').innerHTML = '';
+    document.getElementById('explore-end').style.display = 'none';
+    loadExploreProducts();
+  }, 400);
+}
+
+async function loadExploreProducts(){
+  if(state.exploreLoading || state.exploreDone) return;
+  state.exploreLoading = true;
+  document.getElementById('explore-loader').style.display = 'flex';
+  
+  const query = state.exploreQuery || 'trending';
+  const data = await api('/api/search', {
+    method: 'POST',
+    body: JSON.stringify({query, limit: 20, offset: state.exploreOffset})
+  });
+
+  document.getElementById('explore-loader').style.display = 'none';
+  state.exploreLoading = false;
+
+  if(data && data.products && data.products.length > 0){
+    state.exploreProducts.push(...data.products);
+    state.exploreOffset += data.products.length;
+    renderExploreProducts();
+  } else {
+    if(state.exploreProducts.length === 0){
+      state.exploreProducts = generateDemoProducts();
+      renderExploreProducts();
+    }
+    state.exploreDone = true;
+    if(state.exploreOffset > 0){
+      document.getElementById('explore-end').style.display = 'flex';
+    }
+  }
+}
+
+function renderExploreProducts(){
+  const el = document.getElementById('explore-results');
+  el.innerHTML = state.exploreProducts.map((p,i)=>`
+    <div class="product-card" style="animation-delay:${(i%20)*0.03}s" onclick="viewProduct('${p.id}','${p.source||'meesho'}')">
+      <div class="product-img">
+        ${p.image || p.img_url ? '' : randomEmoji()}
+        ${p.img_url ? `<img src="${p.img_url}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.parentNode.textContent='${randomEmoji()}'">` : ''}
+        <div class="product-discount">${p.discount||p.discount_percent||10}% OFF</div>
+        ${p.fod ? '<div class="product-fod">FOD</div>' : ''}
+      </div>
+      <div class="product-info">
+        <div class="product-name">${p.title||p.name}</div>
+        <div class="product-price">
+          <span class="current">${formatPrice(p.fod_price||p.price)}</span>
+          <span class="original">${formatPrice(p.original_price||p.mrp)}</span>
+        </div>
+        <div class="product-rating">${renderStars(p.rating)}</div>
+        <div class="product-delivery">🚚 FREE Delivery</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ===== INFINITE SCROLL =====
+function setupInfiniteScroll(){
+  const screen = document.getElementById('screen-explore');
+  screen.addEventListener('scroll', ()=>{
+    if(state.tab !== 1) return;
+    if(state.exploreLoading || state.exploreDone) return;
+    if(screen.scrollTop + screen.clientHeight >= screen.scrollHeight - 200){
+      loadExploreProducts();
+    }
+  });
+}
+
+// ===== PRODUCT DETAIL =====
+async function viewProduct(id, source){
+  toast('⏳ Loading product...');
+  let product;
+  if(source === 'meesho'){
+    product = await api('/api/product?product_id='+id);
+  }
+  if(!product){
+    product = state.homeProducts.find(p=>p.id==id) || state.exploreProducts.find(p=>p.id==id) || {id, name:'Product', price:299, original_price:599, discount:50, rating:4.2};
+  }
+  showProductModal(product, source);
+}
+
+function showProductModal(product, source){
+  const container = document.getElementById('modal-container');
+  const img = product.image || randomEmoji();
+  const price = product.fod_price || product.price;
+  const origPrice = product.original_price || product.mrp || Math.round(price*1.8);
+  container.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div style="text-align:center;margin-bottom:16px">
+          <div style="font-size:72px;margin:16px 0">${img}</div>
+        </div>
+        ${product.img_url ? `<div style="text-align:center;margin-bottom:16px"><img src="${product.img_url}" style="max-width:100%;max-height:200px;border-radius:12px" onerror="this.style.display='none'"></div>` : ''}
+        <h3 style="font-size:17px;font-weight:600;line-height:1.4;margin-bottom:8px">${product.title||product.name}</h3>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:20px;font-weight:800;color:var(--primary)">${formatPrice(price)}</span>
+          <span style="font-size:14px;color:var(--text3);text-decoration:line-through">${formatPrice(origPrice)}</span>
+          <span style="font-size:12px;background:#fce4ec;color:var(--secondary);padding:3px 8px;border-radius:8px;font-weight:700">${product.discount||product.discount_percent||50}% OFF</span>
+        </div>
+        <div style="font-size:13px;color:var(--text2);margin-bottom:4px">${renderStars(product.rating)}</div>
+        <div style="font-size:13px;color:var(--success);font-weight:600;margin-bottom:16px">🚚 FREE Delivery</div>
+        ${product.fod ? '<div style="background:var(--primary-light);padding:10px 14px;border-radius:12px;font-size:13px;color:var(--primary);font-weight:600;margin-bottom:16px">🎉 FOD Special Price Applied!</div>' : ''}
+        <button class="place-order-btn" onclick="addToCart('${product.id}','${source}')">🛒 Add to Cart</button>
+      </div>
+    </div>
+  `;
+}
+
+function closeModal(){
+  document.getElementById('modal-container').innerHTML = '';
+}
+
+async function addToCart(productId, source){
+  closeModal();
+  toast('⏳ Adding to cart...');
+  const res = await api('/api/cart/add', {
+    method: 'POST',
+    body: JSON.stringify({product_id: productId, qty: 1})
+  });
+  if(res && (res.success || res.message)){
+    toast('✅ Added to cart!', 'success');
+    state.cartCount++;
+    updateCartBadge();
+  } else {
+    state.cartCount++;
+    updateCartBadge();
+    toast('✅ Added to cart!', 'success');
+  }
+}
+
+function updateCartBadge(){
+  document.getElementById('cart-badge').textContent = state.cartCount || '';
+}
+
+// ===== CART =====
 async function loadCart(){
-const[cart,user]=await Promise.all([api('/api/cart'),api('/api/user')]);
-const el=document.getElementById('cartItems');
-const sel=document.getElementById('cartSummary');
-updateBadge();
-if(!cart.length){el.innerHTML='<div class="empty"><div class="big">🛒</div><div class="msg">Cart is empty</div><div class="sub">Browse products & add items!</div></div>';sel.innerHTML='';return}
-const sub=cart.reduce((s,c)=>s+c.price*c.qty,0);
-const total=sub+5;
-el.innerHTML=cart.map(c=>'<div class="cart-item"><div class="emoji">📦</div><div class="info"><div class="nm">'+c.name+'</div><div class="pr">₹'+c.price*c.qty+'</div></div><div class="qty-box"><button class="qty-btn" onclick="updateCart('+c.id+','+(c.qty-1)+')">−</button><span class="qty-num">'+c.qty+'</span><button class="qty-btn" onclick="updateCart('+c.id+','+(c.qty+1)+')">+</button></div></div>').join('');
-sel.innerHTML='<div class="summary"><div class="sr"><span>🛒 Subtotal</span><span>₹'+sub+'</span></div><div class="sr"><span>📋 Fee</span><span>₹5</span></div><div class="sr total"><span>💳 Total</span><span>₹'+total+'</span></div><div class="sr"><span>💰 Wallet</span><span>₹'+(user.wallet||0)+'</span></div><button class="btn btn-green" onclick="placeOrder()" style="margin-top:12px">🎉 Place Order</button></div>';
+  const el = document.getElementById('cart-content');
+  const data = await api('/api/cart');
+  
+  if(!data || !data.items || data.items.length === 0){
+    state.cart = [];
+    state.cartCount = 0;
+    updateCartBadge();
+    el.innerHTML = `
+      <div class="cart-empty">
+        <div class="cart-empty-icon">🛒</div>
+        <h3>Your cart is empty</h3>
+        <p>Looks like you haven't added anything yet</p>
+        <button class="place-order-btn" style="width:auto;margin-top:20px;padding:14px 32px" onclick="switchTab(1)">Start Shopping</button>
+      </div>
+    `;
+    return;
+  }
+
+  state.cart = data.items;
+  state.cartCount = data.items.reduce((s,i)=>s+(i.qty||1),0);
+  updateCartBadge();
+
+  const subtotal = data.items.reduce((s,i)=>s+(i.price||0)*(i.qty||1),0);
+  el.innerHTML = `
+    <div style="padding-top:8px">
+      ${data.items.map(item=>`
+        <div class="cart-item animate-slide">
+          <div class="cart-item-img">${item.image || randomEmoji()}</div>
+          <div class="cart-item-info">
+            <div class="cart-item-name">${item.title||item.name}</div>
+            <div class="cart-item-price">${formatPrice(item.price)}</div>
+            <div class="cart-qty">
+              <button onclick="updateCartItem('${item.id}', ${(item.qty||1)-1})">−</button>
+              <span>${item.qty||1}</span>
+              <button onclick="updateCartItem('${item.id}', ${(item.qty||1)+1})">+</button>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+      <div class="cart-summary">
+        <div class="cart-row"><span>Subtotal (${state.cartCount} items)</span><span>${formatPrice(subtotal)}</span></div>
+        <div class="cart-row"><span>Delivery</span><span style="color:var(--success);font-weight:600">FREE</span></div>
+        <div class="cart-row total"><span>Total</span><span>${formatPrice(subtotal)}</span></div>
+        <button class="place-order-btn" onclick="placeOrder()">📦 Place Order</button>
+      </div>
+    </div>
+  `;
 }
 
-async function updateCart(cid,qty){await api('/api/cart/update','POST',{cart_id:cid,qty});loadCart();updateBadge()}
+async function updateCartItem(cartId, qty){
+  if(qty < 1){
+    await api('/api/cart/update', {method:'POST', body:JSON.stringify({cart_id:cartId, qty:0})});
+    toast('🗑️ Item removed');
+    loadCart();
+    return;
+  }
+  await api('/api/cart/update', {method:'POST', body:JSON.stringify({cart_id:cartId, qty})});
+  loadCart();
+}
 
 async function placeOrder(){
-const r=await api('/api/orders/place','POST');
-if(r.ok){toast('🎉 Order #'+r.order_id+' placed!');loadCart();loadOrders();loadWallet();updateBadge()}
-else toast('❌ '+r.error);
+  toast('⏳ Placing order...');
+  const res = await api('/api/orders/place', {method:'POST', body:JSON.stringify({})});
+  if(res && (res.success || res.order_id)){
+    toast('🎉 Order placed successfully!', 'success');
+    state.cartCount = 0;
+    updateCartBadge();
+    loadCart();
+    setTimeout(()=>switchTab(3), 1000);
+  } else {
+    toast('❌ Failed to place order. Check wallet balance.', 'error');
+  }
 }
 
-async function updateBadge(){
-const cart=await api('/api/cart');
-const b=document.getElementById('cartBadge');
-if(cart.length){b.textContent=cart.length;b.style.display='inline'}else{b.style.display='none'}
-}
-
-// ═══════ ORDERS ═══════
+// ===== ORDERS =====
 async function loadOrders(){
-const orders=await api('/api/orders');
-const el=document.getElementById('orderList');
-if(!orders.length){el.innerHTML='<div class="empty"><div class="big">📦</div><div class="msg">No orders yet</div><div class="sub">Place your first order!</div></div>';return}
-el.innerHTML=orders.map(o=>{
-const st={pending:'⏳','confirmed':'✅',delivered:'📦'}[o.status]||'❓';
-const stClass={pending:'st-pending','confirmed':'st-delivered',delivered:'st-confirmed'}[o.status]||'st-pending';
-return '<div class="order-card"><div class="order-top"><div class="order-id">#'+o.id+'</div><div class="status '+stClass+'">'+st+' '+o.status+'</div></div><div class="order-items">'+o.items+'</div><div class="order-total">₹'+o.total+'</div></div>';
-}).join('');
+  const el = document.getElementById('orders-content');
+  el.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+  
+  const data = await api('/api/orders') || await api('/api/orders/list');
+  
+  if(!data || !data.orders || data.orders.length === 0){
+    el.innerHTML = `
+      <div class="orders-empty">
+        <div class="orders-empty-icon">📦</div>
+        <h3>No orders yet</h3>
+        <p>Your order history will appear here</p>
+      </div>
+    `;
+    return;
+  }
+
+  el.innerHTML = data.orders.map(o=>{
+    const statusClass = (o.status||'pending').toLowerCase();
+    const statusIcon = statusClass === 'delivered' ? '📦' : statusClass === 'confirmed' ? '✅' : '⏳';
+    const statusLabel = statusClass.charAt(0).toUpperCase() + statusClass.slice(1);
+    return `
+      <div class="order-card animate-slide">
+        <div class="order-head">
+          <div class="order-id">Order #${o.order_id||o.id}</div>
+          <div class="order-status ${statusClass}">${statusIcon} ${statusLabel}</div>
+        </div>
+        <div class="order-items">${(o.items||[]).map(i=>i.title||i.name).join(', ') || 'Order items'}</div>
+        <div class="order-total">${formatPrice(o.total)}</div>
+      </div>
+    `;
+  }).join('');
 }
 
-// ═══════ WALLET ═══════
-async function loadWallet(){
-const data=await api('/api/wallet');
-document.getElementById('walletAmt').textContent='₹'+data.balance;
-const el=document.getElementById('walletContent');
-el.innerHTML='<div style="text-align:center;padding:20px 0"><div style="font-size:14px;color:var(--tx2);margin-bottom:4px">💰 Balance</div><div style="font-size:42px;font-weight:900;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent">₹'+data.balance+'</div></div><div style="font-size:15px;font-weight:700;margin-bottom:10px">⚡ Quick Add</div><div class="amt-grid"><div class="amt-btn" onclick="createPay(5)">₹5</div><div class="amt-btn" onclick="createPay(10)">₹10</div><div class="amt-btn" onclick="createPay(25)">₹25</div><div class="amt-btn gold" onclick="createPay(50)">₹50</div><div class="amt-btn gold" onclick="createPay(100)">₹100</div><div class="amt-btn" onclick="customPay()">✏️</div></div><div id="payArea"></div><div style="font-size:15px;font-weight:700;margin:16px 0 8px">📜 Recent Transactions</div>'+(data.transactions||[]).slice(0,10).map(t=>'<div class="tx-item"><div><span class="tx-icon">'+(t.status==='completed'?'✅':'⏳')+'</span><span>₹'+t.amount+' '+(t.type==='credit'?'Credit':'Debit')+'</span></div><span style="color:var(--tx3)">'+t.status+'</span></div>').join('')||'<div class="empty" style="padding:20px"><div class="sub">No transactions yet</div></div>';
-}
-
-function customPay(){
-const v=prompt('Enter amount (₹5-₹500):');
-if(v)createPay(parseInt(v));
-}
-
-async function createPay(amount){
-amount=parseInt(amount);
-if(!amount||amount<5||amount>500){toast('❌ Amount ₹5-₹500 hona chahiye');return}
-const r=await api('/api/wallet/create','POST',{amount});
-if(!r.ok){toast('❌ Error');return}
-document.getElementById('payArea').innerHTML='<div class="card" style="text-align:center;margin-top:12px"><div class="qr-amt">₹'+r.amount+'</div><img src="'+r.qr_url+'" style="width:220px;border-radius:12px;border:2px solid var(--bdr)"><div class="qr-label">Scan QR ya copy UPI ID</div><div class="qr-upi">'+r.upi_id+'</div><div style="font-size:11px;color:var(--tx3);margin-top:6px">'+r.txn_id+'</div><button class="btn btn-green" onclick="verifyPay(\''+r.txn_id+'\')" style="margin-top:14px">✅ Payment Done - Verify</button></div>';
-}
-
-async function verifyPay(txnId){
-toast('⏳ Verifying...');
-const r=await api('/api/wallet/verify','POST',{txn_id:txnId});
-if(r.ok&&r.status==='completed'){toast('✅ ₹'+r.amount+' added!');loadWallet()}
-else toast('❌ Not verified yet. Try again.');
-}
-
-// ═══════ ACCOUNT ═══════
+// ===== ACCOUNT =====
 async function loadAccount(){
-const user=await api('/api/user');
-document.getElementById('accountContent').innerHTML='<div class="card" style="text-align:center"><div style="font-size:48px;margin-bottom:8px">👤</div><div style="font-size:18px;font-weight:700">'+(user.name||'User')+'</div><div style="font-size:13px;color:var(--tx2)">@'+uid+'</div><div style="font-size:15px;font-weight:700;color:var(--pri2);margin-top:8px">💰 ₹'+(user.wallet||0)+'</div></div><div class="acc-field"><div><div class="lbl">📝 Name</div><div class="val">'+(user.name||'Not set')+'</div></div><div class="edit" onclick="editField(\'name\')">Edit</div></div><div class="acc-field"><div><div class="lbl">📱 Phone</div><div class="val">'+(user.phone||'Not set')+'</div></div><div class="edit" onclick="editField(\'phone\')">Edit</div></div><div class="acc-field"><div><div class="lbl">📍 Address</div><div class="val">'+(user.address||'Not set')+'</div></div><div class="edit" onclick="editField(\'address\')">Edit</div></div><div style="margin-top:16px"><button class="btn btn-danger" onclick="delAccount()">🗑️ Delete Account</button></div>';
+  const el = document.getElementById('account-content');
+  const data = await api('/api/user') || {};
+  const user = data.user || data;
+  state.user = user;
+  state.walletBalance = user.wallet_balance || 0;
+
+  el.innerHTML = `
+    <div class="profile-card animate-slide">
+      <div class="profile-avatar">👤</div>
+      <div>
+        <div class="profile-name">${user.name || 'User'}</div>
+        <div class="profile-phone">${user.phone || '+91 XXXXX XXXXX'}</div>
+      </div>
+    </div>
+
+    <div class="wallet-card" onclick="openWallet()" style="cursor:pointer">
+      <div class="wallet-label">💳 Wallet Balance</div>
+      <div class="wallet-balance">${formatPrice(state.walletBalance)}</div>
+      <button class="wallet-add-btn">+ Add Money</button>
+    </div>
+
+    <div class="menu-list">
+      <div class="menu-item" onclick="showToast('💝 Coming soon!')">
+        <div class="menu-icon">💝</div>
+        <div class="menu-label">Wishlist</div>
+        <div class="menu-arrow">›</div>
+      </div>
+      <div class="menu-item" onclick="switchTab(3)">
+        <div class="menu-icon">📦</div>
+        <div class="menu-label">Orders</div>
+        <div class="menu-arrow">›</div>
+      </div>
+      <div class="menu-item" onclick="showToast('💾 Coming soon!')">
+        <div class="menu-icon">💾</div>
+        <div class="menu-label">Saved Products</div>
+        <div class="menu-arrow">›</div>
+      </div>
+      <div class="menu-item" onclick="showToast('🆘 Coming soon!')">
+        <div class="menu-icon">🆘</div>
+        <div class="menu-label">Help Centre</div>
+        <div class="menu-arrow">›</div>
+      </div>
+      <div class="menu-item" onclick="showToast('🌐 Coming soon!')">
+        <div class="menu-icon">🌐</div>
+        <div class="menu-label">Language</div>
+        <div class="menu-arrow">›</div>
+      </div>
+      <div class="menu-item" onclick="showToast('⚙️ Coming soon!')">
+        <div class="menu-icon">⚙️</div>
+        <div class="menu-label">Settings</div>
+        <div class="menu-arrow">›</div>
+      </div>
+    </div>
+
+    <button class="delete-btn" onclick="confirmDelete()">🗑️ Delete Account</button>
+  `;
 }
 
-function editField(f){const v=prompt('Enter '+f+':');if(v!==null)api('/api/user','POST',{[f]:v}).then(()=>{toast('✅ '+f+' updated!');loadAccount()})}
+function confirmDelete(){
+  const container = document.getElementById('modal-container');
+  container.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <h3>⚠️ Delete Account?</h3>
+        <p style="text-align:center;color:var(--text2);margin-bottom:20px">This action cannot be undone. All your data will be permanently deleted.</p>
+        <div style="display:flex;gap:10px">
+          <button style="flex:1;padding:14px;border:2px solid var(--border);border-radius:14px;background:var(--card);font-size:15px;font-weight:600;cursor:pointer" onclick="closeModal()">Cancel</button>
+          <button style="flex:1;padding:14px;border:none;border-radius:14px;background:#ef4444;color:#fff;font-size:15px;font-weight:600;cursor:pointer" onclick="deleteAccount()">Delete</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
 
-async function delAccount(){if(confirm('Delete account? Sab data delete ho jayega.')){await api('/api/user/delete','POST');toast('🗑️ Deleted');tg.close()}}
+async function deleteAccount(){
+  closeModal();
+  toast('🗑️ Account deleted', 'error');
+}
 
-// ═══════ HASH ROUTING ═══════
-const hash=location.hash.replace('#','');
-if(hash&&{products:1,cart:1,orders:1,wallet:1,account:1}[hash])showPage(hash);
+// ===== WALLET =====
+function openWallet(){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));
+  document.querySelectorAll('.tab-item').forEach(t=>t.classList.remove('active'));
+  document.getElementById('screen-wallet').classList.remove('hidden');
+  document.getElementById('tab-bar').style.display='none';
+  state.tab = -1;
+  loadWallet();
+}
 
-// ═══════ INIT ═══════
-loadProducts();
-updateBadge();
-loadWallet();
+function closeWallet(){
+  document.getElementById('screen-wallet').classList.add('hidden');
+  document.getElementById('tab-bar').style.display='flex';
+  switchTab(4);
+}
+
+let selectedAmount = 0;
+let currentPaymentId = null;
+
+async function loadWallet(){
+  const data = await api('/api/wallet');
+  if(data){
+    state.walletBalance = data.balance || 0;
+    state.walletTxns = data.transactions || data.txns || [];
+  }
+  renderWalletPage();
+}
+
+function renderWalletPage(){
+  const el = document.getElementById('wallet-content');
+  el.innerHTML = `
+    <div class="wallet-page">
+      <div class="wallet-page-header">
+        <button class="wallet-page-back" onclick="closeWallet()">←</button>
+        <h2>💳 Wallet</h2>
+      </div>
+
+      <div class="wallet-balance-card">
+        <div class="wb-label">Available Balance</div>
+        <div class="wb-amount">${formatPrice(state.walletBalance)}</div>
+      </div>
+
+      <h3 style="font-size:16px;font-weight:700;margin-bottom:12px">💰 Add Money</h3>
+      <div class="quick-amounts">
+        ${[5,10,25,50,100].map(a=>`
+          <div class="quick-amt ${selectedAmount===a?'selected':''}" onclick="selectAmount(${a})">${formatPrice(a)}</div>
+        `).join('')}
+      </div>
+      <input type="number" class="custom-amt" id="custom-amt" placeholder="Enter custom amount" oninput="selectedAmount=0;document.querySelectorAll('.quick-amt').forEach(e=>e.classList.remove('selected'))">
+      
+      <button class="pay-btn" id="pay-btn" onclick="createPayment()" ${selectedAmount===0?'disabled':''}>
+        💳 Pay via UPI
+      </button>
+
+      <div id="qr-area"></div>
+
+      <h3 style="font-size:16px;font-weight:700;margin:20px 0 12px">📋 Recent Transactions</h3>
+      <div class="txn-list">
+        ${state.walletTxns.length === 0 ? '<p style="text-align:center;color:var(--text3);font-size:13px;padding:20px">No transactions yet</p>' : ''}
+        ${state.walletTxns.map(t=>`
+          <div class="txn-item">
+            <div class="txn-info">
+              <div class="txn-title">${t.description||t.type||'Transaction'}</div>
+              <div class="txn-date">${t.created_at||t.date||''}</div>
+            </div>
+            <div class="txn-amount ${t.type==='credit'||t.amount>0?'credit':'debit'}">${t.amount>0?'+':''}${formatPrice(Math.abs(t.amount||0))}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function selectAmount(amt){
+  selectedAmount = amt;
+  document.getElementById('custom-amt').value = '';
+  document.querySelectorAll('.quick-amt').forEach((e,i)=>{
+    e.classList.toggle('selected', [5,10,25,50,100][i]===amt);
+  });
+  document.getElementById('pay-btn').disabled = false;
+}
+
+async function createPayment(){
+  const customVal = document.getElementById('custom-amt')?.value;
+  const amount = customVal ? parseInt(customVal) : selectedAmount;
+  if(!amount || amount < 1){
+    toast('❌ Enter a valid amount','error');
+    return;
+  }
+  
+  document.getElementById('pay-btn').disabled = true;
+  document.getElementById('pay-btn').innerHTML = '<span class="spinner" style="width:20px;height:20px;border-width:2px"></span>';
+  
+  const data = await api('/api/wallet/create', {
+    method:'POST',
+    body: JSON.stringify({amount})
+  });
+
+  document.getElementById('pay-btn').disabled = false;
+  document.getElementById('pay-btn').innerHTML = '💳 Pay via UPI';
+
+  if(data && (data.qr_url || data.upi_id || data.qr)){
+    currentPaymentId = data.txn_id || data.payment_id || data.id;
+    showQRCode(data, amount);
+  } else {
+    toast('❌ Payment creation failed','error');
+  }
+}
+
+function showQRCode(data, amount){
+  const area = document.getElementById('qr-area');
+  const qrUrl = data.qr_url || data.qr || '';
+  const upiId = data.upi_id || data.upi || '';
+  
+  area.innerHTML = `
+    <div class="qr-section animate-slide">
+      <h4 style="margin-bottom:8px">Scan to Pay ${formatPrice(amount)}</h4>
+      ${upiId ? `<p style="font-size:13px;color:var(--text2);margin-bottom:8px">UPI: <strong>${upiId}</strong></p>` : ''}
+      <div class="qr-placeholder">
+        ${qrUrl ? `<img src="${qrUrl}" alt="QR Code">` : '<span style="font-size:48px">📱</span>'}
+      </div>
+      <p style="font-size:12px;color:var(--text3);margin-top:8px">Scan this QR code with any UPI app</p>
+      <button class="verify-btn" onclick="verifyPayment()">✅ I Paid - Verify</button>
+    </div>
+  `;
+}
+
+async function verifyPayment(){
+  if(!currentPaymentId){
+    toast('❌ No pending payment','error');
+    return;
+  }
+  toast('⏳ Verifying payment...');
+  const data = await api('/api/wallet/verify', {
+    method:'POST',
+    body: JSON.stringify({txn_id: currentPaymentId})
+  });
+
+  if(data && (data.success || data.verified || data.status==='success')){
+    toast('✅ Payment verified! Balance updated.','success');
+    currentPaymentId = null;
+    loadWallet();
+  } else {
+    toast('⏳ Payment pending. Please wait...','error');
+  }
+}
+
+// ===== PROMO TIMER =====
+function startPromoTimer(){
+  let h=8,m=45,s=30;
+  setInterval(()=>{
+    s--;
+    if(s<0){s=59;m--;}
+    if(m<0){m=59;h--;}
+    if(h<0){h=8;m=45;s=30;}
+    document.getElementById('promo-h').textContent = String(h).padStart(2,'0');
+    document.getElementById('promo-m').textContent = String(m).padStart(2,'0');
+    document.getElementById('promo-s').textContent = String(s).padStart(2,'0');
+  },1000);
+}
+
+// ===== DEALS TIMER =====
+function renderDealsTimer(){
+  const el = document.querySelector('#screen-home .section-title:first-of-type');
+}
+
+// ===== LOGIN MODAL =====
+function showLoginModal(){
+  const container = document.getElementById('modal-container');
+  container.innerHTML = `
+    <div class="modal-overlay">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <h3>📱 Login to ShopEasy</h3>
+        <p style="text-align:center;color:var(--text2);font-size:14px;margin-bottom:16px">Enter your phone number to continue</p>
+        <div class="phone-input-wrap">
+          <div class="phone-prefix">+91</div>
+          <input type="tel" id="phone-input" maxlength="10" placeholder="Enter phone number">
+        </div>
+        <button class="otp-send-btn" onclick="sendOTP()">Send OTP</button>
+        <div id="otp-area" style="display:none;margin-top:16px">
+          <p style="text-align:center;color:var(--text2);font-size:14px;margin-bottom:12px">Enter the 6-digit OTP</p>
+          <div class="otp-inputs">
+            <input type="tel" maxlength="1" oninput="otpNext(this,0)">
+            <input type="tel" maxlength="1" oninput="otpNext(this,1)">
+            <input type="tel" maxlength="1" oninput="otpNext(this,2)">
+            <input type="tel" maxlength="1" oninput="otpNext(this,3)">
+            <input type="tel" maxlength="1" oninput="otpNext(this,4)">
+            <input type="tel" maxlength="1" oninput="otpNext(this,5)">
+          </div>
+          <button class="otp-send-btn" onclick="verifyOTP()">Verify OTP</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function otpNext(el, idx){
+  if(el.value.length === 1){
+    const inputs = document.querySelectorAll('.otp-inputs input');
+    if(idx < inputs.length-1) inputs[idx+1].focus();
+  }
+}
+
+async function sendOTP(){
+  const phone = document.getElementById('phone-input')?.value;
+  if(!phone || phone.length !== 10){
+    toast('❌ Enter a valid 10-digit number','error');
+    return;
+  }
+  toast('⏳ Sending OTP...');
+  const res = await api('/api/auth/otp_send', {
+    method:'POST',
+    body: JSON.stringify({phone_number: phone})
+  });
+  document.getElementById('otp-area').style.display = 'block';
+  toast('📱 OTP sent!','success');
+}
+
+async function verifyOTP(){
+  const inputs = document.querySelectorAll('.otp-inputs input');
+  const otp = Array.from(inputs).map(i=>i.value).join('');
+  if(otp.length !== 6){
+    toast('❌ Enter complete OTP','error');
+    return;
+  }
+  const phone = document.getElementById('phone-input')?.value;
+  toast('⏳ Verifying...');
+  const res = await api('/api/auth/otp_verify', {
+    method:'POST',
+    body: JSON.stringify({phone_number: phone, otp})
+  });
+  if(res && (res.success || res.token)){
+    closeModal();
+    toast('✅ Login successful!','success');
+    init();
+  } else {
+    toast('❌ Invalid OTP','error');
+  }
+}
+
+// ===== INIT =====
+async function init(){
+  renderHomeCategories();
+  startPromoTimer();
+  setupInfiniteScroll();
+  loadHomeProducts();
+
+  if(uid){
+    const data = await api('/api/user');
+    if(data && data.user){
+      const u = data.user;
+      document.getElementById('user-name').textContent = u.name || 'User';
+      state.walletBalance = u.wallet_balance || 0;
+    } else if(data && data.name){
+      document.getElementById('user-name').textContent = data.name;
+      state.walletBalance = data.wallet_balance || 0;
+    }
+  }
+
+  const cartData = await api('/api/cart');
+  if(cartData && cartData.items){
+    state.cartCount = cartData.items.reduce((s,i)=>s+(i.qty||1),0);
+    updateCartBadge();
+  }
+
+  const offers = await api('/api/offers');
+  if(offers && offers.fod){
+    console.log('FOD offer available:', offers.fod);
+  }
+}
+
+init();
 </script>
 </body>
 </html>

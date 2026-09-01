@@ -1,6 +1,6 @@
 """
 app.py - Flask Backend for Mini App
-Products, Cart, Orders, Wallet - sab API yahan se
+Products, Cart, Orders, Wallet, Meesho - sab API yahan se
 """
 import json
 import time
@@ -14,6 +14,7 @@ from database import (
 )
 from gateway import generate_txn_id, create_upi_link, get_qr_url, verify_payment
 from config import ORDER_FEE, WALLET_MIN, WALLET_MAX, GW_UPI_ID, GW_UPI_NAME
+from meesho import get_meesho_offer, search_meesho, get_meesho_product, send_otp, verify_otp, check_number
 
 app = Flask(__name__)
 
@@ -166,7 +167,9 @@ def api_place_order():
 @app.route("/api/wallet")
 def api_wallet():
     uid = get_uid()
-    user = get_user(uid)
+    if not uid:
+        return jsonify({"balance": 0, "transactions": []})
+    user = get_user(uid) or create_user(uid)
     txs = get_wallet_tx(uid)
     return jsonify({"balance": user.get("wallet", 0), "transactions": txs})
 
@@ -240,6 +243,119 @@ def api_admin_add_product():
         image=data.get("image_url", ""),
     )
     return jsonify({"ok": True, "product_id": pid})
+
+
+# ═══════════════════════════════════════════════════════════════
+# MEESHO API - FOD, Search, Product, OTP
+# ═══════════════════════════════════════════════════════════════
+
+_meesho_otp_sessions = {}
+_meesho_offer = None
+
+
+@app.route("/api/fod/roll")
+def api_fod_roll():
+    global _meesho_offer
+    result = get_meesho_offer()
+    if result.get("ok") and result.get("offer"):
+        _meesho_offer = result["offer"]
+    return jsonify(result)
+
+
+@app.route("/api/offers")
+def api_offers():
+    global _meesho_offer
+    if not _meesho_offer:
+        result = get_meesho_offer()
+        if result.get("ok") and result.get("offer"):
+            _meesho_offer = result["offer"]
+    return jsonify({"offer": _meesho_offer})
+
+
+@app.route("/api/search", methods=["POST"])
+def api_meesho_search():
+    data = request.json or {}
+    query = data.get("query", "").strip()
+    if not query:
+        return jsonify({"catalogs": []})
+    offer = _meesho_offer
+    result = search_meesho(query, offer=offer)
+    return jsonify(result or {"catalogs": []})
+
+
+@app.route("/api/product")
+def api_meesho_product():
+    pid = request.args.get("product_id", "")
+    if not pid:
+        return jsonify({"error": "no product_id"}), 400
+    offer = _meesho_offer
+    result = get_meesho_product(pid, offer=offer)
+    if result:
+        return jsonify(result)
+    return jsonify({"error": "not found"}), 404
+
+
+@app.route("/api/check_number", methods=["POST"])
+def api_check_number():
+    data = request.json or {}
+    phone = str(data.get("phone_number", ""))[-10:]
+    if len(phone) < 10:
+        return jsonify({"ok": False, "error": "Invalid number"})
+    result = check_number(phone)
+    return jsonify(result)
+
+
+@app.route("/api/auth/otp_send", methods=["POST"])
+def api_otp_send():
+    data = request.json or {}
+    phone = str(data.get("phone_number", ""))[-10:]
+    if len(phone) < 10:
+        return jsonify({"ok": False, "error": "Enter valid 10-digit number"})
+    result = send_otp(phone)
+    if result.get("ok") and result.get("session"):
+        _meesho_otp_sessions[phone] = result["session"]
+        return jsonify({"ok": True, "phone": phone, "live": True})
+    return jsonify({"ok": False, "error": result.get("error") or "OTP send failed"})
+
+
+@app.route("/api/auth/otp_verify", methods=["POST"])
+def api_otp_verify():
+    data = request.json or {}
+    phone = str(data.get("phone_number", ""))[-10:]
+    otp = str(data.get("otp", "")).strip()
+    session = _meesho_otp_sessions.get(phone)
+    if not session:
+        return jsonify({"ok": False, "error": "No pending OTP."})
+    result = verify_otp(phone, otp, session)
+    if result.get("ok"):
+        _meesho_otp_sessions.pop(phone, None)
+        acc = {
+            "id": str(int(time.time() * 1000))[-8:],
+            "mobile": phone,
+            "user_id": result.get("user_id"),
+            "xo": result.get("xo"),
+            "instance_id": result.get("instance_id"),
+            "is_first_order": True,
+            "order_placed": False,
+        }
+        return jsonify({"ok": True, "account": acc})
+    return jsonify({"ok": False, "error": result.get("error") or "Wrong OTP"})
+
+
+@app.route("/api/auth/me")
+def api_auth_me():
+    return jsonify({"ok": True, "user": None})
+
+
+@app.route("/api/fod/continue", methods=["POST"])
+def api_fod_continue():
+    data = request.json or {}
+    offer = data.get("offer")
+    if not offer:
+        return jsonify({"ok": False, "error": "No offer"})
+    global _meesho_offer
+    _meesho_offer = offer
+    return jsonify({"ok": True, "offer": offer})
 
 
 if __name__ == "__main__":

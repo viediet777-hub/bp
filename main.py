@@ -33,8 +33,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(uid) or create_user(uid, update.effective_user.first_name)
     wallet = user.get("wallet", 0)
 
-    # Mini App URL - Railway pe apna URL daalo
     WEBAPP_URL = os.environ.get("WEBAPP_URL", "http://localhost:5000")
+    https = WEBAPP_URL.startswith("https://")
 
     text = (
         f"🛍️ <b>WELCOME TO SHOP</b>\n"
@@ -42,13 +42,22 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💰 Wallet: <b>₹{wallet}</b>\n\n"
         f"👇 Mini App kholo ya neeche buttons dabao"
     )
-    rows = [
-        [InlineKeyboardButton("🛍️ Open Shop", web_app=WebAppInfo(url=WEBAPP_URL))],
-        [InlineKeyboardButton("🛒 My Cart", callback_data="cart"),
-         InlineKeyboardButton("📦 My Orders", callback_data="orders")],
-        [InlineKeyboardButton("👤 My Account", callback_data="account"),
-         InlineKeyboardButton("💰 Add Wallet", callback_data="wallet")],
-    ]
+    if https:
+        rows = [
+            [InlineKeyboardButton("🛍️ Open Shop", web_app=WebAppInfo(url=WEBAPP_URL))],
+            [InlineKeyboardButton("🛒 My Cart", callback_data="cart"),
+             InlineKeyboardButton("📦 My Orders", callback_data="orders")],
+            [InlineKeyboardButton("👤 My Account", callback_data="account"),
+             InlineKeyboardButton("💰 Add Wallet", callback_data="wallet")],
+        ]
+    else:
+        rows = [
+            [InlineKeyboardButton("🛒 My Cart", callback_data="cart"),
+             InlineKeyboardButton("📦 My Orders", callback_data="orders")],
+            [InlineKeyboardButton("👤 My Account", callback_data="account"),
+             InlineKeyboardButton("💰 Add Wallet", callback_data="wallet")],
+        ]
+        text += "\n\n⚠️ <i>Mini App needs HTTPS URL. Set WEBAPP_URL env var.</i>"
     await update.message.reply_text(
         text, parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(rows))
@@ -64,50 +73,49 @@ async def cb_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(uid) or create_user(uid, q.from_user.first_name)
     d = q.data
     WEBAPP_URL = os.environ.get("WEBAPP_URL", "http://localhost:5000")
+    https = WEBAPP_URL.startswith("https://")
 
     if d == "back":
-        await q.edit_message_text(
-            f"🛍️ <b>SHOP</b>\n💰 Wallet: ₹{user.get('wallet',0)}\n\n👇 Mini App kholo:",
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🛍️ Open Shop", web_app=WebAppInfo(url=WEBAPP_URL))],
-            ]))
+        msg = f"🛍️ <b>SHOP</b>\n💰 Wallet: ₹{user.get('wallet',0)}\n\n👇 Mini App kholo:"
+        btns = [[InlineKeyboardButton("🛍️ Open Shop", web_app=WebAppInfo(url=WEBAPP_URL))]] if https else []
+        await q.edit_message_text(msg, parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(btns))
 
     elif d == "cart":
-        await q.edit_message_text(
-            f"🛒 <b>My Cart</b>\n\nMini App mein dekho:",
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🛒 Open Cart", web_app=WebAppInfo(url=WEBAPP_URL + "#cart"))],
-                [InlineKeyboardButton("⬅️ Back", callback_data="back")],
-            ]))
+        if https:
+            btns = [[InlineKeyboardButton("🛒 Open Cart", web_app=WebAppInfo(url=WEBAPP_URL + "#cart"))]]
+        else:
+            btns = []
+        btns.append([InlineKeyboardButton("⬅️ Back", callback_data="back")])
+        await q.edit_message_text("🛒 <b>My Cart</b>\n\nMini App mein dekho:",
+            parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(btns))
 
     elif d == "orders":
-        await q.edit_message_text(
-            f"📦 <b>My Orders</b>\n\nMini App mein dekho:",
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📦 Open Orders", web_app=WebAppInfo(url=WEBAPP_URL + "#orders"))],
-                [InlineKeyboardButton("⬅️ Back", callback_data="back")],
-            ]))
+        if https:
+            btns = [[InlineKeyboardButton("📦 Open Orders", web_app=WebAppInfo(url=WEBAPP_URL + "#orders"))]]
+        else:
+            btns = []
+        btns.append([InlineKeyboardButton("⬅️ Back", callback_data="back")])
+        await q.edit_message_text("📦 <b>My Orders</b>\n\nMini App mein dekho:",
+            parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(btns))
 
     elif d == "account":
-        await q.edit_message_text(
-            f"👤 <b>My Account</b>\n\nMini App mein dekho:",
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("👤 Open Account", web_app=WebAppInfo(url=WEBAPP_URL + "#account"))],
-                [InlineKeyboardButton("⬅️ Back", callback_data="back")],
-            ]))
+        if https:
+            btns = [[InlineKeyboardButton("👤 Open Account", web_app=WebAppInfo(url=WEBAPP_URL + "#account"))]]
+        else:
+            btns = []
+        btns.append([InlineKeyboardButton("⬅️ Back", callback_data="back")])
+        await q.edit_message_text("👤 <b>My Account</b>\n\nMini App mein dekho:",
+            parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(btns))
 
     elif d == "wallet":
-        await q.edit_message_text(
-            f"💰 <b>Add Wallet</b>\n\nMini App mein karo:",
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💰 Open Wallet", web_app=WebAppInfo(url=WEBAPP_URL + "#wallet"))],
-                [InlineKeyboardButton("⬅️ Back", callback_data="back")],
-            ]))
+        if https:
+            btns = [[InlineKeyboardButton("💰 Open Wallet", web_app=WebAppInfo(url=WEBAPP_URL + "#wallet"))]]
+        else:
+            btns = []
+        btns.append([InlineKeyboardButton("⬅️ Back", callback_data="back")])
+        await q.edit_message_text("💰 <b>Add Wallet</b>\n\nMini App mein karo:",
+            parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(btns))
 
     await q.answer()
 
