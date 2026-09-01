@@ -27,6 +27,12 @@ from meesho import get_meesho_offer, search_meesho, get_meesho_product, send_otp
 app = Flask(__name__)
 
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+CORS(app, resources={r"/": {"origins": "*"}})
+
+@app.before_request
+def log_request():
+    import sys
+    print(f"[REQ] {request.method} {request.path} from {request.remote_addr}", flush=True, file=sys.stderr)
 
 
 def get_uid():
