@@ -1,0 +1,268 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Shop</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0f0f23;--card:#1a1a3e;--card2:#252550;--bdr:#2d2d5e;--tx:#e8e8f0;--tx2:#9999bb;--tx3:#666688;
+--pri:#7c5cfc;--pri2:#9b7dff;--pink:#ff6b9d;--cyan:#00d4aa;--gold:#ffd700;--red:#ff4757;--green:#2ed573;
+--grad:linear-gradient(135deg,#7c5cfc,#ff6b9d);--grad2:linear-gradient(135deg,#00d4aa,#7c5cfc);--r:16px;--sh:0 4px 20px rgba(0,0,0,.3)}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--tx)}
+body{overflow-x:hidden}
+.hdr{padding:20px 16px 14px;background:linear-gradient(180deg,#1a1a3e 0%,#0f0f23 100%);position:sticky;top:0;z-index:100;backdrop-filter:blur(20px)}
+.hdr-top{display:flex;justify-content:space-between;align-items:center}
+.logo{font-size:22px;font-weight:900;letter-spacing:-.5px}.logo span{background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hdr-sub{font-size:12px;color:var(--tx2);margin-top:2px}
+.wallet-pill{display:flex;align-items:center;gap:6px;background:var(--grad);padding:8px 14px;border-radius:20px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;transition:.2s}
+.wallet-pill:active{transform:scale(.95)}
+.tabs{display:flex;gap:4px;padding:10px 16px;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{padding:10px 16px;border-radius:12px;border:none;background:var(--card);color:var(--tx2);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:.2s;flex-shrink:0}
+.tab.active{background:var(--grad);color:#fff;box-shadow:0 4px 15px rgba(124,92,252,.4)}
+.tab .badge{background:var(--pink);color:#fff;font-size:10px;padding:1px 6px;border-radius:10px;margin-left:4px}
+.page{display:none;padding:12px 16px 80px;animation:fadeIn .3s}
+.page.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.card{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;margin-bottom:10px;transition:.2s}
+.card:active{transform:scale(.98)}
+.pcard{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden;transition:.2s;position:relative}
+.pcard:active{transform:scale(.97)}
+.pcard .img{width:100%;height:180px;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:48px}
+.pcard .bd{padding:14px}
+.pcard .nm{font-size:15px;font-weight:700;margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pcard .pr{font-size:18px;font-weight:800;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.pcard .stk{font-size:11px;color:var(--tx3);margin-top:2px}
+.pcard .stk.oos{color:var(--red)}
+.pcard .desc{font-size:12px;color:var(--tx2);margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.btn{display:block;width:100%;padding:14px;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;text-align:center;transition:.2s}
+.btn:active{transform:scale(.97)}
+.btn-pri{background:var(--grad);color:#fff;box-shadow:0 4px 15px rgba(124,92,252,.3)}
+.btn-green{background:linear-gradient(135deg,#2ed573,#00d4aa);color:#fff;box-shadow:0 4px 15px rgba(46,213,115,.3)}
+.btn-outline{background:transparent;border:2px solid var(--bdr);color:var(--tx)}
+.btn-danger{background:linear-gradient(135deg,#ff4757,#ff6b81);color:#fff}
+.btn-sm{padding:10px 16px;font-size:13px;width:auto;display:inline-block;border-radius:10px}
+.cart-item{display:flex;align-items:center;gap:12px;padding:14px;background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);margin-bottom:8px}
+.cart-item .emoji{font-size:32px;width:50px;text-align:center;flex-shrink:0}
+.cart-item .info{flex:1;min-width:0}
+.cart-item .nm{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cart-item .pr{font-size:15px;font-weight:800;color:var(--pri2)}
+.qty-box{display:flex;align-items:center;gap:10px;background:var(--card2);border-radius:10px;padding:4px}
+.qty-btn{width:32px;height:32px;border-radius:8px;border:none;background:var(--pri);color:#fff;font-size:16px;font-weight:700;cursor:pointer}
+.qty-num{font-size:15px;font-weight:700;min-width:20px;text-align:center}
+.summary{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;margin-top:12px}
+.sr{display:flex;justify-content:space-between;padding:6px 0;font-size:14px}
+.sr.total{font-size:18px;font-weight:800;border-top:1px solid var(--bdr);padding-top:10px;margin-top:6px}
+.sr.total span:last-child{background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.order-card{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;margin-bottom:10px}
+.order-top{display:flex;justify-content:space-between;align-items:center}
+.order-id{font-size:16px;font-weight:700}
+.status{padding:4px 10px;border-radius:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+.st-pending{background:rgba(255,215,0,.15);color:var(--gold)}
+.st-confirmed{background:rgba(46,213,115,.15);color:var(--green)}
+.st-delivered{background:rgba(0,212,170,.15);color:var(--cyan)}
+.order-items{font-size:13px;color:var(--tx2);margin-top:8px;line-height:1.6}
+.order-total{font-size:16px;font-weight:700;color:var(--pri2);margin-top:6px}
+.qr-box{text-align:center;padding:20px}
+.qr-box img{width:240px;height:240px;border-radius:var(--r);border:3px solid var(--bdr);box-shadow:var(--sh)}
+.qr-label{font-size:14px;color:var(--tx2);margin-top:12px}
+.qr-amt{font-size:28px;font-weight:900;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin:8px 0}
+.qr-upi{font-size:13px;color:var(--tx3);word-break:break-all;background:var(--card2);padding:8px 12px;border-radius:8px;margin-top:8px;display:inline-block}
+.amt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
+.amt-btn{padding:14px;border:2px solid var(--bdr);border-radius:12px;background:var(--card);color:var(--tx);font-size:16px;font-weight:700;cursor:pointer;text-align:center;transition:.2s}
+.amt-btn:active{border-color:var(--pri);background:rgba(124,92,252,.1);color:var(--pri2)}
+.amt-btn.gold{border-color:var(--gold);background:rgba(255,215,0,.08);color:var(--gold)}
+.tx-item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--bdr);font-size:13px}
+.tx-icon{font-size:20px;margin-right:8px}
+.empty{text-align:center;padding:50px 20px;color:var(--tx3)}
+.empty .big{font-size:48px;margin-bottom:12px}
+.empty .msg{font-size:15px;font-weight:600}
+.empty .sub{font-size:12px;margin-top:4px}
+.search-bar{display:flex;gap:8px;margin-bottom:12px}
+.search-bar input{flex:1;padding:12px 16px;border:2px solid var(--bdr);border-radius:12px;font-size:14px;background:var(--card);color:var(--tx);outline:none;transition:.2s}
+.search-bar input:focus{border-color:var(--pri)}
+.search-bar button{padding:12px 16px;border:none;border-radius:12px;background:var(--grad);color:#fff;font-size:14px;font-weight:600;cursor:pointer}
+.acc-field{background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.acc-field .lbl{font-size:12px;color:var(--tx3);margin-bottom:2px}
+.acc-field .val{font-size:15px;font-weight:600}
+.acc-field .edit{color:var(--pri2);font-size:13px;cursor:pointer}
+.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--card2);border:1px solid var(--bdr);border-radius:12px;padding:12px 20px;font-size:13px;font-weight:600;z-index:999;display:none;box-shadow:var(--sh)}
+.toast.show{display:block;animation:slideUp .3s}
+@keyframes slideUp{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.banner{background:var(--grad);border-radius:var(--r);padding:20px;margin-bottom:12px;position:relative;overflow:hidden}
+.banner::after{content:"";position:absolute;top:-50%;right:-20%;width:200px;height:200px;background:rgba(255,255,255,.1);border-radius:50%}
+.banner h2{font-size:18px;font-weight:800;color:#fff;margin-bottom:4px}
+.banner p{font-size:12px;color:rgba(255,255,255,.8)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.price-row{display:flex;align-items:baseline;gap:6px}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+<div class="hdr-top">
+<div><div class="logo">🛍️ My<span>Shop</span></div><div class="hdr-sub">Fast delivery, best prices</div></div>
+<div class="wallet-pill" onclick="showPage('wallet')">💰 <span id="walletAmt">₹0</span></div>
+</div>
+</div>
+
+<div class="tabs" id="tabBar">
+<button class="tab active" onclick="showPage('products')">🛍️ Shop</button>
+<button class="tab" onclick="showPage('cart')">🛒 Cart <span class="badge" id="cartBadge" style="display:none">0</span></button>
+<button class="tab" onclick="showPage('orders')">📦 Orders</button>
+<button class="tab" onclick="showPage('wallet')">💰 Wallet</button>
+<button class="tab" onclick="showPage('account')">👤 Account</button>
+</div>
+
+<div class="page active" id="page-products">
+<div class="banner"><h2>🔥 Welcome!</h2><p>Browse products, add to cart & order instantly</p></div>
+<div class="search-bar"><input type="text" id="searchInput" placeholder="🔍 Search products..."><button onclick="searchProducts()">Go</button></div>
+<div id="productGrid"></div>
+</div>
+
+<div class="page" id="page-cart">
+<div id="cartItems"></div>
+<div id="cartSummary"></div>
+</div>
+
+<div class="page" id="page-orders"><div id="orderList"></div></div>
+<div class="page" id="page-wallet"><div id="walletContent"></div></div>
+<div class="page" id="page-account"><div id="accountContent"></div></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const tg=window.Telegram.WebApp;
+tg.expand();
+const uid=tg.initDataUnsafe?.user?.id||0;
+const H={'Content-Type':'application/json','X-User-Id':uid};
+
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.className='toast show';setTimeout(()=>t.className='toast',2500)}
+async function api(u,m='GET',b=null){const o={method:m,headers:H};if(b)o.body=JSON.stringify(b);const r=await fetch(u,o);return r.json()}
+const emojis=['📱','👕','👗','👟','🎮','📚','🏠','⌚','🎒','💍','🎧','💄','🧸','⚽','🍳'];
+
+function showPage(n){
+document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+document.getElementById('page-'+n).classList.add('active');
+const tabs=document.querySelectorAll('.tab');
+const idx={products:0,cart:1,orders:2,wallet:3,account:4}[n];
+if(tabs[idx])tabs[idx].classList.add('active');
+if(n==='products')loadProducts();
+if(n==='cart')loadCart();
+if(n==='orders')loadOrders();
+if(n==='wallet')loadWallet();
+if(n==='account')loadAccount();
+}
+
+// ═══════ PRODUCTS ═══════
+async function loadProducts(q=''){
+const url=q?'/api/products?q='+encodeURIComponent(q):'/api/products';
+const products=await api(url);
+const el=document.getElementById('productGrid');
+if(!products.length){el.innerHTML='<div class="empty"><div class="big">📦</div><div class="msg">No products yet</div><div class="sub">Admin will add products soon!</div></div>';return}
+el.innerHTML='<div class="grid2">'+products.map((p,i)=>{
+const em=emojis[i%emojis.length];
+const oos=p.stock<=0;
+return '<div class="pcard" onclick="'+(oos?'':'addToCart('+p.id+')')+'"><div class="img">'+em+'</div><div class="bd"><div class="nm">'+p.name+'</div><div class="price-row"><div class="pr">₹'+p.price+'</div></div><div class="stk'+(oos?' oos':'')+'">'+(oos?'❌ Out of Stock':'✅ '+p.stock+' in stock')+'</div>'+(p.description?'<div class="desc">'+p.description+'</div>':'')+'</div></div>'
+}).join('')+'</div>';
+}
+
+function searchProducts(){const q=document.getElementById('searchInput').value.trim();loadProducts(q)}
+
+async function addToCart(pid){
+await api('/api/cart/add','POST',{product_id:pid,qty:1});
+toast('✅ Added to cart!');
+updateBadge();
+}
+
+// ═══════ CART ═══════
+async function loadCart(){
+const[cart,user]=await Promise.all([api('/api/cart'),api('/api/user')]);
+const el=document.getElementById('cartItems');
+const sel=document.getElementById('cartSummary');
+updateBadge();
+if(!cart.length){el.innerHTML='<div class="empty"><div class="big">🛒</div><div class="msg">Cart is empty</div><div class="sub">Browse products & add items!</div></div>';sel.innerHTML='';return}
+const sub=cart.reduce((s,c)=>s+c.price*c.qty,0);
+const total=sub+5;
+el.innerHTML=cart.map(c=>'<div class="cart-item"><div class="emoji">📦</div><div class="info"><div class="nm">'+c.name+'</div><div class="pr">₹'+c.price*c.qty+'</div></div><div class="qty-box"><button class="qty-btn" onclick="updateCart('+c.id+','+(c.qty-1)+')">−</button><span class="qty-num">'+c.qty+'</span><button class="qty-btn" onclick="updateCart('+c.id+','+(c.qty+1)+')">+</button></div></div>').join('');
+sel.innerHTML='<div class="summary"><div class="sr"><span>🛒 Subtotal</span><span>₹'+sub+'</span></div><div class="sr"><span>📋 Fee</span><span>₹5</span></div><div class="sr total"><span>💳 Total</span><span>₹'+total+'</span></div><div class="sr"><span>💰 Wallet</span><span>₹'+(user.wallet||0)+'</span></div><button class="btn btn-green" onclick="placeOrder()" style="margin-top:12px">🎉 Place Order</button></div>';
+}
+
+async function updateCart(cid,qty){await api('/api/cart/update','POST',{cart_id:cid,qty});loadCart();updateBadge()}
+
+async function placeOrder(){
+const r=await api('/api/orders/place','POST');
+if(r.ok){toast('🎉 Order #'+r.order_id+' placed!');loadCart();loadOrders();loadWallet();updateBadge()}
+else toast('❌ '+r.error);
+}
+
+async function updateBadge(){
+const cart=await api('/api/cart');
+const b=document.getElementById('cartBadge');
+if(cart.length){b.textContent=cart.length;b.style.display='inline'}else{b.style.display='none'}
+}
+
+// ═══════ ORDERS ═══════
+async function loadOrders(){
+const orders=await api('/api/orders');
+const el=document.getElementById('orderList');
+if(!orders.length){el.innerHTML='<div class="empty"><div class="big">📦</div><div class="msg">No orders yet</div><div class="sub">Place your first order!</div></div>';return}
+el.innerHTML=orders.map(o=>{
+const st={pending:'⏳','confirmed':'✅',delivered:'📦'}[o.status]||'❓';
+const stClass={pending:'st-pending','confirmed':'st-delivered',delivered:'st-confirmed'}[o.status]||'st-pending';
+return '<div class="order-card"><div class="order-top"><div class="order-id">#'+o.id+'</div><div class="status '+stClass+'">'+st+' '+o.status+'</div></div><div class="order-items">'+o.items+'</div><div class="order-total">₹'+o.total+'</div></div>';
+}).join('');
+}
+
+// ═══════ WALLET ═══════
+async function loadWallet(){
+const data=await api('/api/wallet');
+document.getElementById('walletAmt').textContent='₹'+data.balance;
+const el=document.getElementById('walletContent');
+el.innerHTML='<div style="text-align:center;padding:20px 0"><div style="font-size:14px;color:var(--tx2);margin-bottom:4px">💰 Balance</div><div style="font-size:42px;font-weight:900;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent">₹'+data.balance+'</div></div><div style="font-size:15px;font-weight:700;margin-bottom:10px">⚡ Quick Add</div><div class="amt-grid"><div class="amt-btn" onclick="createPay(5)">₹5</div><div class="amt-btn" onclick="createPay(10)">₹10</div><div class="amt-btn" onclick="createPay(25)">₹25</div><div class="amt-btn gold" onclick="createPay(50)">₹50</div><div class="amt-btn gold" onclick="createPay(100)">₹100</div><div class="amt-btn" onclick="customPay()">✏️</div></div><div id="payArea"></div><div style="font-size:15px;font-weight:700;margin:16px 0 8px">📜 Recent Transactions</div>'+(data.transactions||[]).slice(0,10).map(t=>'<div class="tx-item"><div><span class="tx-icon">'+(t.status==='completed'?'✅':'⏳')+'</span><span>₹'+t.amount+' '+(t.type==='credit'?'Credit':'Debit')+'</span></div><span style="color:var(--tx3)">'+t.status+'</span></div>').join('')||'<div class="empty" style="padding:20px"><div class="sub">No transactions yet</div></div>';
+}
+
+function customPay(){
+const v=prompt('Enter amount (₹5-₹500):');
+if(v)createPay(parseInt(v));
+}
+
+async function createPay(amount){
+amount=parseInt(amount);
+if(!amount||amount<5||amount>500){toast('❌ Amount ₹5-₹500 hona chahiye');return}
+const r=await api('/api/wallet/create','POST',{amount});
+if(!r.ok){toast('❌ Error');return}
+document.getElementById('payArea').innerHTML='<div class="card" style="text-align:center;margin-top:12px"><div class="qr-amt">₹'+r.amount+'</div><img src="'+r.qr_url+'" style="width:220px;border-radius:12px;border:2px solid var(--bdr)"><div class="qr-label">Scan QR ya copy UPI ID</div><div class="qr-upi">'+r.upi_id+'</div><div style="font-size:11px;color:var(--tx3);margin-top:6px">'+r.txn_id+'</div><button class="btn btn-green" onclick="verifyPay(\''+r.txn_id+'\')" style="margin-top:14px">✅ Payment Done - Verify</button></div>';
+}
+
+async function verifyPay(txnId){
+toast('⏳ Verifying...');
+const r=await api('/api/wallet/verify','POST',{txn_id:txnId});
+if(r.ok&&r.status==='completed'){toast('✅ ₹'+r.amount+' added!');loadWallet()}
+else toast('❌ Not verified yet. Try again.');
+}
+
+// ═══════ ACCOUNT ═══════
+async function loadAccount(){
+const user=await api('/api/user');
+document.getElementById('accountContent').innerHTML='<div class="card" style="text-align:center"><div style="font-size:48px;margin-bottom:8px">👤</div><div style="font-size:18px;font-weight:700">'+(user.name||'User')+'</div><div style="font-size:13px;color:var(--tx2)">@'+uid+'</div><div style="font-size:15px;font-weight:700;color:var(--pri2);margin-top:8px">💰 ₹'+(user.wallet||0)+'</div></div><div class="acc-field"><div><div class="lbl">📝 Name</div><div class="val">'+(user.name||'Not set')+'</div></div><div class="edit" onclick="editField(\'name\')">Edit</div></div><div class="acc-field"><div><div class="lbl">📱 Phone</div><div class="val">'+(user.phone||'Not set')+'</div></div><div class="edit" onclick="editField(\'phone\')">Edit</div></div><div class="acc-field"><div><div class="lbl">📍 Address</div><div class="val">'+(user.address||'Not set')+'</div></div><div class="edit" onclick="editField(\'address\')">Edit</div></div><div style="margin-top:16px"><button class="btn btn-danger" onclick="delAccount()">🗑️ Delete Account</button></div>';
+}
+
+function editField(f){const v=prompt('Enter '+f+':');if(v!==null)api('/api/user','POST',{[f]:v}).then(()=>{toast('✅ '+f+' updated!');loadAccount()})}
+
+async function delAccount(){if(confirm('Delete account? Sab data delete ho jayega.')){await api('/api/user/delete','POST');toast('🗑️ Deleted');tg.close()}}
+
+// ═══════ HASH ROUTING ═══════
+const hash=location.hash.replace('#','');
+if(hash&&{products:1,cart:1,orders:1,wallet:1,account:1}[hash])showPage(hash);
+
+// ═══════ INIT ═══════
+loadProducts();
+updateBadge();
+loadWallet();
+</script>
+</body>
+</html>
