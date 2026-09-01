@@ -3,8 +3,10 @@ app.py - Flask Backend for Mini App
 Products, Cart, Orders, Wallet, Meesho - sab API yahan se
 """
 import json
+import os
 import time
 from flask import Flask, render_template, request, jsonify
+from flask_cors import CORS
 from database import (
     get_user, create_user, update_user, delete_user, add_wallet, deduct_wallet,
     get_products, get_product, add_product, update_stock,
@@ -23,6 +25,8 @@ from config import ORDER_FEE, WALLET_MIN, WALLET_MAX, GW_UPI_ID, GW_UPI_NAME
 from meesho import get_meesho_offer, search_meesho, get_meesho_product, send_otp, verify_otp, check_number
 
 app = Flask(__name__)
+
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 
 def get_uid():
@@ -720,5 +724,40 @@ def api_address_default():
     return jsonify({"address": addr})
 
 
+# ═══════════════════════════════════════════════════════════════
+# TELEGRAM WEBHOOK
+# ═══════════════════════════════════════════════════════════════
+
+_bot_app = None
+
+def set_bot_app(bot_app):
+    global _bot_app
+    _bot_app = bot_app
+
+@app.route("/webhook", methods=["POST"])
+def telegram_webhook():
+    import asyncio
+    from flask import request as flask_request
+    if _bot_app is None:
+        return "Bot not ready", 503
+    update = Update.de_json(flask_request.get_json(force=True), _bot_app.bot)
+    asyncio.run(_bot_app.process_update(update))
+    return "OK", 200
+
+@app.route("/set_webhook", methods=["GET"])
+def set_webhook():
+    import asyncio
+    if _bot_app is None:
+        return jsonify({"error": "bot not ready"})
+    webhook_url = os.environ.get("WEBHOOK_URL", "").strip()
+    if not webhook_url:
+        return jsonify({"error": "WEBHOOK_URL env var not set"})
+    async def _set():
+        await _bot_app.bot.set_webhook(url=webhook_url + "/webhook", drop_pending_updates=True)
+    asyncio.run(_set())
+    return jsonify({"ok": True, "url": webhook_url + "/webhook"})
+
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)

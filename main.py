@@ -6,7 +6,6 @@ Mini App = shopping UI
 import json
 import logging
 import os
-import threading
 import time
 import urllib.parse
 
@@ -933,36 +932,41 @@ async def cb_toggle_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ═══════════════════════════════════════════════════════════════
-# FLASK IN BACKGROUND
-# ═══════════════════════════════════════════════════════════════
-
-def run_flask():
-    from app import app as flask_app
-    import os
-    port = int(os.environ.get("PORT", 5000))
-    flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-
-
-# ═══════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════
 
 def main():
-    print("Starting Bot + Mini App...")
+    print("Starting Bot + Mini App (webhook mode)...")
     print(f"Admin: {ADMIN_IDS}")
 
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    print("Flask running on port 5000")
+    import asyncio
 
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("addproduct", cmd_addproduct))
-    app.add_handler(CallbackQueryHandler(cb_router))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg_router))
+    bot_app = Application.builder().token(BOT_TOKEN).build()
+    bot_app.add_handler(CommandHandler("start", cmd_start))
+    bot_app.add_handler(CommandHandler("addproduct", cmd_addproduct))
+    bot_app.add_handler(CallbackQueryHandler(cb_router))
+    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg_router))
 
-    print("Bot running!")
-    app.run_polling(drop_pending_updates=True)
+    from app import app as flask_app, set_bot_app
+    set_bot_app(bot_app)
+
+    port = int(os.environ.get("PORT", 5000))
+
+    async def _post_init(_app):
+        await _app.bot.delete_webhook(drop_pending_updates=True)
+        webhook_url = os.environ.get("WEBHOOK_URL", "").strip()
+        if webhook_url:
+            await _app.bot.set_webhook(url=webhook_url + "/webhook", drop_pending_updates=True)
+            print(f"Webhook set: {webhook_url}/webhook")
+        else:
+            print("WARNING: WEBHOOK_URL not set! Bot updates won't work.")
+            print("Set WEBHOOK_URL in Railway env vars (e.g. https://cheerful-adaptation.up.railway.app)")
+
+    asyncio.run(bot_app.initialize())
+    asyncio.run(_post_init(bot_app))
+
+    print(f"Flask running on 0.0.0.0:{port}")
+    flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 
 if __name__ == "__main__":

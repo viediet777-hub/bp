@@ -1,6 +1,7 @@
 python-telegram-bot>=20.0
 requests
 flask
+flask-cors
 httpx
 cryptography
 flask-cors
