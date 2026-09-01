@@ -3,6 +3,7 @@ from pathlib import Path
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8812724251:AAFPMF3BcrF1drjCrzOL0OshDRfVWG1akU0")
 ADMIN_IDS = [int(x) for x in os.environ.get("ADMIN_IDS", "1364476174,8455570642").split(",")]
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://fancy-choux-03153e.netlify.app")
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"

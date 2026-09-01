@@ -5,7 +5,6 @@ Mini App = shopping UI
 """
 import json
 import logging
-import os
 import threading
 import time
 import urllib.parse
@@ -20,7 +19,7 @@ from telegram.ext import (
     ContextTypes, MessageHandler, filters,
 )
 
-from config import BOT_TOKEN, ADMIN_IDS, GW_UPI_ID, GW_UPI_NAME, WALLET_MIN, WALLET_MAX
+from config import BOT_TOKEN, ADMIN_IDS, GW_UPI_ID, GW_UPI_NAME, WALLET_MIN, WALLET_MAX, WEBAPP_URL
 from database import (
     get_user, create_user, get_all_orders, add_wallet,
     get_wallet_tx, create_wallet_tx,
@@ -81,7 +80,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("💳 Wallet History", callback_data="wallet_history")],
     ]
 
-    WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
     if WEBAPP_URL.startswith("https://"):
         rows.insert(0, [InlineKeyboardButton("🛍️ Open Shop", web_app=WebAppInfo(url=WEBAPP_URL))])
 
@@ -468,7 +466,6 @@ async def cb_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("👤 My Account", callback_data="account_menu")],
         [InlineKeyboardButton("💳 Wallet History", callback_data="wallet_history")],
     ]
-    WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
     if WEBAPP_URL.startswith("https://"):
         rows.insert(0, [InlineKeyboardButton("🛍️ Open Shop", web_app=WebAppInfo(url=WEBAPP_URL))])
     if is_admin(uid):
