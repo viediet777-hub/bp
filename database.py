@@ -46,6 +46,10 @@ def init_db():
             image TEXT DEFAULT '',
             source TEXT DEFAULT 'local',
             qty INTEGER DEFAULT 1,
+            supplier_id INTEGER DEFAULT 0,
+            variation_id INTEGER DEFAULT 0,
+            variation_name TEXT DEFAULT '',
+            mrp INTEGER DEFAULT 0,
             created_at REAL DEFAULT 0
         );
 
@@ -57,6 +61,9 @@ def init_db():
             fee INTEGER DEFAULT 0,
             status TEXT DEFAULT 'pending',
             address TEXT DEFAULT '',
+            meesho_order_num TEXT DEFAULT '',
+            payment_method TEXT DEFAULT 'COD',
+            meesho_amount INTEGER DEFAULT 0,
             created_at REAL DEFAULT 0
         );
 
@@ -118,6 +125,16 @@ def init_db():
         conn.execute("ALTER TABLE meesho_accounts ADD COLUMN instance_id TEXT DEFAULT ''")
     except Exception:
         pass
+    for col, tbl, default in [
+        ("supplier_id", "cart", "0"), ("variation_id", "cart", "0"),
+        ("variation_name", "cart", "''"), ("mrp", "cart", "0"),
+        ("meesho_order_num", "orders", "''"), ("payment_method", "orders", "'COD'"),
+        ("meesho_amount", "orders", "0"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {default}")
+        except Exception:
+            pass
     conn.commit()
     conn.close()
 
@@ -261,7 +278,8 @@ def get_cart(user_id):
     return result
 
 
-def add_to_cart(user_id, product_id, qty=1, name="", price=0, image="", source="local"):
+def add_to_cart(user_id, product_id, qty=1, name="", price=0, image="",
+                source="local", supplier_id=0, variation_id=0, variation_name="", mrp=0):
     conn = get_db()
     existing = conn.execute(
         "SELECT id, qty FROM cart WHERE user_id=? AND product_id=?",
@@ -270,8 +288,11 @@ def add_to_cart(user_id, product_id, qty=1, name="", price=0, image="", source="
         conn.execute("UPDATE cart SET qty=qty+? WHERE id=?", (qty, existing["id"]))
     else:
         conn.execute(
-            "INSERT INTO cart (user_id, product_id, name, price, image, source, qty, created_at) VALUES (?,?,?,?,?,?,?,?)",
-            (user_id, product_id, name, price, image, source, qty, time.time()))
+            """INSERT INTO cart (user_id, product_id, name, price, image, source, qty,
+               supplier_id, variation_id, variation_name, mrp, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (user_id, product_id, name, price, image, source, qty,
+             supplier_id, variation_id, variation_name, mrp, time.time()))
     conn.commit()
     conn.close()
 
@@ -295,11 +316,15 @@ def clear_cart(user_id):
 
 # ─── ORDERS ───
 
-def create_order(user_id, items, total, fee, address=""):
+def create_order(user_id, items, total, fee, address="", meesho_order_num="",
+                 payment_method="COD", meesho_amount=0):
     conn = get_db()
     conn.execute(
-        "INSERT INTO orders (user_id, items, total, fee, status, address, created_at) VALUES (?,?,?,?,?,?,?)",
-        (user_id, items, total, fee, "pending", address, time.time()))
+        """INSERT INTO orders (user_id, items, total, fee, status, address,
+           meesho_order_num, payment_method, meesho_amount, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (user_id, items, total, fee, "pending", address,
+         meesho_order_num, payment_method, meesho_amount, time.time()))
     conn.commit()
     oid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.close()

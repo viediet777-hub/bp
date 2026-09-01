@@ -446,6 +446,353 @@ def check_number_registered_sync(phone):
             return {"registered": True, "phone": phone}
         return {"registered": False, "phone": phone, "error": data.get("errorMessage", "")}
 
+# ============================================================ REAL MEESHO CART/CHECKOUT/ORDER API
+
+def logged_in_headers(acc, location=None):
+    """Build headers for logged-in Meesho API calls"""
+    phone = acc.get("phone", "")
+    uid = str(acc.get("user_id", ""))
+    instance_id = acc.get("instance_id", "")
+    xo = acc.get("xo", "")
+    h = _api_headers(instance_id, xo, "logged_in",
+                     session_id=acc.get("app_session_id") or uuid.uuid4().hex,
+                     ua="Cronet")
+    h["app-version"] = acc.get("app_version") or "29.1"
+    h["app-version-code"] = acc.get("app_version_code") or "858"
+    h["app-sdk-version"] = "31"
+    h["app-user-id"] = uid
+    h["shield-session-id"] = acc.get("shield_session_id") or ""
+    h["accept-encoding"] = "gzip"
+    if phone:
+        h["u-token"] = base64.b64encode(("+91" + phone).encode()).decode()
+    if location:
+        h["app-user-location"] = base64.b64encode(json.dumps(location).encode()).decode()
+    else:
+        h["app-user-location"] = base64.b64encode(json.dumps({
+            "lat": "22.7196", "long": "75.8577", "pincode": "452001",
+            "city": "indore", "address_id": ""
+        }).encode()).decode()
+    return h
+
+
+def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, cart_session=None):
+    """Add product to real Meesho cart via /api/1.0/cart/add"""
+    body = {
+        "context": "pdp",
+        "identifier": "buy_now",
+        "cart_session": cart_session,
+        "replaceable": False,
+        "items": [{
+            "identifier": "buy_now",
+            "product_id": int(product_id),
+            "supplier_id": int(supplier_id) if supplier_id else None,
+            "variation_id": variation_id,
+            "variation": variation,
+            "quantity": int(qty),
+            "selected_price_type_id": "premium_return_price",
+            "client_metadata": None,
+        }],
+        "address_id": None,
+        "user_id": int(acc.get("user_id", 0)),
+    }
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.post(f"{MEESHO_API}/1.0/cart/add",
+                               headers=logged_in_headers(acc), json=body)
+            data = resp.json() or {}
+            if data.get("success"):
+                result = data.get("result", {})
+                return {
+                    "ok": True,
+                    "cart_session": data.get("cart_session"),
+                    "effective_total": result.get("effective_total"),
+                    "effective_total_for_upi_plugin": result.get("effective_total_for_upi_plugin"),
+                    "total_quantity": result.get("total_quantity"),
+                    "splits": result.get("splits", []),
+                    "price_break_up": result.get("price_break_up", []),
+                }
+            return {"ok": False, "error": data.get("error_type", "cart_add_failed"), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def real_cart_review(acc, cart_session=None):
+    """Get real Meesho cart review via /api/9.0/cart"""
+    body = {
+        "context": "review",
+        "identifier": "buy_now",
+        "cart_session": cart_session,
+        "dest_pin": None, "address_id": None,
+        "payment_modes": None,
+        "replaceable": None, "item": None,
+        "payment_instrument": None, "bank_offers": None,
+        "filter_products": None, "is_self_pickup": None,
+        "self_pickup_address": None, "is_emi": None,
+        "user_id": int(acc.get("user_id", 0)),
+    }
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.post(f"{MEESHO_API}/9.0/cart",
+                               headers=logged_in_headers(acc), json=body)
+            data = resp.json() or {}
+            if data.get("success"):
+                result = data.get("result", {})
+                return {
+                    "ok": True,
+                    "cart_session": data.get("cart_session"),
+                    "effective_total": result.get("effective_total"),
+                    "total_quantity": result.get("total_quantity"),
+                    "items": result.get("items", []),
+                    "splits": result.get("splits", []),
+                }
+            return {"ok": False, "error": data.get("error_type", "review_failed"), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def real_cart_remove(acc, item_identifier, cart_session):
+    """Remove item from real Meesho cart"""
+    body = {
+        "context": "atc_cart_v2",
+        "identifier": "default",
+        "cart_session": cart_session,
+        "item": {"identifier": item_identifier},
+        "user_id": int(acc.get("user_id", 0)),
+    }
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.post(f"{MEESHO_API}/1.0/cart/remove",
+                               headers=logged_in_headers(acc), json=body)
+            data = resp.json() or {}
+            return {"ok": data.get("success", False), "cart_session": data.get("cart_session")}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def real_cart_clear(acc, cart_session):
+    """Clear all items from real Meesho cart"""
+    review = real_cart_review(acc, cart_session)
+    if not review.get("ok"):
+        return review
+    cs = review.get("cart_session", cart_session)
+    for item in review.get("items", []):
+        ident = item.get("identifier")
+        if ident:
+            r = real_cart_remove(acc, ident, cs)
+            if r.get("cart_session"):
+                cs = r["cart_session"]
+    return {"ok": True, "cart_session": cs}
+
+
+def real_bind_address(acc, cart_session, address_id, dest_pin=None):
+    """Bind address to cart via /api/1.0/cart/location"""
+    body = {
+        "context": "review",
+        "identifier": "buy_now",
+        "cart_session": cart_session,
+        "dest_pin": dest_pin,
+        "address_id": int(address_id),
+        "customerAmount": None,
+        "payment_modes": None,
+        "replaceable": None,
+        "item": None,
+        "payment_instrument": None,
+        "bank_offers": None,
+        "filter_products": None,
+        "is_self_pickup": None,
+        "self_pickup_address": None,
+        "is_emi": None,
+        "user_id": int(acc.get("user_id", 0)),
+    }
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.post(f"{MEESHO_API}/1.0/cart/location",
+                               headers=logged_in_headers(acc), json=body)
+            data = resp.json() or {}
+            return {"ok": data.get("success", False), "cart_session": data.get("cart_session")}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def real_paymentinfo(acc, cart_session, payment_modes=None):
+    """Get payment info via /api/1.0/cart/paymentinfo"""
+    body = {
+        "context": "payment_summary",
+        "identifier": "buy_now",
+        "cart_session": cart_session,
+        "dest_pin": None,
+        "address_id": None,
+        "customerAmount": None,
+        "payment_modes": payment_modes or ["cod"],
+        "replaceable": None,
+        "item": None,
+        "payment_instrument": None,
+        "bank_offers": None,
+        "filter_products": None,
+        "is_self_pickup": None,
+        "self_pickup_address": None,
+        "is_emi": None,
+        "user_id": int(acc.get("user_id", 0)),
+    }
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.post(f"{MEESHO_API}/1.0/cart/paymentinfo",
+                               headers=logged_in_headers(acc), json=body)
+            data = resp.json() or {}
+            if data.get("success"):
+                result = data.get("result", {})
+                return {
+                    "ok": True,
+                    "effective_total": result.get("effective_total"),
+                    "effective_total_for_upi_plugin": result.get("effective_total_for_upi_plugin"),
+                    "effective_total_with_ppd": result.get("effective_total_with_ppd"),
+                    "effective_total_without_ppd": result.get("effective_total_without_ppd"),
+                    "payment_details": result.get("payment_details", {}),
+                    "cart_session": data.get("cart_session"),
+                }
+            return {"ok": False, "error": data.get("error_type", "paymentinfo_failed"), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def real_address_create(acc, name, mobile, pin, city, state, line1, line2="", landmark="", addr_type="Home"):
+    """Create address on Meesho via /api/2.0/addresses"""
+    body = {
+        "alternative_mobile": None,
+        "pin": str(pin),
+        "address_type": addr_type,
+        "city": city,
+        "name": name,
+        "mobile": mobile,
+        "address_line_1": line1,
+        "address_line_2": line2,
+        "state": state,
+        "id": 0,
+        "landmark": landmark,
+        "coordinates": {"latitude": "0", "longitude": "0", "accuracy": "41"},
+        "country_id": 1,
+        "user_id": int(acc.get("user_id", 0)),
+    }
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.post(f"{MEESHO_API}/2.0/addresses?context=cart&cart_identifier=default",
+                               headers=logged_in_headers(acc), json=body)
+            data = resp.json() or {}
+            addr = data.get("address", {})
+            if addr.get("id"):
+                return {"ok": True, "meesho_address_id": addr["id"], "address": addr}
+            return {"ok": False, "error": data.get("error_type", "address_create_failed"), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def real_preorder(acc, cart_session, address_id, payment_method="COD",
+                  customer_amount=None, payment_aggregator=None):
+    """Place real order via /api/4.0/preorders"""
+    is_upi = payment_method.upper() in ("UPI", "PREPAID")
+    body = {
+        "payment_method_type": payment_method.upper() if payment_method.upper() != "PREPAID" else "UPI",
+        "identifier": "buy_now",
+        "payment_aggregator": payment_aggregator or ("JUSPAY" if is_upi else None),
+        "is_selling_to_customer": False,
+        "cart_session": cart_session,
+        "vpa": None,
+        "address_id": int(address_id),
+        "direct_wallet_token": None,
+        "customer_amount": customer_amount,
+        "upi_package_name": "com.google.android.apps.nbu.paisa.user" if is_upi else None,
+        "payment_flow_type": "qr" if is_upi else None,
+        "sender_id": -1,
+        "accurate_location": json.dumps({"lat": "22.7196", "long": "75.8577"}),
+        "card_token": None,
+        "payment_provider": "JUSPAY" if is_upi else None,
+        "processor_id": "in.juspay.hyperapi" if is_upi else None,
+        "payment_method": "UPI" if is_upi else "COD",
+        "enable_price_unbundling": True,
+        "user_id": int(acc.get("user_id", 0)),
+    }
+    try:
+        with httpx.Client(timeout=25.0) as client:
+            resp = client.post(f"{MEESHO_API}/4.0/preorders",
+                               headers=logged_in_headers(acc), json=body)
+            data = resp.json() or {}
+            order_num = data.get("order_num")
+            qr_params = data.get("qr_transaction_params", {})
+            if order_num:
+                return {
+                    "ok": True,
+                    "order_num": order_num,
+                    "juspay_order_id": data.get("juspay_order_id"),
+                    "qr_base64": qr_params.get("payload", {}).get("qr_base64_string"),
+                    "upi_intent_url": qr_params.get("payload", {}).get("upi_intent_url"),
+                    "payment_url": data.get("payment_url"),
+                    "raw": data,
+                }
+            return {"ok": False, "error": data.get("error_type", "order_failed"),
+                    "message": data.get("message", ""), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def real_payment_status(acc, juspay_order_id):
+    """Check payment status via /api/v3/payments/{id}/status"""
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(f"{MEESHO_API}/v3/payments/{juspay_order_id}/status",
+                              params={"sync": "true"},
+                              headers=logged_in_headers(acc))
+            data = resp.json() or {}
+            return {"ok": True, "status": data.get("status", "UNKNOWN"), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def real_preorder_status(acc, order_num, cart_session):
+    """Check preorder status via /api/1.0/preorders/payments/status"""
+    body = {
+        "pre_order_id": -1,
+        "is_selling_to_customer": False,
+        "order_num": order_num,
+        "retry_in_sec": 0,
+        "cart_session": cart_session,
+        "user_id": int(acc.get("user_id", 0)),
+    }
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.post(f"{MEESHO_API}/1.0/preorders/payments/status",
+                               headers=logged_in_headers(acc), json=body)
+            data = resp.json() or {}
+            return {"ok": True, "status": data.get("status", "UNKNOWN"), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def real_payment_options(acc, cart_session, order_total=0):
+    """Get payment options via /api/v1/list/payment-options"""
+    body = {
+        "payment_identifier": "checkout",
+        "checkout_identifier": "buy_now",
+        "cart_session": cart_session or "",
+        "sms_id": None,
+        "order_total": order_total,
+        "available_upi_apps": [],
+        "skip_bnpl_eligibility": True,
+        "user_id": int(acc.get("user_id", 0)),
+    }
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            h = logged_in_headers(acc)
+            h["line-of-business"] = "MEESHO_MARKETPLACE"
+            resp = client.post(f"{MEESHO_API}/v1/list/payment-options",
+                               headers=h, json=body)
+            data = resp.json() or {}
+            return {"ok": True, "options": data.get("payment_options", []),
+                    "auth_token": data.get("client_auth_token"),
+                    "merchant_id": data.get("merchant_id"), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # ============================================================ PUBLIC API
 def get_meesho_offer():
     return roll_fod_sync()
@@ -474,3 +821,14 @@ def check_number(phone):
         return check_number_registered_sync(phone)
     except Exception as e:
         return {"registered": False, "phone": phone, "error": str(e)}
+
+
+# Expose real Meesho API functions
+__all__ = [
+    "get_meesho_offer", "search_meesho", "get_meesho_product",
+    "send_otp", "verify_otp", "check_number",
+    "logged_in_headers", "real_cart_add", "real_cart_review", "real_cart_remove",
+    "real_cart_clear", "real_bind_address", "real_paymentinfo",
+    "real_address_create", "real_preorder", "real_payment_status",
+    "real_preorder_status", "real_payment_options",
+]

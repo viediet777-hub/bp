@@ -22,7 +22,12 @@ from database import (
 )
 from gateway import generate_txn_id, create_upi_link, get_qr_url, verify_payment
 from config import ORDER_FEE, WALLET_MIN, WALLET_MAX, GW_UPI_ID, GW_UPI_NAME
-from meesho import get_meesho_offer, search_meesho, get_meesho_product, send_otp, verify_otp, check_number
+from meesho import (
+    get_meesho_offer, search_meesho, get_meesho_product, send_otp, verify_otp, check_number,
+    real_cart_add, real_cart_review, real_cart_clear, real_bind_address,
+    real_paymentinfo, real_address_create, real_preorder, real_payment_status,
+    real_preorder_status, real_payment_options,
+)
 
 app = Flask(__name__)
 
@@ -151,7 +156,13 @@ def api_cart_add():
     price = int(data.get("price", 0))
     image = data.get("image", "")
     source = data.get("source", "local")
-    add_to_cart(uid, pid, qty, name=name, price=price, image=image, source=source)
+    supplier_id = int(data.get("supplier_id", 0))
+    variation_id = int(data.get("variation_id", 0))
+    variation_name = data.get("variation_name", "Free Size")
+    mrp = int(data.get("mrp", price))
+    add_to_cart(uid, pid, qty, name=name, price=price, image=image, source=source,
+                supplier_id=supplier_id, variation_id=variation_id,
+                variation_name=variation_name, mrp=mrp)
     return jsonify({"ok": True})
 
 
@@ -192,36 +203,184 @@ def api_place_order():
     if not cart:
         return jsonify({"error": "cart empty"}), 400
 
+    data = request.json or {}
+    payment_method = data.get("payment_method", "COD").upper()
+    address_id = data.get("address_id")
+
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"error": "no meesho account linked. Login first."}), 400
+
+    addr = None
+    if address_id:
+        addr = get_address(address_id)
+    if not addr:
+        addr = get_default_address(uid)
+    if not addr:
+        return jsonify({"error": "no address found. Add address first."}), 400
+
+    subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
+    user_mode = (user.get("mode") or "paid") if user else "paid"
+    fee = 0 if user_mode == "free" else ORDER_FEE
+    our_total = subtotal + fee
+    w = user.get("wallet", 0)
+
+    if user_mode == "paid":
+        if w < our_total:
+            return jsonify({"error": "insufficient wallet", "needed": our_total - w, "balance": w}), 400
+        deduct_wallet(uid, our_total)
+
+    sync_addr = real_address_create(acc, addr.get("name", ""), addr.get("mobile", ""),
+                                    addr.get("pin", ""), addr.get("city", ""),
+                                    addr.get("state", ""), addr.get("address_line_1", ""),
+                                    addr.get("address_line_2", ""),
+                                    addr.get("landmark", ""), addr.get("address_type", "Home"))
+    meesho_addr_id = sync_addr.get("meesho_address_id")
+
+    cart_session = None
+    real_cart_clear(acc, cart_session)
+
+    for c in cart:
+        r = real_cart_add(acc, c.get("product_id"), c.get("supplier_id"),
+                         c.get("variation_id"), c.get("variation_name", "Free Size"),
+                         c.get("qty", 1), cart_session)
+        if r.get("ok"):
+            cart_session = r.get("cart_session")
+        else:
+            if user_mode == "paid":
+                add_wallet(uid, our_total)
+            return jsonify({"error": f"Meesho cart add failed: {r.get('error')}", "details": r}), 400
+
+    if meesho_addr_id:
+        bind_r = real_bind_address(acc, cart_session, meesho_addr_id, addr.get("pin"))
+        if bind_r.get("cart_session"):
+            cart_session = bind_r["cart_session"]
+
+    if payment_method == "UPI":
+        pay_modes = ["juspay"]
+    else:
+        pay_modes = ["cod"]
+    payinfo = real_paymentinfo(acc, cart_session, pay_modes)
+    if payinfo.get("ok"):
+        cart_session = payinfo.get("cart_session", cart_session)
+
+    meesho_amount = payinfo.get("effective_total", subtotal)
+
+    order_r = real_preorder(acc, cart_session, meesho_addr_id,
+                            payment_method=payment_method,
+                            customer_amount=meesho_amount)
+
+    if not order_r.get("ok"):
+        if user_mode == "paid":
+            add_wallet(uid, our_total)
+        return jsonify({"error": f"Order failed: {order_r.get('error')}",
+                        "message": order_r.get("message", ""), "details": order_r}), 400
+
+    meesho_order_num = order_r.get("order_num", "")
+    items_str = ", ".join([f"{c.get('name', '?')}x{c.get('qty', 1)}" for c in cart])
+    oid = create_order(uid, items_str, our_total, fee, addr.get("address_line_1", ""),
+                       meesho_order_num=meesho_order_num, payment_method=payment_method,
+                       meesho_amount=meesho_amount)
+
+    clear_cart(uid)
+
+    return jsonify({
+        "ok": True, "order_id": oid, "meesho_order_num": meesho_order_num,
+        "total": our_total, "meesho_amount": meesho_amount,
+        "payment_method": payment_method, "mode": user_mode,
+        "qr_base64": order_r.get("qr_base64"),
+        "upi_intent_url": order_r.get("upi_intent_url"),
+        "payment_url": order_r.get("payment_url"),
+    })
+
+
+# ═══════════════════════════════════════════════════════════════
+# CHECKOUT API - Real Meesho pricing
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/checkout/summary")
+def api_checkout_summary():
+    uid = get_uid()
+    cart = get_cart(uid)
+    user = get_user(uid)
+    if not cart:
+        return jsonify({"error": "cart empty"}), 400
+
     subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
     user_mode = (user.get("mode") or "paid") if user else "paid"
     fee = 0 if user_mode == "free" else ORDER_FEE
     total = subtotal + fee
-    w = user.get("wallet", 0)
+    balance = user.get("wallet", 0) if user else 0
 
-    # Free mode: skip wallet check, place order free
-    if user_mode == "free":
-        pass  # No wallet deduction in free mode
-    else:
-        if w < total:
-            return jsonify({"error": "insufficient wallet", "needed": total - w, "balance": w}), 400
-        deduct_wallet(uid, total)
+    addr = get_default_address(uid)
+    acc = get_active_meesho_account(uid)
 
+    cod_amount = subtotal
+    upi_amount = subtotal
+    payinfo_ok = False
+
+    if acc:
+        cart_session = None
+        real_cart_clear(acc, cart_session)
+        for c in cart:
+            r = real_cart_add(acc, c.get("product_id"), c.get("supplier_id"),
+                             c.get("variation_id"), c.get("variation_name", "Free Size"),
+                             c.get("qty", 1), cart_session)
+            if r.get("ok"):
+                cart_session = r.get("cart_session")
+        if addr:
+            meesho_addr_id = None
+            sync_addr = real_address_create(acc, addr.get("name", ""), addr.get("mobile", ""),
+                                            addr.get("pin", ""), addr.get("city", ""),
+                                            addr.get("state", ""), addr.get("address_line_1", ""),
+                                            addr.get("address_line_2", ""),
+                                            addr.get("landmark", ""), addr.get("address_type", "Home"))
+            meesho_addr_id = sync_addr.get("meesho_address_id")
+            if meesho_addr_id:
+                real_bind_address(acc, cart_session, meesho_addr_id, addr.get("pin"))
+
+        pay_cod = real_paymentinfo(acc, cart_session, ["cod"])
+        if pay_cod.get("ok"):
+            cod_amount = pay_cod.get("effective_total", subtotal)
+            cart_session = pay_cod.get("cart_session", cart_session)
+            payinfo_ok = True
+
+        pay_upi = real_paymentinfo(acc, cart_session, ["juspay"])
+        if pay_upi.get("ok"):
+            upi_amount = pay_upi.get("effective_total", subtotal)
+            payinfo_ok = True
+
+    return jsonify({
+        "items": cart,
+        "subtotal": subtotal,
+        "fee": fee,
+        "total": total,
+        "cod_amount": cod_amount,
+        "upi_amount": upi_amount,
+        "balance": balance,
+        "mode": user_mode,
+        "address": addr,
+        "account": {"phone": acc.get("phone"), "user_id": acc.get("user_id")} if acc else None,
+        "payinfo_ok": payinfo_ok,
+    })
+
+
+@app.route("/api/payment/status", methods=["POST"])
+def api_payment_status():
+    uid = get_uid()
     data = request.json or {}
-    addr_text = data.get("address", "")
-    if not addr_text:
-        default_addr = get_default_address(uid)
-        if default_addr:
-            addr_text = f"{default_addr.get('name','')}, {default_addr.get('address_line_1','')}, {default_addr.get('city','')}, {default_addr.get('state','')} - {default_addr.get('pin','')}"
-
-    items_str = ", ".join([f"{c.get('name','?')}x{c.get('qty',1)}" for c in cart])
-    oid = create_order(uid, items_str, total, fee, addr_text)
-
-    for c in cart:
-        if c.get("product_id"):
-            update_stock(c["product_id"], c.get("qty", 1))
-    clear_cart(uid)
-
-    return jsonify({"ok": True, "order_id": oid, "total": total, "mode": user_mode})
+    order_num = data.get("order_num")
+    juspay_id = data.get("juspay_order_id")
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"ok": False, "error": "no account"})
+    if juspay_id:
+        r = real_payment_status(acc, juspay_id)
+    elif order_num:
+        r = real_preorder_status(acc, order_num, data.get("cart_session", ""))
+    else:
+        return jsonify({"ok": False, "error": "no order reference"})
+    return jsonify(r)
 
 
 # ═══════════════════════════════════════════════════════════════
