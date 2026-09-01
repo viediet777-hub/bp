@@ -724,40 +724,6 @@ def api_address_default():
     return jsonify({"address": addr})
 
 
-# ═══════════════════════════════════════════════════════════════
-# TELEGRAM WEBHOOK
-# ═══════════════════════════════════════════════════════════════
-
-_bot_app = None
-
-def set_bot_app(bot_app):
-    global _bot_app
-    _bot_app = bot_app
-
-@app.route("/webhook", methods=["POST"])
-def telegram_webhook():
-    import asyncio
-    from flask import request as flask_request
-    if _bot_app is None:
-        return "Bot not ready", 503
-    update = Update.de_json(flask_request.get_json(force=True), _bot_app.bot)
-    asyncio.run(_bot_app.process_update(update))
-    return "OK", 200
-
-@app.route("/set_webhook", methods=["GET"])
-def set_webhook():
-    import asyncio
-    if _bot_app is None:
-        return jsonify({"error": "bot not ready"})
-    webhook_url = os.environ.get("WEBHOOK_URL", "").strip()
-    if not webhook_url:
-        return jsonify({"error": "WEBHOOK_URL env var not set"})
-    async def _set():
-        await _bot_app.bot.set_webhook(url=webhook_url + "/webhook", drop_pending_updates=True)
-    asyncio.run(_set())
-    return jsonify({"ok": True, "url": webhook_url + "/webhook"})
-
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
