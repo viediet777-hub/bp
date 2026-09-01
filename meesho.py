@@ -266,9 +266,18 @@ def meesho_product_sync(product_id, offer=None):
             images = [im.get("url") if isinstance(im, dict) else str(im) for im in imgs[:6] if im]
             sizes = []
             for it in (sup.get("inventory") or []):
-                name = it.get("variation_name") or it.get("variation")
-                if name:
-                    sizes.append({"name": name, "id": it.get("variation_id")})
+                raw_name = it.get("variation_name") or it.get("variation") or ""
+                if isinstance(raw_name, dict):
+                    name = str(raw_name.get("name") or raw_name.get("size") or raw_name.get("value") or "")
+                else:
+                    name = str(raw_name)
+                raw_vid = it.get("variation_id") or it.get("id")
+                if isinstance(raw_vid, dict):
+                    vid = raw_vid.get("id")
+                else:
+                    vid = raw_vid
+                if name.strip():
+                    sizes.append({"name": name.strip(), "id": vid})
             fod_price, sav, pct = _apply_fod(final, offer)
             return {"product_id": int(p.get("id") or product_id), "name": p.get("name") or "Product",
                 "price": fod_price, "fod_price": fod_price if fod_price != final else None, "fod_savings": sav,
@@ -517,10 +526,10 @@ def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, 
 
 
 def real_cart_review(acc, cart_session=None):
-    """Get real Meesho cart review via /api/9.0/cart"""
+    """Get real Meesho cart review via /api/8.0/cart (default flow)"""
     body = {
-        "context": "review",
-        "identifier": "buy_now",
+        "context": "atc_cart_v2",
+        "identifier": "default",
         "cart_session": cart_session,
         "dest_pin": None, "address_id": None,
         "payment_modes": None,
@@ -532,7 +541,7 @@ def real_cart_review(acc, cart_session=None):
     }
     try:
         with httpx.Client(timeout=20.0) as client:
-            resp = client.post(f"{MEESHO_API}/9.0/cart",
+            resp = client.post(f"{MEESHO_API}/8.0/cart",
                                headers=logged_in_headers(acc), json=body)
             data = resp.json() or {}
             if data.get("success"):
@@ -584,11 +593,25 @@ def real_cart_clear(acc, cart_session):
     return {"ok": True, "cart_session": cs}
 
 
+def real_cart_sync(acc, local_items, cart_session=None):
+    """Reconcile local cart items into real Meesho cart. Returns latest cart_session."""
+    cs = cart_session
+    for c in local_items:
+        pid = c.get("product_id")
+        if not pid:
+            continue
+        r = real_cart_add(acc, pid, c.get("supplier_id"), c.get("variation_id"),
+                          c.get("variation_name") or "Free Size", c.get("qty", 1), cs)
+        if r.get("ok"):
+            cs = r.get("cart_session", cs)
+    return {"ok": True, "cart_session": cs}
+
+
 def real_bind_address(acc, cart_session, address_id, dest_pin=None):
-    """Bind address to cart via /api/1.0/cart/location"""
+    """Bind address to cart via /api/1.0/cart/location (default flow)"""
     body = {
-        "context": "review",
-        "identifier": "buy_now",
+        "context": "atc_cart_v2",
+        "identifier": "default",
         "cart_session": cart_session,
         "dest_pin": dest_pin,
         "address_id": int(address_id),
@@ -615,16 +638,16 @@ def real_bind_address(acc, cart_session, address_id, dest_pin=None):
 
 
 def real_paymentinfo(acc, cart_session, payment_modes=None):
-    """Get payment info via /api/1.0/cart/paymentinfo"""
+    """Get payment info via /api/1.0/cart/paymentinfo (atc_payment_summary flow)"""
     body = {
-        "context": "payment_summary",
-        "identifier": "buy_now",
+        "context": "atc_payment_summary",
+        "identifier": "default",
         "cart_session": cart_session,
         "dest_pin": None,
         "address_id": None,
         "customerAmount": None,
         "payment_modes": payment_modes or ["cod"],
-        "replaceable": None,
+        "replaceable": False,
         "item": None,
         "payment_instrument": None,
         "bank_offers": None,
@@ -828,7 +851,7 @@ __all__ = [
     "get_meesho_offer", "search_meesho", "get_meesho_product",
     "send_otp", "verify_otp", "check_number",
     "logged_in_headers", "real_cart_add", "real_cart_review", "real_cart_remove",
-    "real_cart_clear", "real_bind_address", "real_paymentinfo",
+    "real_cart_clear", "real_cart_sync", "real_bind_address", "real_paymentinfo",
     "real_address_create", "real_preorder", "real_payment_status",
     "real_preorder_status", "real_payment_options",
 ]

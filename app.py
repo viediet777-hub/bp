@@ -19,12 +19,13 @@ from database import (
     get_addresses, get_address, create_address, update_address,
     delete_address, set_default_address, get_default_address,
     toggle_user_mode, get_user_mode, get_order_count,
+    get_cart_session, set_cart_session,
 )
 from gateway import generate_txn_id, create_upi_link, get_qr_url, verify_payment
-from config import ORDER_FEE, WALLET_MIN, WALLET_MAX, GW_UPI_ID, GW_UPI_NAME
+from config import ORDER_FEE, WALLET_MIN, WALLET_MAX, GW_UPI_ID, GW_UPI_NAME, ADMIN_IDS
 from meesho import (
     get_meesho_offer, search_meesho, get_meesho_product, send_otp, verify_otp, check_number,
-    real_cart_add, real_cart_review, real_cart_clear, real_bind_address,
+    real_cart_add, real_cart_review, real_cart_clear, real_cart_sync, real_bind_address,
     real_paymentinfo, real_address_create, real_preorder, real_payment_status,
     real_preorder_status, real_payment_options,
 )
@@ -102,6 +103,8 @@ def api_toggle_mode():
     uid = get_uid()
     if not uid:
         return jsonify({"ok": False, "error": "login required"})
+    if uid not in ADMIN_IDS:
+        return jsonify({"ok": False, "error": "admin only"})
     new_mode = toggle_user_mode(uid)
     return jsonify({"ok": True, "mode": new_mode})
 
@@ -163,6 +166,13 @@ def api_cart_add():
     add_to_cart(uid, pid, qty, name=name, price=price, image=image, source=source,
                 supplier_id=supplier_id, variation_id=variation_id,
                 variation_name=variation_name, mrp=mrp)
+    # Sync to real Meesho cart immediately
+    acc = get_active_meesho_account(uid)
+    if acc and supplier_id and variation_id:
+        cs = get_cart_session(uid)
+        r = real_cart_add(acc, pid, supplier_id, variation_id, variation_name, qty, cs)
+        if r.get("ok"):
+            set_cart_session(uid, r["cart_session"])
     return jsonify({"ok": True})
 
 
@@ -230,26 +240,28 @@ def api_place_order():
             return jsonify({"error": "insufficient wallet", "needed": our_total - w, "balance": w}), 400
         deduct_wallet(uid, our_total)
 
-    sync_addr = real_address_create(acc, addr.get("name", ""), addr.get("mobile", ""),
-                                    addr.get("pin", ""), addr.get("city", ""),
-                                    addr.get("state", ""), addr.get("address_line_1", ""),
-                                    addr.get("address_line_2", ""),
-                                    addr.get("landmark", ""), addr.get("address_type", "Home"))
-    meesho_addr_id = sync_addr.get("meesho_address_id")
+    # Get persisted cart_session, or sync local cart to real Meesho cart
+    cart_session = get_cart_session(uid)
+    if not cart_session:
+        sync_r = real_cart_sync(acc, cart, cart_session)
+        cart_session = sync_r.get("cart_session")
+        if cart_session:
+            set_cart_session(uid, cart_session)
 
-    cart_session = None
-    real_cart_clear(acc, cart_session)
+    # Sync address to Meesho (reuse meesho_address_id if already created)
+    meesho_addr_id = addr.get("meesho_address_id")
+    if not meesho_addr_id:
+        sync_addr = real_address_create(acc, addr.get("name", ""), addr.get("mobile", ""),
+                                        addr.get("pin", ""), addr.get("city", ""),
+                                        addr.get("state", ""), addr.get("address_line_1", ""),
+                                        addr.get("address_line_2", ""),
+                                        addr.get("landmark", ""), addr.get("address_type", "Home"))
+        meesho_addr_id = sync_addr.get("meesho_address_id")
 
-    for c in cart:
-        r = real_cart_add(acc, c.get("product_id"), c.get("supplier_id"),
-                         c.get("variation_id"), c.get("variation_name", "Free Size"),
-                         c.get("qty", 1), cart_session)
-        if r.get("ok"):
-            cart_session = r.get("cart_session")
-        else:
-            if user_mode == "paid":
-                add_wallet(uid, our_total)
-            return jsonify({"error": f"Meesho cart add failed: {r.get('error')}", "details": r}), 400
+    if not meesho_addr_id:
+        if user_mode == "paid":
+            add_wallet(uid, our_total)
+        return jsonify({"error": "Could not create address on Meesho"}), 400
 
     if meesho_addr_id:
         bind_r = real_bind_address(acc, cart_session, meesho_addr_id, addr.get("pin"))
@@ -264,7 +276,7 @@ def api_place_order():
     if payinfo.get("ok"):
         cart_session = payinfo.get("cart_session", cart_session)
 
-    meesho_amount = payinfo.get("effective_total", subtotal)
+    meesho_amount = payinfo.get("effective_total", subtotal) if payinfo.get("ok") else subtotal
 
     order_r = real_preorder(acc, cart_session, meesho_addr_id,
                             payment_method=payment_method,
@@ -283,6 +295,7 @@ def api_place_order():
                        meesho_amount=meesho_amount)
 
     clear_cart(uid)
+    set_cart_session(uid, "")
 
     return jsonify({
         "ok": True, "order_id": oid, "meesho_order_num": meesho_order_num,
@@ -320,35 +333,16 @@ def api_checkout_summary():
     payinfo_ok = False
 
     if acc:
-        cart_session = None
-        real_cart_clear(acc, cart_session)
-        for c in cart:
-            r = real_cart_add(acc, c.get("product_id"), c.get("supplier_id"),
-                             c.get("variation_id"), c.get("variation_name", "Free Size"),
-                             c.get("qty", 1), cart_session)
-            if r.get("ok"):
-                cart_session = r.get("cart_session")
-        if addr:
-            meesho_addr_id = None
-            sync_addr = real_address_create(acc, addr.get("name", ""), addr.get("mobile", ""),
-                                            addr.get("pin", ""), addr.get("city", ""),
-                                            addr.get("state", ""), addr.get("address_line_1", ""),
-                                            addr.get("address_line_2", ""),
-                                            addr.get("landmark", ""), addr.get("address_type", "Home"))
-            meesho_addr_id = sync_addr.get("meesho_address_id")
-            if meesho_addr_id:
-                real_bind_address(acc, cart_session, meesho_addr_id, addr.get("pin"))
-
-        pay_cod = real_paymentinfo(acc, cart_session, ["cod"])
-        if pay_cod.get("ok"):
-            cod_amount = pay_cod.get("effective_total", subtotal)
-            cart_session = pay_cod.get("cart_session", cart_session)
-            payinfo_ok = True
-
-        pay_upi = real_paymentinfo(acc, cart_session, ["juspay"])
-        if pay_upi.get("ok"):
-            upi_amount = pay_upi.get("effective_total", subtotal)
-            payinfo_ok = True
+        cs = get_cart_session(uid)
+        if cs:
+            pay_cod = real_paymentinfo(acc, cs, ["cod"])
+            if pay_cod.get("ok"):
+                cod_amount = pay_cod.get("effective_total", subtotal)
+                payinfo_ok = True
+            pay_upi = real_paymentinfo(acc, cs, ["juspay"])
+            if pay_upi.get("ok"):
+                upi_amount = pay_upi.get("effective_total", subtotal)
+                payinfo_ok = True
 
     return jsonify({
         "items": cart,

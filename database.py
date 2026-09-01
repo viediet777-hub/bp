@@ -23,6 +23,7 @@ def init_db():
             wallet INTEGER DEFAULT 0,
             mode TEXT DEFAULT 'paid',
             referral_link TEXT DEFAULT '',
+            cart_session TEXT DEFAULT '',
             created_at REAL DEFAULT 0
         );
 
@@ -130,6 +131,8 @@ def init_db():
         ("variation_name", "cart", "''"), ("mrp", "cart", "0"),
         ("meesho_order_num", "orders", "''"), ("payment_method", "orders", "'COD'"),
         ("meesho_amount", "orders", "0"),
+        ("cart_session", "users", "''"),
+        ("meesho_address_id", "addresses", "0"),
     ]:
         try:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {default}")
@@ -543,6 +546,20 @@ def get_default_address(user_id):
             (user_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def get_cart_session(user_id):
+    conn = get_db()
+    row = conn.execute("SELECT cart_session FROM users WHERE user_id=?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row)["cart_session"] if row and row["cart_session"] else None
+
+
+def set_cart_session(user_id, cart_session):
+    conn = get_db()
+    conn.execute("UPDATE users SET cart_session=? WHERE user_id=?", (cart_session, user_id))
+    conn.commit()
+    conn.close()
 
 
 init_db()

@@ -209,7 +209,6 @@ input,button{font-family:inherit;outline:none;border:none}
   <div class="topbar"><h1>Account</h1></div>
   <div class="profile-card"><h3 id="userName">Guest User</h3><p id="userPhone">Tap to login</p><button onclick="openLogin()" style="margin-top:10px;padding:8px 20px;border-radius:8px;background:var(--accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer">📱 Login / Add Account</button></div>
   <div class="wallet-card"><div class="wl"><h4>Wallet Balance</h4><div class="wbal" id="walletBal">Rs.0</div></div></div>
-  <div style="margin:0 16px 8px" id="modeStatus"></div>
   <div style="margin:0 16px 8px" id="orderCount"></div>
   <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
     <span>Delivery Addresses</span>
@@ -421,7 +420,16 @@ async function openProduct(pid){
     var supplierId=d.supplier_id||0;
     var sizesHtml='';
     if(sizes.length){
-      sizesHtml='<div class="pmodal-sizes">'+sizes.map(function(s,i){var vid=s.id||s.variation_id||0;var vname=s.name||s.size||'';return '<div class="size-chip'+(i===0?' selected':'')+'" onclick="selectSize(this)" data-vid="'+vid+'" data-vname="'+vname+'">'+(typeof s==='string'?s:s.size||s.name||'')+'</div>'}).join('')+'</div>';
+      sizesHtml='<div class="pmodal-sizes">'+sizes.map(function(s,i){
+        var vid=0,vname='';
+        if(typeof s==='string'){vname=s}
+        else if(s&&typeof s==='object'){
+          vid=s.id||s.variation_id||0;
+          vname=(typeof s.name==='string'?s.name:'')||(typeof s.size==='string'?s.size:'')||(typeof s.variation_name==='string'?s.variation_name:'')||(typeof s.variation==='string'?s.variation:'')||s.label||'';
+        }
+        if(!vname)vname='Free Size';
+        return '<div class="size-chip'+(i===0?' selected':'')+'" onclick="selectSize(this)" data-vid="'+vid+'" data-vname="'+vname+'">'+vname+'</div>'
+      }).join('')+'</div>';
     }
     var mrpHtml=mrp?'<div class="pmodal-mrp">Rs.'+mrp+'</div>':'';
     var fodHtml=fod?'<div class="pmodal-fod">'+fod+'</div>':'';
@@ -697,15 +705,6 @@ async function loadAccount(){
     $('walletBal').textContent='Rs.'+(d.balance||0);
   }catch(e){}
   try{
-    var r=await fetch(API+'/api/mode',{headers:headers()});
-    var d=await r.json();
-    var mode=d.mode||'paid';
-    var modeLabel=mode==='free'?'🟢 FREE Mode':'🔴 PAID Mode';
-    var modeDesc=mode==='free'?'No order fee — ₹0':'Order fee: ₹5 per order';
-    var switchLabel=mode==='free'?'Switch to PAID':'Switch to FREE';
-    $('modeStatus').innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg);border-radius:10px"><div><b style="font-size:14px">'+modeLabel+'</b><br><span style="font-size:11px;color:var(--text2)">'+modeDesc+'</span></div><button onclick="switchMode()" style="padding:8px 14px;border-radius:8px;background:var(--accent);color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">'+switchLabel+'</button></div>';
-  }catch(e){}
-  try{
     var r=await fetch(API+'/api/orders/count',{headers:headers()});
     var d=await r.json();
     $('orderCount').innerHTML='<div style="padding:10px 14px;background:var(--bg);border-radius:10px;text-align:center"><b style="font-size:20px;color:var(--accent)">'+(d.count||0)+'</b><br><span style="font-size:12px;color:var(--text2)">Total Orders Placed</span></div>';
@@ -722,15 +721,6 @@ async function loadAccount(){
     }).join('');
   }catch(e){}
   loadAddresses();
-}
-
-async function switchMode(){
-  try{
-    var r=await fetch(API+'/api/mode/toggle',{method:'POST',headers:headers()});
-    var d=await r.json();
-    if(d.ok){toast('Switched to '+d.mode.toUpperCase()+' mode!');loadAccount()}
-    else toast('Failed to switch');
-  }catch(e){toast('Failed to switch mode')}
 }
 
 async function exportData(){

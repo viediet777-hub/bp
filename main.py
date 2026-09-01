@@ -78,8 +78,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     rows = [
         [InlineKeyboardButton("🛍️ Open Shop", web_app=WebAppInfo(url=WEBAPP_URL))],
-        [InlineKeyboardButton("💰 Add Wallet", callback_data="wallet_add"),
-         InlineKeyboardButton(f"🔄 Switch to {'PAID' if mode=='free' else 'FREE'}", callback_data="toggle_mode")],
+        [InlineKeyboardButton("💰 Add Wallet", callback_data="wallet_add")],
         [InlineKeyboardButton("📍 My Address", callback_data="addr_list"),
          InlineKeyboardButton("📦 My Orders", callback_data="orders")],
         [InlineKeyboardButton("👤 My Account", callback_data="account_menu")],
@@ -682,8 +681,7 @@ async def cb_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     rows = [
         [InlineKeyboardButton("🛍️ Open Shop", web_app=WebAppInfo(url=WEBAPP_URL))],
-        [InlineKeyboardButton("💰 Add Wallet", callback_data="wallet_add"),
-         InlineKeyboardButton(f"🔄 Switch to {'PAID' if mode=='free' else 'FREE'}", callback_data="toggle_mode")],
+        [InlineKeyboardButton("💰 Add Wallet", callback_data="wallet_add")],
         [InlineKeyboardButton("📍 My Address", callback_data="addr_list"),
          InlineKeyboardButton("📦 My Orders", callback_data="orders")],
         [InlineKeyboardButton("👤 My Account", callback_data="account_menu")],
@@ -708,6 +706,7 @@ async def cb_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     orders = get_all_orders()
     btns = [
         [InlineKeyboardButton(f"📦 Orders ({len(orders)})", callback_data="admin_orders")],
+        [InlineKeyboardButton("🔄 Toggle Mode (your account)", callback_data="toggle_mode")],
         [InlineKeyboardButton("⬅️ Back", callback_data="back")],
     ]
     await q.edit_message_text(f"👑 *Admin Panel*\n\nTotal Orders: {len(orders)}",
@@ -924,6 +923,9 @@ async def cb_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cb_toggle_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
+    if not is_admin(q.from_user.id):
+        await q.answer("Admin only!", show_alert=True)
+        return
     uid = q.from_user.id
     new_mode = toggle_user_mode(uid)
     mode_label = "🟢 FREE Mode" if new_mode == "free" else "🔴 PAID Mode"
