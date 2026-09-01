@@ -26,7 +26,7 @@ from gateway import generate_txn_id, create_upi_link, get_qr_url, verify_payment
 from config import ORDER_FEE, WALLET_MIN, WALLET_MAX, GW_UPI_ID, GW_UPI_NAME, ADMIN_IDS
 from meesho import (
     get_meesho_offer, search_meesho, get_meesho_product, send_otp, verify_otp, check_number,
-    real_cart_add, real_cart_add_many, real_cart_review, real_cart_clear, real_cart_sync,
+    real_cart_add, real_cart_add_many, real_cart_review, real_cart_clear, real_cart_sync, real_cart_remove,
     real_bind_address, real_paymentinfo, real_address_create, real_fetch_addresses,
     real_preorder, real_payment_status, real_preorder_status, real_payment_options,
     fresh_checkout_state,
