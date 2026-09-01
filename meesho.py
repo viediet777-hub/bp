@@ -136,10 +136,10 @@ def _fod_body(dev):
 def _api_headers(instance_id, xo, context, session_id=None, gaid=None, session_count=None, ua=None):
     h = {"authorization": MEESHO_AUTH, "app-version": APP_VERSION, "app-version-code": APP_VERSION_CODE,
          "instance-id": instance_id, "country-iso": "in", "application-id": APPLICATION_ID,
-         "app-session-id": session_id or uuid.uuid4().hex, "app-sdk-version": "34",
+         "app-session-id": session_id or uuid.uuid4().hex, "app-sdk-version": "30",
          "app-client-id": "android", "shield-session-id": "", "xo": xo,
          "app-iso-language-code": "en", "meesho-user-context": context,
-         "content-type": "application/json; charset=UTF-8", "user-agent": ua or "Cronet",
+         "content-type": "application/json; charset=UTF-8", "user-agent": ua or "okhttp/4.9.0",
          "accept-encoding": "gzip, deflate"}
     if gaid: h["app-gaid"] = gaid
     if session_count is not None: h["app-session-count"] = str(session_count)
@@ -202,7 +202,7 @@ def _prod_headers(xo="", instance_id=""):
          "x-wishlist-aggregation-required": "false", "app-version": APP_VERSION,
          "app-version-code": APP_VERSION_CODE, "instance-id": instance_id or uuid.uuid4().hex,
          "country-iso": "in", "application-id": APPLICATION_ID, "app-session-id": str(uuid.uuid4()),
-         "app-sdk-version": "33", "app-client-id": "android", "shield-session-id": "",
+         "app-sdk-version": "30", "app-client-id": "android", "shield-session-id": "",
          "xo": xo or ANON_XO, "app-iso-language-code": "en", "meesho-user-context": "anonymous",
          "Content-Type": "application/json", "Accept": "application/json, text/plain, */*",
          "User-Agent": "okhttp/4.9.0"}
@@ -476,12 +476,12 @@ def logged_in_headers(acc, location=None):
     app_sid = acc.get("app_session_id") or uuid.uuid4().hex
     h = _api_headers(instance_id, xo, "logged_in",
                      session_id=app_sid,
-                     ua="Cronet")
+                     ua="okhttp/4.9.0")
     h["app-version"] = acc.get("app_version") or "29.1"
     h["app-version-code"] = acc.get("app_version_code") or "858"
-    h["app-sdk-version"] = "31"
+    h["app-sdk-version"] = "30"
     h["app-user-id"] = uid
-    h["shield-session-id"] = acc.get("shield_session_id") or "bca1ee85f80f45a2b0e4dc480495a192"
+    h["shield-session-id"] = acc.get("shield_session_id") or ""
     h["accept-encoding"] = "gzip"
     if phone and not phone.startswith("xxxx"):
         h["u-token"] = base64.b64encode(("+91" + phone).encode()).decode()
@@ -489,31 +489,38 @@ def logged_in_headers(acc, location=None):
         h["app-user-location"] = base64.b64encode(json.dumps(location).encode()).decode()
     else:
         h["app-user-location"] = base64.b64encode(json.dumps({
-            "lat": "22.7196", "long": "75.8577", "pincode": "452001",
+            "lat": "22.6984", "long": "75.9292", "pincode": "452010",
             "city": "indore", "address_id": ""
         }).encode()).decode()
     return h
 
 
 def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, cart_session=None):
-    """Add product to real Meesho cart via /api/1.0/user/cart/add"""
+    """Add product to real Meesho cart via /api/1.0/cart/add"""
     pid = int(product_id) if product_id else 0
     vid = _safe_int(variation_id)
     sid = _safe_int(supplier_id)
     body = {
-        "context": "cart",
+        "context": "pdp",
+        "identifier": "buy_now",
+        "cart_session": cart_session,
+        "replaceable": False,
         "items": [{
-            "identifier": f"{pid}:{vid}",
+            "identifier": "buy_now",
             "product_id": pid,
             "supplier_id": sid,
             "variation_id": vid,
             "variation": variation or "",
             "quantity": int(qty) if qty else 1,
+            "selected_price_type_id": "premium_return_price",
+            "client_metadata": None,
         }],
+        "address_id": None,
+        "user_id": int(acc.get("user_id", 0)),
     }
     try:
         with httpx.Client(timeout=20.0) as client:
-            resp = client.post(f"{MEESHO_API}/1.0/user/cart/add",
+            resp = client.post(f"{MEESHO_API}/1.0/cart/add",
                                headers=logged_in_headers(acc), json=body)
             data = resp.json() or {}
             print(f"[CART_ADD] resp={resp.status_code} data={str(data)[:500]}", flush=True)
@@ -619,9 +626,9 @@ def real_cart_sync(acc, local_items, cart_session=None):
 
 
 def real_bind_address(acc, cart_session, address_id, dest_pin=None):
-    """Bind address to cart via /api/1.0/cart/location (default flow)"""
+    """Bind address to cart via /api/1.0/cart/location"""
     body = {
-        "context": "atc_cart_v2",
+        "context": "atc_review",
         "identifier": "default",
         "cart_session": cart_session,
         "dest_pin": dest_pin,

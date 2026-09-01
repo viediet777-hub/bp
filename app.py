@@ -229,7 +229,7 @@ def api_place_order():
         return jsonify({"error": "no address found. Add address first."}), 400
 
     subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
-    user_mode = (user.get("mode") or "paid") if user else "paid"
+    user_mode = get_global_mode()
     fee = 0 if user_mode == "free" else ORDER_FEE
     our_total = subtotal + fee
     w = user.get("wallet", 0)
@@ -319,7 +319,7 @@ def api_checkout_summary():
         return jsonify({"error": "cart empty"}), 400
 
     subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
-    user_mode = (user.get("mode") or "paid") if user else "paid"
+    user_mode = get_global_mode()
     fee = 0 if user_mode == "free" else ORDER_FEE
     total = subtotal + fee
     balance = user.get("wallet", 0) if user else 0
