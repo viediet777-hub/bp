@@ -265,6 +265,7 @@ function switchTab(i){
   var pages=['home','explore','cart','orders','account'];
   $('page-'+pages[i]).classList.add('active');
   document.querySelectorAll('.tab')[i].classList.add('active');
+  if(i===1){exploreQuery='fashion trending';exploreOffset=0;exploreDone=false;searchProducts()}
   if(i===2)loadCart();
   if(i===3)loadOrders();
   if(i===4)loadAccount();
@@ -292,13 +293,17 @@ function renderProductCard(p){
   var name=p.name||p.title||'Product';
   var price=p.price||0;
   var orig=p.original_price||p.mrp||'';
-  var fod=p.fod_price||'';
+  var fod=p.fod_price||p.fod_savings||'';
+  var discount=p.discount_text||'';
   var src=p.source||'meesho';
-  var rating=p.rating||'';
-  var origHtml=orig?'<span>Rs.'+orig+'</span>':'';
-  var fodHtml=fod?'<div class="fod">FOD: Rs.'+fod+'</div>':'';
-  var ratingHtml=rating?'<div class="src">'+rating+'</div>':'';
-  return '<div class="prod-card fade-up" onclick="openProduct(\''+pid+'\')"><img src="'+img+'" alt="" loading="lazy"><div class="info"><h3>'+name+'</h3><div class="price">Rs.'+price+origHtml+'</div>'+fodHtml+'<div class="src">'+src+'</div>'+ratingHtml+'</div></div>';
+  var rating=p.rating;
+  var ratingVal=typeof rating==='object'?(rating.average||''):rating;
+  var origHtml=orig&&orig>price?'<span>Rs.'+Math.round(orig)+'</span>':'';
+  var fodHtml=fod?'<div class="fod">'+fod+'</div>':'';
+  var discountHtml=discount&&!fod?'<div class="fod">'+discount+'</div>':'';
+  var ratingHtml=ratingVal?'<div class="src">'+ratingVal+'</div>':'';
+  var safePid=String(pid).replace(/'/g,"\\'");
+  return '<div class="prod-card fade-up" onclick="openProduct(\''+safePid+'\')"><img src="'+img+'" alt="" loading="lazy" onerror="this.src=\'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22><rect fill=%22%23eee%22 width=%22200%22 height=%22200%22/></svg>\'"><div class="info"><h3>'+name+'</h3><div class="price">Rs.'+Math.round(price)+origHtml+'</div>'+fodHtml+discountHtml+ratingHtml+'</div></div>';
 }
 
 function renderProducts(prods,gridId){
@@ -385,13 +390,17 @@ async function loadProducts(gridId){
   try{
     var r=await fetch(API+'/api/products',{headers:headers()});
     var prods=await r.json();
-    renderProducts(Array.isArray(prods)?prods:[],gridId);
+    var arr=Array.isArray(prods)?prods:[];
+    if(arr.length>0){renderProducts(arr,gridId);return}
+    var r2=await fetch(API+'/api/search',{method:'POST',headers:headers(),body:JSON.stringify({query:'fashion trending',limit:20,offset:0})});
+    var d2=await r2.json();
+    renderProducts(d2.catalogs||[],gridId);
   }catch(e){}
 }
 
 var homeTimer,exploreTimer;
 function debounceHomeSearch(){clearTimeout(homeTimer);homeTimer=setTimeout(function(){var q=$('homeSearch').value.trim();if(q.length>=2)searchHome(q);else loadProducts('homeProdGrid')},400)}
-function debounceExploreSearch(){clearTimeout(exploreTimer);exploreTimer=setTimeout(function(){exploreQuery=$('exploreSearch').value.trim();exploreOffset=0;exploreDone=false;if(exploreQuery.length>=2)searchProducts();else loadProducts('exploreProdGrid')},400)}
+function debounceExploreSearch(){clearTimeout(exploreTimer);exploreTimer=setTimeout(function(){exploreQuery=$('exploreSearch').value.trim();exploreOffset=0;exploreDone=false;if(exploreQuery.length>=2)searchProducts();else{exploreQuery='fashion trending';searchProducts()}},400)}
 
 async function searchHome(q){
   try{
