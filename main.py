@@ -27,6 +27,8 @@ from database import (
     get_meesho_accounts, get_active_meesho_account, save_meesho_account,
     delete_meesho_account, get_user_offer, save_user_offer,
     get_orders, get_cart,
+    get_addresses, get_address, create_address, update_address,
+    delete_address, set_default_address, get_default_address,
 )
 from gateway import generate_txn_id, create_upi_link, get_qr_url, verify_payment
 from meesho import get_meesho_offer, send_otp, verify_otp, check_number
@@ -76,8 +78,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = [
         [InlineKeyboardButton("🎯 Roll Offer", callback_data="offer_roll"),
          InlineKeyboardButton("💰 Add Wallet", callback_data="wallet_add")],
-        [InlineKeyboardButton("📦 My Orders", callback_data="orders"),
-         InlineKeyboardButton("👤 My Account", callback_data="account_menu")],
+        [InlineKeyboardButton("📍 My Address", callback_data="addr_list"),
+         InlineKeyboardButton("📦 My Orders", callback_data="orders")],
+        [InlineKeyboardButton("👤 My Account", callback_data="account_menu")],
         [InlineKeyboardButton("💳 Wallet History", callback_data="wallet_history")],
     ]
 
@@ -106,9 +109,9 @@ async def cb_offer_roll(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if result.get("ok") and result.get("offer"):
         offer = result["offer"]
         save_user_offer(uid, json.dumps(offer))
-        buck = offer.get("bucket", 0)
+        buck = offer.get("display_bucket", offer.get("bucket", 0))
         title = offer.get("title", "OFFER")
-        text = offer.get("text", "")
+        text = offer.get("display_text", offer.get("text", ""))
         subtitle = offer.get("subtitle", "")
 
         msg = (
@@ -435,6 +438,227 @@ async def cb_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ═══════════════════════════════════════════════════════════════
+# ADDRESS FLOW - Bot pe hi
+# ═══════════════════════════════════════════════════════════════
+
+async def cb_addr_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    uid = q.from_user.id
+    addrs = get_addresses(uid)
+
+    msg = f"📍 *My Addresses*\n\n"
+    btns = []
+    if addrs:
+        for i, a in enumerate(addrs[:5]):
+            star = "⭐" if a.get("is_default") else "📍"
+            short = (a.get("address_line_1", "")[:30] + "...") if len(a.get("address_line_1", "")) > 30 else a.get("address_line_1", "")
+            msg += f"{star} *{a.get('name','?')}*\n"
+            msg += f"    📱 {a.get('mobile','?')} | 📌 {a.get('pin','?')}\n"
+            msg += f"    {short}\n\n"
+            btns.append([InlineKeyboardButton(f"{star} {a.get('name','?')} ({a.get('pin','?')})", callback_data=f"addr_view_{a['id']}")])
+    else:
+        msg += "Koi address nahi hai.\nNaya address add karo!"
+
+    btns.append([InlineKeyboardButton("➕ Add New Address", callback_data="addr_add")])
+    btns.append([InlineKeyboardButton("⬅️ Back", callback_data="back")])
+    await q.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(btns))
+
+
+async def cb_addr_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    uid = q.from_user.id
+    addr_id = int(q.data.replace("addr_view_", ""))
+    addr = get_address(addr_id)
+    if not addr or addr.get("user_id") != uid:
+        await q.edit_message_text("Address nahi mila.")
+        return
+
+    star = "⭐ Default" if addr.get("is_default") else ""
+    msg = (
+        f"📍 *Address Details*\n\n"
+        f"👤 Name: *{addr.get('name','?')}*\n"
+        f"📱 Mobile: `{addr.get('mobile','?')}`\n"
+        f"📌 Pin: `{addr.get('pin','?')}`\n"
+        f"🏙️ City: {addr.get('city','?')}\n"
+        f"🗺️ State: {addr.get('state','?')}\n"
+        f"🏠 Address: {addr.get('address_line_1','?')}\n"
+    )
+    if addr.get("address_line_2"):
+        msg += f"🏠 Line 2: {addr.get('address_line_2')}\n"
+    if addr.get("landmark"):
+        msg += f"📍 Landmark: {addr.get('landmark')}\n"
+    msg += f"🏷️ Type: {addr.get('address_type','Home')}\n"
+    if star:
+        msg += f"\n{star}"
+
+    btns = []
+    if not addr.get("is_default"):
+        btns.append([InlineKeyboardButton("⭐ Set Default", callback_data=f"addr_default_{addr_id}")])
+    btns.append([InlineKeyboardButton("✏️ Edit", callback_data=f"addr_edit_{addr_id}")])
+    btns.append([InlineKeyboardButton("🗑️ Delete", callback_data=f"addr_del_{addr_id}")])
+    btns.append([InlineKeyboardButton("⬅️ Back", callback_data="addr_list")])
+    await q.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(btns))
+
+
+async def cb_addr_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    context.user_data["wait_addr"] = True
+    context.user_data["addr_step"] = "name"
+    context.user_data["addr_data"] = {}
+    await q.edit_message_text(
+        "➕ *New Address Add Karo*\n\n"
+        "Step 1/7: *Name* likho:\n\n"
+        "Example: Vijay Kumar",
+        parse_mode=ParseMode.MARKDOWN)
+    await q.answer()
+
+
+async def cb_addr_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    uid = q.from_user.id
+    addr_id = int(q.data.replace("addr_edit_", ""))
+    addr = get_address(addr_id)
+    if not addr or addr.get("user_id") != uid:
+        await q.edit_message_text("Address nahi mila.")
+        return
+
+    context.user_data["wait_addr_edit"] = True
+    context.user_data["edit_addr_id"] = addr_id
+    context.user_data["addr_step"] = "name"
+    context.user_data["addr_data"] = {
+        "name": addr.get("name", ""),
+        "mobile": addr.get("mobile", ""),
+        "pin": addr.get("pin", ""),
+        "city": addr.get("city", ""),
+        "state": addr.get("state", ""),
+        "address_line_1": addr.get("address_line_1", ""),
+        "address_line_2": addr.get("address_line_2", ""),
+        "landmark": addr.get("landmark", ""),
+        "address_type": addr.get("address_type", "Home"),
+    }
+    await q.edit_message_text(
+        "✏️ *Edit Address*\n\n"
+        "Step 1/7: *Name* likho:\n\n"
+        f"Current: `{addr.get('name','')}`\n"
+        "Naya name likho ya 'skip' se current rakho:",
+        parse_mode=ParseMode.MARKDOWN)
+    await q.answer()
+
+
+async def cb_addr_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    uid = q.from_user.id
+    addr_id = int(q.data.replace("addr_del_", ""))
+    addr = get_address(addr_id)
+    if not addr or addr.get("user_id") != uid:
+        await q.edit_message_text("Address nahi mila.")
+        return
+    delete_address(addr_id)
+    await q.edit_message_text("✅ Address delete ho gaya.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Back", callback_data="addr_list")]]))
+
+
+async def cb_addr_default(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    uid = q.from_user.id
+    addr_id = int(q.data.replace("addr_default_", ""))
+    addr = get_address(addr_id)
+    if not addr or addr.get("user_id") != uid:
+        await q.edit_message_text("Address nahi mila.")
+        return
+    set_default_address(uid, addr_id)
+    await q.edit_message_text("⭐ Default address set ho gaya!",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Back", callback_data="addr_list")]]))
+
+
+ADDR_STEPS = [
+    ("name", "Name"),
+    ("mobile", "Mobile Number"),
+    ("pin", "PIN Code"),
+    ("city", "City"),
+    ("state", "State"),
+    ("address_line_1", "Address Line 1"),
+    ("address_line_2", "Address Line 2 (ya 'skip')"),
+]
+
+ADDR_STEPS_WITH_LANDMARK = ADDR_STEPS + [("landmark", "Landmark (ya 'skip')")]
+
+
+async def _addr_next_step(uid, text, context, edit=False):
+    step = context.user_data.get("addr_step", "name")
+    data = context.user_data.get("addr_data", {})
+    is_edit = context.user_data.get("wait_addr_edit")
+
+    if step == "name":
+        if text.lower() != "skip" or not is_edit:
+            data["name"] = text
+        context.user_data["addr_step"] = "mobile"
+        msg = "Step 2/7: *Mobile Number* likho:\n\nExample: 9876543210"
+    elif step == "mobile":
+        if text.lower() != "skip" or not is_edit:
+            data["mobile"] = text[-10:]
+        context.user_data["addr_step"] = "pin"
+        msg = "Step 3/7: *PIN Code* likho:\n\nExample: 110001"
+    elif step == "pin":
+        if text.lower() != "skip" or not is_edit:
+            data["pin"] = text
+        context.user_data["addr_step"] = "city"
+        msg = "Step 4/7: *City* likho:\n\nExample: New Delhi"
+    elif step == "city":
+        if text.lower() != "skip" or not is_edit:
+            data["city"] = text
+        context.user_data["addr_step"] = "state"
+        msg = "Step 5/7: *State* likho:\n\nExample: Delhi"
+    elif step == "state":
+        if text.lower() != "skip" or not is_edit:
+            data["state"] = text
+        context.user_data["addr_step"] = "address_line_1"
+        msg = "Step 6/7: *Address Line 1* likho:\n\nExample: 123, MG Road"
+    elif step == "address_line_1":
+        if text.lower() != "skip" or not is_edit:
+            data["address_line_1"] = text
+        context.user_data["addr_step"] = "address_line_2"
+        msg = "Step 7a: *Address Line 2* (optional):\n\nYa 'skip' karo"
+    elif step == "address_line_2":
+        if text.lower() != "skip":
+            data["address_line_2"] = text
+        context.user_data["addr_step"] = "landmark"
+        msg = "Step 7b: *Landmark* (optional):\n\nYa 'skip' karo"
+    elif step == "landmark":
+        if text.lower() != "skip":
+            data["landmark"] = text
+        data["address_type"] = "Home"
+        data["is_default"] = 1 if not is_edit else 0
+
+        if is_edit:
+            addr_id = context.user_data.get("edit_addr_id")
+            update_address(addr_id, **data)
+            context.user_data.pop("wait_addr_edit", None)
+            context.user_data.pop("edit_addr_id", None)
+            context.user_data.pop("wait_addr", None)
+            context.user_data.pop("addr_step", None)
+            context.user_data.pop("addr_data", None)
+            return True, "✅ Address update ho gaya!"
+        else:
+            aid = create_address(uid, 0, data.get("name", ""), data.get("mobile", ""),
+                                 data.get("pin", ""), data.get("city", ""), data.get("state", ""),
+                                 data.get("address_line_1", ""), data.get("address_line_2", ""),
+                                 data.get("landmark", ""), data.get("address_type", "Home"),
+                                 "", "", data.get("is_default", 1))
+            context.user_data.pop("wait_addr", None)
+            context.user_data.pop("addr_step", None)
+            context.user_data.pop("addr_data", None)
+            return True, "✅ Address add ho gaya!"
+
+    context.user_data["addr_data"] = data
+    return False, msg
+
+
+# ═══════════════════════════════════════════════════════════════
 # BACK / HOME
 # ═══════════════════════════════════════════════════════════════
 
@@ -463,8 +687,9 @@ async def cb_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = [
         [InlineKeyboardButton("🎯 Roll Offer", callback_data="offer_roll"),
          InlineKeyboardButton("💰 Add Wallet", callback_data="wallet_add")],
-        [InlineKeyboardButton("📦 My Orders", callback_data="orders"),
-         InlineKeyboardButton("👤 My Account", callback_data="account_menu")],
+        [InlineKeyboardButton("📍 My Address", callback_data="addr_list"),
+         InlineKeyboardButton("📦 My Orders", callback_data="orders")],
+        [InlineKeyboardButton("👤 My Account", callback_data="account_menu")],
         [InlineKeyboardButton("💳 Wallet History", callback_data="wallet_history")],
     ]
     if WEBAPP_URL.startswith("https://"):
@@ -606,6 +831,19 @@ async def msg_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("acc_phone", None)
         return
 
+    # Add address
+    if context.user_data.get("wait_addr") or context.user_data.get("wait_addr_edit"):
+        done, msg = await _addr_next_step(uid, text, context)
+        if done:
+            await update.message.reply_text(
+                msg,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📍 My Addresses", callback_data="addr_list")],
+                    [InlineKeyboardButton("⬅️ Back", callback_data="back")]]))
+        else:
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        return
+
     # Admin add product
     if is_admin(uid) and context.user_data.get("wait_prod"):
         context.user_data["wait_prod"] = False
@@ -669,6 +907,18 @@ async def cb_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cb_acc_export(update, context)
     elif d == "orders":
         await cb_orders(update, context)
+    elif d == "addr_list":
+        await cb_addr_list(update, context)
+    elif d == "addr_add":
+        await cb_addr_add(update, context)
+    elif d.startswith("addr_view_"):
+        await cb_addr_view(update, context)
+    elif d.startswith("addr_edit_"):
+        await cb_addr_edit(update, context)
+    elif d.startswith("addr_del_"):
+        await cb_addr_del(update, context)
+    elif d.startswith("addr_default_"):
+        await cb_addr_default(update, context)
     elif d == "admin_panel":
         await cb_admin_panel(update, context)
     elif d == "admin_orders":

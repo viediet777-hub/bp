@@ -14,6 +14,8 @@ from database import (
     save_meesho_account, get_meesho_accounts, get_active_meesho_account,
     delete_meesho_account, update_meesho_xo,
     save_user_offer, get_user_offer,
+    get_addresses, get_address, create_address, update_address,
+    delete_address, set_default_address, get_default_address,
 )
 from gateway import generate_txn_id, create_upi_link, get_qr_url, verify_payment
 from config import ORDER_FEE, WALLET_MIN, WALLET_MAX, GW_UPI_ID, GW_UPI_NAME
@@ -155,9 +157,16 @@ def api_place_order():
     if w < total:
         return jsonify({"error": "insufficient wallet", "needed": total - w}), 400
 
+    data = request.json or {}
+    addr_text = data.get("address", "")
+    if not addr_text:
+        default_addr = get_default_address(uid)
+        if default_addr:
+            addr_text = f"{default_addr.get('name','')}, {default_addr.get('address_line_1','')}, {default_addr.get('city','')}, {default_addr.get('state','')} - {default_addr.get('pin','')}"
+
     items_str = ", ".join([f"{c.get('name','?')}x{c.get('qty',1)}" for c in cart])
     deduct_wallet(uid, total)
-    oid = create_order(uid, items_str, total, ORDER_FEE, user.get("address", ""))
+    oid = create_order(uid, items_str, total, ORDER_FEE, addr_text)
 
     for c in cart:
         if c.get("product_id"):
@@ -462,6 +471,121 @@ def api_user_export():
         "wallet_transactions": wallet_txs,
         "orders": orders,
     })
+
+
+# ═══════════════════════════════════════════════════════════════
+# ADDRESS API
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/addresses")
+def api_addresses():
+    uid = get_uid()
+    if not uid:
+        return jsonify({"addresses": [], "default": None})
+    acc_id = request.args.get("account_id", type=int)
+    addrs = get_addresses(uid, acc_id)
+    default = next((a for a in addrs if a.get("is_default")), addrs[0] if addrs else None)
+    return jsonify({"addresses": addrs, "default": default})
+
+
+@app.route("/api/addresses/create", methods=["POST"])
+def api_address_create():
+    uid = get_uid()
+    if not uid:
+        return jsonify({"ok": False, "error": "no user"})
+    data = request.json or {}
+    name = data.get("name", "").strip()
+    mobile = data.get("mobile", "").strip()
+    pin = data.get("pin", "").strip()
+    city = data.get("city", "").strip()
+    state = data.get("state", "").strip()
+    line1 = data.get("address_line_1", "").strip()
+    line2 = data.get("address_line_2", "").strip()
+    landmark = data.get("landmark", "").strip()
+    addr_type = data.get("address_type", "Home")
+    is_def = int(data.get("is_default", 0))
+    acc_id = int(data.get("meesho_account_id", 0))
+    lat = data.get("latitude", "")
+    lng = data.get("longitude", "")
+
+    if not (name and mobile and pin and line1):
+        return jsonify({"ok": False, "error": "Name, mobile, pin, address required"})
+
+    aid = create_address(uid, acc_id, name, mobile, pin, city, state,
+                         line1, line2, landmark, addr_type, lat, lng, is_def)
+    addr = get_address(aid)
+    return jsonify({"ok": True, "address": addr})
+
+
+@app.route("/api/addresses/update", methods=["POST"])
+def api_address_update():
+    uid = get_uid()
+    if not uid:
+        return jsonify({"ok": False, "error": "no user"})
+    data = request.json or {}
+    addr_id = data.get("id")
+    if not addr_id:
+        return jsonify({"ok": False, "error": "no address id"})
+    addr = get_address(addr_id)
+    if not addr or addr.get("user_id") != uid:
+        return jsonify({"ok": False, "error": "not found"})
+
+    fields = {}
+    for k in ("name", "mobile", "pin", "city", "state", "address_line_1",
+              "address_line_2", "landmark", "address_type", "latitude", "longitude"):
+        if k in data:
+            fields[k] = data[k]
+    if "is_default" in data:
+        fields["is_default"] = int(data["is_default"])
+        if fields["is_default"]:
+            set_default_address(uid, addr_id)
+            fields.pop("is_default", None)
+
+    if fields:
+        update_address(addr_id, **fields)
+    addr = get_address(addr_id)
+    return jsonify({"ok": True, "address": addr})
+
+
+@app.route("/api/addresses/delete", methods=["POST"])
+def api_address_delete():
+    uid = get_uid()
+    if not uid:
+        return jsonify({"ok": False, "error": "no user"})
+    data = request.json or {}
+    addr_id = data.get("id")
+    if not addr_id:
+        return jsonify({"ok": False, "error": "no address id"})
+    addr = get_address(addr_id)
+    if not addr or addr.get("user_id") != uid:
+        return jsonify({"ok": False, "error": "not found"})
+    delete_address(addr_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/addresses/set_default", methods=["POST"])
+def api_address_set_default():
+    uid = get_uid()
+    if not uid:
+        return jsonify({"ok": False, "error": "no user"})
+    data = request.json or {}
+    addr_id = data.get("id")
+    if not addr_id:
+        return jsonify({"ok": False, "error": "no address id"})
+    addr = get_address(addr_id)
+    if not addr or addr.get("user_id") != uid:
+        return jsonify({"ok": False, "error": "not found"})
+    set_default_address(uid, addr_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/addresses/default")
+def api_address_default():
+    uid = get_uid()
+    if not uid:
+        return jsonify({"address": None})
+    addr = get_default_address(uid)
+    return jsonify({"address": addr})
 
 
 if __name__ == "__main__":

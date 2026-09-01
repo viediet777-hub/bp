@@ -87,6 +87,25 @@ def init_db():
             offer_json TEXT DEFAULT '',
             created_at REAL DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS addresses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            meesho_account_id INTEGER DEFAULT 0,
+            name TEXT DEFAULT '',
+            mobile TEXT DEFAULT '',
+            pin TEXT DEFAULT '',
+            city TEXT DEFAULT '',
+            state TEXT DEFAULT '',
+            address_line_1 TEXT DEFAULT '',
+            address_line_2 TEXT DEFAULT '',
+            landmark TEXT DEFAULT '',
+            address_type TEXT DEFAULT 'Home',
+            latitude TEXT DEFAULT '',
+            longitude TEXT DEFAULT '',
+            is_default INTEGER DEFAULT 0,
+            created_at REAL DEFAULT 0
+        );
     """)
     conn.commit()
     conn.close()
@@ -385,6 +404,84 @@ def get_user_offer(user_id):
         except Exception:
             return None
     return None
+
+
+# ─── ADDRESSES ───
+
+def get_addresses(user_id, meesho_account_id=None):
+    conn = get_db()
+    if meesho_account_id:
+        rows = conn.execute(
+            "SELECT * FROM addresses WHERE user_id=? AND meesho_account_id=? ORDER BY is_default DESC, created_at DESC",
+            (user_id, meesho_account_id)).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM addresses WHERE user_id=? ORDER BY is_default DESC, created_at DESC",
+            (user_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_address(addr_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM addresses WHERE id=?", (addr_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def create_address(user_id, meesho_account_id=0, name="", mobile="", pin="", city="",
+                   state="", address_line_1="", address_line_2="", landmark="",
+                   address_type="Home", latitude="", longitude="", is_default=0):
+    conn = get_db()
+    if is_default:
+        conn.execute("UPDATE addresses SET is_default=0 WHERE user_id=?", (user_id,))
+    conn.execute(
+        """INSERT INTO addresses (user_id, meesho_account_id, name, mobile, pin, city, state,
+           address_line_1, address_line_2, landmark, address_type, latitude, longitude,
+           is_default, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (user_id, meesho_account_id, name, mobile, pin, city, state,
+         address_line_1, address_line_2, landmark, address_type, latitude, longitude,
+         is_default, time.time()))
+    conn.commit()
+    aid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.close()
+    return aid
+
+
+def update_address(addr_id, **kwargs):
+    conn = get_db()
+    for k, v in kwargs.items():
+        conn.execute(f"UPDATE addresses SET {k}=? WHERE id=?", (v, addr_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_address(addr_id):
+    conn = get_db()
+    conn.execute("DELETE FROM addresses WHERE id=?", (addr_id,))
+    conn.commit()
+    conn.close()
+
+
+def set_default_address(user_id, addr_id):
+    conn = get_db()
+    conn.execute("UPDATE addresses SET is_default=0 WHERE user_id=?", (user_id,))
+    conn.execute("UPDATE addresses SET is_default=1 WHERE id=?", (addr_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_default_address(user_id):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM addresses WHERE user_id=? AND is_default=1 LIMIT 1",
+        (user_id,)).fetchone()
+    if not row:
+        row = conn.execute(
+            "SELECT * FROM addresses WHERE user_id=? ORDER BY created_at DESC LIMIT 1",
+            (user_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 init_db()

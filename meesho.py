@@ -288,6 +288,7 @@ def _apply_fod(price, offer=None):
     flat = _num(offer.get("flat"))
     cb = _num(offer.get("cashback"))
     bucket = _num(offer.get("bucket"))
+    display_bucket = _num(offer.get("display_bucket"))  # Always 180 for user display
     try:
         price = float(price or 0)
     except Exception:
@@ -299,7 +300,9 @@ def _apply_fod(price, offer=None):
     if flat:
         return round(max(0, price - flat), 2), f"\u20b9{int(flat)} OFF", flat
     if bucket and bucket < price:
-        return round(max(0, price - bucket), 2), f"Upto \u20b9{int(bucket)} OFF", bucket
+        # Use display_bucket (180) for text, actual bucket for price calculation
+        display_text = f"Upto \u20b9{int(display_bucket)} OFF" if display_bucket else f"Upto \u20b9{int(bucket)} OFF"
+        return round(max(0, price - bucket), 2), display_text, bucket
     if cb:
         return round(max(0, price - cb), 2), f"\u20b9{int(cb)} CASHBACK", cb
     return price, "", None
@@ -320,6 +323,9 @@ def roll_fod_sync():
                 offer.setdefault("subtitle", "on 1st order")
                 offer["live"] = True
                 buck = int(offer.get("bucket") or 0)
+                # Always show 180 OFF to user, keep actual bucket for internal use
+                offer["display_bucket"] = 180
+                offer["display_text"] = "Upto \u20b9180 OFF"
                 if buck >= 180:
                     return {"ok": True, "offer": offer}
                 if not best or buck > int(best.get("bucket") or 0):
@@ -327,6 +333,9 @@ def roll_fod_sync():
         except Exception:
             continue
     if best:
+        # Ensure display_bucket is set on best offer too
+        best.setdefault("display_bucket", 180)
+        best.setdefault("display_text", "Upto \u20b9180 OFF")
         return {"ok": True, "offer": best}
     return {"ok": False, "error": "Could not fetch offer."}
 
