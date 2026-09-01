@@ -292,9 +292,8 @@ async def cb_account_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for i, a in enumerate(accs[:5]):
             phone = a.get("phone", "?")
             btns.append([InlineKeyboardButton(f"📱 {phone}", callback_data=f"acc_view_{a['id']}")])
-    btns.append([InlineKeyboardButton("➕ Add New Account", callback_data="acc_add")])
+    btns.append([InlineKeyboardButton("🛍️ Login in Mini App", web_app=WebAppInfo(url=WEBAPP_URL))])
     btns.append([InlineKeyboardButton("🔄 Refresh Session", callback_data="acc_refresh")])
-    btns.append([InlineKeyboardButton("📤 Export Data", callback_data="acc_export")])
     btns.append([InlineKeyboardButton("⬅️ Back", callback_data="back")])
     await q.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(btns))

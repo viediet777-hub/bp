@@ -183,7 +183,7 @@ input,button{font-family:inherit;outline:none;border:none}
 
 <div class="page" id="page-account">
   <div class="topbar"><h1>Account</h1></div>
-  <div class="profile-card"><h3 id="userName">Guest User</h3><p id="userPhone">Tap to login</p></div>
+  <div class="profile-card"><h3 id="userName">Guest User</h3><p id="userPhone">Tap to login</p><button onclick="openLogin()" style="margin-top:10px;padding:8px 20px;border-radius:8px;background:var(--accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer">📱 Login / Add Account</button></div>
   <div class="wallet-card"><div class="wl"><h4>Wallet Balance</h4><div class="wbal" id="walletBal">Rs.0</div></div></div>
   <div style="margin:0 16px 8px" id="modeStatus"></div>
   <div style="margin:0 16px 8px" id="orderCount"></div>
@@ -288,19 +288,33 @@ input,button{font-family:inherit;outline:none;border:none}
 <script>
 var API='';
 
-// Telegram WebApp se user ID lo, nahi toh random
+// Telegram WebApp se REAL user ID lo
 var userId=(function(){
   try{
-    if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initDataUnsafe&&window.Telegram.WebApp.initDataUnsafe.user){
-      return String(window.Telegram.WebApp.initDataUnsafe.user.id);
+    var tg=window.Telegram&&window.Telegram.WebApp;
+    if(tg){
+      tg.ready();tg.expand();
+      if(tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.id){
+        return String(tg.initDataUnsafe.user.id);
+      }
+      // Try parsing initData string
+      if(tg.initData){
+        var p=new URLSearchParams(tg.initData);
+        var u=p.get('user');
+        if(u){var obj=JSON.parse(u);if(obj.id)return String(obj.id)}
+      }
     }
   }catch(e){}
-  return localStorage.getItem('userId')||('u'+Math.random().toString(36).slice(2,10));
+  // Fallback: numeric only (same as bot format)
+  var saved=localStorage.getItem('userId');
+  if(saved&&!isNaN(saved)&&saved.length>5) return saved;
+  var rid=String(Math.floor(100000000+Math.random()*900000000));
+  localStorage.setItem('userId',rid);
+  return rid;
 })();
 localStorage.setItem('userId',userId);
+console.log('[INIT] userId =',userId);
 
-// Telegram WebApp ready
-try{if(window.Telegram&&window.Telegram.WebApp){window.Telegram.WebApp.ready();window.Telegram.WebApp.expand()}}catch(e){}
 var cartCount=0,currentTab=0,exploreOffset=0,exploreQuery='',exploreLoading=false,exploreDone=false;
 var loginStep=1,loginPhone='';
 const DEFAULT_REF='https://app.meesho.com/2yoV/r99th0qd?via=8ghwzu&from=account_section';
@@ -544,13 +558,14 @@ async function loadAccount(){
   try{
     var r=await fetch(API+'/api/user',{headers:headers()});
     var d=await r.json();
-    $('userName').textContent=d.name||d.phone||'User';
-    $('userPhone').textContent=d.phone?'Phone: '+d.phone:'Tap to login';
-    if(d.referral_link){
-      var refShort=d.referral_link.length>40?d.referral_link.substring(0,40)+'...':d.referral_link;
-      $('userPhone').innerHTML+=(d.phone?'<br>':'')+'<span style="font-size:11px;color:rgba(255,255,255,.7);word-break:break-all">Ref: '+refShort+'</span>';
+    if(d.error||!d.phone){
+      $('userName').textContent='Guest User';
+      $('userPhone').innerHTML='Tap <b>Login</b> to connect your Meesho account<br><span style="font-size:11px;color:rgba(255,255,255,.5)">User ID: '+userId+'</span>';
+    }else{
+      $('userName').textContent=d.name||d.phone||'User';
+      $('userPhone').innerHTML='Phone: '+d.phone+'<br><span style="font-size:11px;color:rgba(255,255,255,.5)">User ID: '+userId+'</span>';
     }
-  }catch(e){}
+  }catch(e){$('userName').textContent='Guest User'}
   try{
     var r=await fetch(API+'/api/wallet',{headers:headers()});
     var d=await r.json();
@@ -574,7 +589,7 @@ async function loadAccount(){
     var r=await fetch(API+'/api/accounts',{headers:headers()});
     var accs=await r.json();
     var list=Array.isArray(accs)?accs:[];
-    if(!list.length){$('accountsList').innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">No accounts linked</div>';return}
+    if(!list.length){$('accountsList').innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">No accounts linked. Login above to link your Meesho account.</div>';return}
     $('accountsList').innerHTML=list.map(function(a){
       var statusCls=a.meesho_user_id?'active':'inactive';
       var statusText=a.meesho_user_id?'Active':'Inactive';
@@ -623,9 +638,12 @@ async function handleLogin(){
     if(!loginPhone||loginPhone.length<10){toast('Enter valid phone number');return}
     $('loginBtn').disabled=true;$('loginBtn').textContent='Sending...';
     try{
-      await fetch(API+'/api/auth/otp_send',{method:'POST',headers:headers(),body:JSON.stringify({phone_number:loginPhone})});
-      loginStep=2;$('otpWrap').style.display='block';$('refWrap').style.display='none';$('loginBtn').textContent='Verify OTP';$('loginTitle').textContent='Verify OTP';$('loginSub').textContent='Enter the OTP sent to '+loginPhone;
-      toast('OTP sent!');
+      var r=await fetch(API+'/api/auth/otp_send',{method:'POST',headers:headers(),body:JSON.stringify({phone_number:loginPhone})});
+      var d=await r.json();
+      if(d.ok){
+        loginStep=2;$('otpWrap').style.display='block';$('refWrap').style.display='none';$('loginBtn').textContent='Verify OTP';$('loginTitle').textContent='Verify OTP';$('loginSub').textContent='Enter the OTP sent to '+loginPhone;
+        toast('OTP sent!');
+      }else toast(d.error||'Failed to send OTP');
     }catch(e){toast('Failed to send OTP')}
     $('loginBtn').disabled=false;
   }else{
@@ -636,10 +654,20 @@ async function handleLogin(){
       var r=await fetch(API+'/api/auth/otp_verify',{method:'POST',headers:headers(),body:JSON.stringify({phone_number:loginPhone,otp:otp})});
       var d=await r.json();
       if(d.ok){
+        // Save phone + referral to user profile
         var refLink=$('loginRef').value.trim()||DEFAULT_REF;
         await fetch(API+'/api/user',{method:'POST',headers:headers(),body:JSON.stringify({phone:loginPhone,referral_link:refLink})});
+        // Save account from OTP result
+        if(d.account){
+          await fetch(API+'/api/accounts/add',{method:'POST',headers:headers(),body:JSON.stringify({
+            phone:loginPhone,
+            meesho_user_id:d.account.user_id||'',
+            xo:d.account.xo||'',
+            instance_id:d.account.instance_id||''
+          })});
+        }
         toast('Logged in!');closeLogin();loadAccount();
-      } else toast('Invalid OTP');
+      } else toast(d.error||'Invalid OTP');
     }catch(e){toast('Invalid OTP')}
     $('loginBtn').disabled=false;$('loginBtn').textContent='Verify OTP';
   }
