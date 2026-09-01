@@ -286,7 +286,7 @@ input,button{font-family:inherit;outline:none;border:none}
 </nav>
 
 <script>
-var API='';
+var API=(location.hostname==='localhost'||location.hostname==='127.0.0.1')?'':'https://cheerful-adaptation.up.railway.app';
 var userId=localStorage.getItem('userId')||('u'+Math.random().toString(36).slice(2,10));
 localStorage.setItem('userId',userId);
 var cartCount=0,currentTab=0,exploreOffset=0,exploreQuery='',exploreLoading=false,exploreDone=false;
