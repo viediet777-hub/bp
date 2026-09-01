@@ -523,7 +523,9 @@ async function placeOrder(){
     var r=await fetch(API+'/api/orders/place',{method:'POST',headers:headers(),body:JSON.stringify({address:addrText})});
     var d=await r.json();
     if(d.ok){toast('Order placed! #'+d.order_id);loadCart();switchTab(3)}
-    else toast(d.error||'Failed to place order');
+    else if(d.error==='insufficient wallet'){
+      toast('Need Rs.'+d.needed+' more (balance: Rs.'+(d.balance||0)+'). Add money or switch to FREE mode.');
+    }else toast(d.error||'Failed to place order');
   }catch(e){toast('Failed to place order')}
 }
 

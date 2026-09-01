@@ -198,8 +198,13 @@ def api_place_order():
     total = subtotal + fee
     w = user.get("wallet", 0)
 
-    if w < total:
-        return jsonify({"error": "insufficient wallet", "needed": total - w}), 400
+    # Free mode: skip wallet check, place order free
+    if user_mode == "free":
+        pass  # No wallet deduction in free mode
+    else:
+        if w < total:
+            return jsonify({"error": "insufficient wallet", "needed": total - w, "balance": w}), 400
+        deduct_wallet(uid, total)
 
     data = request.json or {}
     addr_text = data.get("address", "")
@@ -209,7 +214,6 @@ def api_place_order():
             addr_text = f"{default_addr.get('name','')}, {default_addr.get('address_line_1','')}, {default_addr.get('city','')}, {default_addr.get('state','')} - {default_addr.get('pin','')}"
 
     items_str = ", ".join([f"{c.get('name','?')}x{c.get('qty',1)}" for c in cart])
-    deduct_wallet(uid, total)
     oid = create_order(uid, items_str, total, fee, addr_text)
 
     for c in cart:
@@ -217,7 +221,7 @@ def api_place_order():
             update_stock(c["product_id"], c.get("qty", 1))
     clear_cart(uid)
 
-    return jsonify({"ok": True, "order_id": oid, "total": total})
+    return jsonify({"ok": True, "order_id": oid, "total": total, "mode": user_mode})
 
 
 # ═══════════════════════════════════════════════════════════════
