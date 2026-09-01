@@ -602,7 +602,7 @@ def api_meesho_search():
     uid = get_uid()
     if uid and offer:
         acc = get_active_meesho_account(uid)
-        if acc and not acc.get("is_first_order", 1):
+        if acc and not int(acc.get("is_first_order", 1)):
             offer = None
     result = search_meesho(query, offer=offer)
     return jsonify(result or {"catalogs": []})
@@ -637,7 +637,7 @@ def api_product_by_link():
     uid = get_uid()
     if uid and offer:
         acc = get_active_meesho_account(uid)
-        if acc and not acc.get("is_first_order", 1):
+        if acc and not int(acc.get("is_first_order", 1)):
             offer = None
     result = get_meesho_product(pid, offer=offer)
     if result:
@@ -654,7 +654,7 @@ def api_meesho_product():
     uid = get_uid()
     if uid and offer:
         acc = get_active_meesho_account(uid)
-        if acc and not acc.get("is_first_order", 1):
+        if acc and not int(acc.get("is_first_order", 1)):
             offer = None
     result = get_meesho_product(pid, offer=offer)
     if result:

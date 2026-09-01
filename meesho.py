@@ -936,6 +936,11 @@ def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True):
     else:
         order_total = review.get("effective_total")
     if order_total is None or order_total <= 0:
+        order_total = review.get("effective_total")
+    if order_total is None or order_total <= 0:
+        items = review.get("items") or []
+        order_total = sum(float(it.get("price", 0)) * int(it.get("quantity", 1)) for it in items) or 1
+    if order_total is None or order_total <= 0:
         print(f"[FRESH_CHECKOUT] zero_amt: {order_total}", flush=True)
         return None
     return {"cs": cs, "addr": addr, "amt": int(round(order_total)),
