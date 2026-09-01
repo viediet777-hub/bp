@@ -544,33 +544,82 @@ def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, 
 
 
 def real_cart_review(acc, cart_session=None):
-    """Get real Meesho cart review via /api/8.0/cart (default flow)"""
+    """Get real Meesho cart review via /api/9.0/cart (review flow).
+    CRITICAL: context='review' + identifier='buy_now' matches the real app's
+    cart-review call. Using 'atc_cart_v2' + 'default' gives an empty cart."""
     body = {
-        "context": "atc_cart_v2",
-        "identifier": "default",
-        "cart_session": cart_session,
-        "dest_pin": None, "address_id": None,
-        "payment_modes": None,
-        "replaceable": None, "item": None,
+        "context": "review", "identifier": "buy_now",
+        "cart_session": cart_session or "",
+        "dest_pin": None, "address_id": None, "customerAmount": None,
+        "payment_modes": None, "replaceable": None, "item": None,
         "payment_instrument": None, "bank_offers": None,
-        "filter_products": None, "is_self_pickup": None,
+        "filter_products": True, "is_self_pickup": None,
         "self_pickup_address": None, "is_emi": None,
         "user_id": int(acc.get("user_id", 0)),
     }
     try:
-        with httpx.Client(timeout=20.0) as client:
-            resp = client.post(f"{MEESHO_API}/8.0/cart",
+        with httpx.Client(timeout=25.0) as client:
+            resp = client.post(f"{MEESHO_API}/9.0/cart",
                                headers=logged_in_headers(acc), json=body)
             data = resp.json() or {}
             if data.get("success"):
                 result = data.get("result", {})
+                items = []
+                for s in (result.get("splits") or []):
+                    sup = s.get("supplier") or {}
+                    for p in (s.get("products") or []):
+                        imgs = p.get("images") or []
+                        items.append({
+                            "identifier": p.get("identifier"),
+                            "product_id": p.get("product_id"),
+                            "catalog_id": (p.get("catalog") or {}).get("id") if isinstance(p.get("catalog"), dict) else None,
+                            "name": p.get("name"),
+                            "supplier_id": sup.get("id"),
+                            "supplier_name": sup.get("name"),
+                            "variation_id": p.get("variation_id"),
+                            "variation": p.get("variation"),
+                            "quantity": int(p.get("quantity") or 1),
+                            "max_quantity": int(p.get("max_quantity") or 10),
+                            "price": p.get("price"),
+                            "mrp": p.get("mrp"),
+                            "original_price": p.get("original_price"),
+                            "image": (imgs[0] if imgs else None),
+                            "images": imgs,
+                            "price_type_id": (p.get("price_unbundling") or {}).get("selected_price_type_id"),
+                            "discount_text": p.get("discount_text"),
+                        })
+                addr_raw = result.get("address") or {}
+                addr = None
+                if isinstance(addr_raw, dict) and addr_raw.get("id"):
+                    coords = addr_raw.get("coordinates") or {}
+                    addr = {
+                        "id": addr_raw.get("id"),
+                        "name": addr_raw.get("name"),
+                        "mobile": str(addr_raw.get("mobile") or ""),
+                        "pin": addr_raw.get("pin"),
+                        "city": addr_raw.get("city"),
+                        "state": addr_raw.get("state"),
+                        "address_line_1": addr_raw.get("address_line_1"),
+                        "address_line_2": addr_raw.get("address_line_2"),
+                        "landmark": addr_raw.get("landmark"),
+                        "address_type": addr_raw.get("address_type"),
+                        "latitude": coords.get("latitude") if isinstance(coords, dict) else addr_raw.get("latitude"),
+                        "longitude": coords.get("longitude") if isinstance(coords, dict) else addr_raw.get("longitude"),
+                        "pin_serviceable": addr_raw.get("pin_serviceable", True),
+                    }
+                um = result.get("user_meta") or {}
                 return {
                     "ok": True,
                     "cart_session": data.get("cart_session"),
                     "effective_total": result.get("effective_total"),
+                    "effective_total_for_upi_plugin": result.get("effective_total_for_upi_plugin"),
                     "total_quantity": result.get("total_quantity"),
-                    "items": result.get("items", []),
+                    "items": items,
                     "splits": result.get("splits", []),
+                    "address": addr,
+                    "user_meta": um,
+                    "is_first_order": bool(um.get("is_first_order")),
+                    "price_break_up": result.get("price_break_up", []),
                 }
             return {"ok": False, "error": data.get("error_type", "review_failed"), "raw": data}
     except Exception as e:
@@ -578,12 +627,11 @@ def real_cart_review(acc, cart_session=None):
 
 
 def real_cart_remove(acc, item_identifier, cart_session):
-    """Remove item from real Meesho cart"""
+    """Remove item from real Meesho cart via /api/1.0/cart/remove"""
     body = {
-        "context": "atc_cart_v2",
-        "identifier": "default",
+        "context": "atc_cart_v2", "identifier": "buy_now",
         "cart_session": cart_session,
-        "item": {"identifier": item_identifier},
+        "items": [item_identifier] if isinstance(item_identifier, str) else item_identifier,
         "user_id": int(acc.get("user_id", 0)),
     }
     try:
@@ -626,10 +674,10 @@ def real_cart_sync(acc, local_items, cart_session=None):
 
 
 def real_bind_address(acc, cart_session, address_id, dest_pin=None):
-    """Bind address to cart via /api/1.0/cart/location"""
+    """Bind address to cart via /api/1.0/cart/location.
+    CRITICAL: context='review' + identifier='buy_now' matches the real app."""
     body = {
-        "context": "atc_review",
-        "identifier": "default",
+        "context": "review", "identifier": "buy_now",
         "cart_session": cart_session,
         "dest_pin": dest_pin,
         "address_id": int(address_id),
@@ -656,16 +704,16 @@ def real_bind_address(acc, cart_session, address_id, dest_pin=None):
 
 
 def real_paymentinfo(acc, cart_session, payment_modes=None):
-    """Get payment info via /api/1.0/cart/paymentinfo (atc_payment_summary flow)"""
+    """Get payment info via /api/1.0/cart/paymentinfo.
+    CRITICAL: context='payment_summary' + identifier='buy_now' matches real app."""
     body = {
-        "context": "atc_payment_summary",
-        "identifier": "default",
+        "context": "payment_summary", "identifier": "buy_now",
         "cart_session": cart_session,
         "dest_pin": None,
         "address_id": None,
         "customerAmount": None,
-        "payment_modes": payment_modes or ["cod"],
-        "replaceable": False,
+        "payment_modes": payment_modes or ["upi_qr"],
+        "replaceable": None,
         "item": None,
         "payment_instrument": None,
         "bank_offers": None,
@@ -697,7 +745,8 @@ def real_paymentinfo(acc, cart_session, payment_modes=None):
 
 
 def real_address_create(acc, name, mobile, pin, city, state, line1, line2="", landmark="", addr_type="Home"):
-    """Create address on Meesho via /api/2.0/addresses"""
+    """Create address on Meesho via /api/2.0/addresses.
+    CRITICAL: cart_identifier='buy_now' matches the real app."""
     body = {
         "alternative_mobile": None,
         "pin": str(pin),
@@ -716,7 +765,7 @@ def real_address_create(acc, name, mobile, pin, city, state, line1, line2="", la
     }
     try:
         with httpx.Client(timeout=20.0) as client:
-            resp = client.post(f"{MEESHO_API}/2.0/addresses?context=cart&cart_identifier=default",
+            resp = client.post(f"{MEESHO_API}/2.0/addresses?context=cart&cart_identifier=buy_now",
                                headers=logged_in_headers(acc), json=body)
             data = resp.json() or {}
             addr = data.get("address", {})
@@ -725,6 +774,142 @@ def real_address_create(acc, name, mobile, pin, city, state, line1, line2="", la
             return {"ok": False, "error": data.get("error_type", "address_create_failed"), "raw": data}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+def real_cart_add_many(acc, items, cart_session=""):
+    """Add multiple items to real Meesho cart in ONE call via /api/1.0/cart/add.
+    CRITICAL: identifier='buy_now' so items land in the checkout/review cart."""
+    h = logged_in_headers(acc)
+    its = []
+    for li in items:
+        its.append({
+            "identifier": "buy_now",
+            "product_id": int(li.get("product_id") or 0),
+            "supplier_id": int(li["supplier_id"]) if li.get("supplier_id") else None,
+            "variation_id": li.get("variation_id"),
+            "variation": li.get("variation") or li.get("variation_name") or "Free Size",
+            "quantity": int(li.get("quantity") or li.get("qty") or 1),
+            "selected_price_type_id": li.get("price_type_id") or "premium_return_price",
+            "client_metadata": None,
+        })
+    body = {
+        "context": "pdp", "identifier": "buy_now",
+        "cart_session": cart_session or "",
+        "replaceable": False, "items": its,
+        "address_id": None, "user_id": int(acc.get("user_id", 0)),
+    }
+    try:
+        with httpx.Client(timeout=25.0) as client:
+            resp = client.post(f"{MEESHO_API}/1.0/cart/add", headers=h, json=body)
+            data = resp.json() or {}
+            print(f"[CART_ADD_MANY] resp={resp.status_code} data={str(data)[:500]}", flush=True)
+            if data.get("success"):
+                new_cs = data.get("cart_session") or cart_session
+                result = data.get("result", {})
+                return {
+                    "ok": True, "success": True,
+                    "cart_session": new_cs,
+                    "effective_total": result.get("effective_total"),
+                    "total_quantity": result.get("total_quantity"),
+                    "splits": result.get("splits", []),
+                }
+            ecode = (data.get("error") or {}).get("code") if isinstance(data.get("error"), dict) else None
+            if ecode == "CART_OOS" and resp.status_code == 200:
+                for li in its:
+                    li["selected_price_type_id"] = "basic_return_price"
+                body["items"] = its
+                resp2 = client.post(f"{MEESHO_API}/1.0/cart/add", headers=h, json=body)
+                data2 = resp2.json() or {}
+                if data2.get("success"):
+                    new_cs = data2.get("cart_session") or cart_session
+                    result = data2.get("result", {})
+                    return {"ok": True, "success": True, "cart_session": new_cs,
+                            "effective_total": result.get("effective_total"),
+                            "total_quantity": result.get("total_quantity"),
+                            "splits": result.get("splits", [])}
+            return {"ok": False, "error": data.get("error_type", "add_failed"), "raw": data}
+    except Exception as e:
+        print(f"[CART_ADD_MANY] EXCEPTION: {e}", flush=True)
+        return {"ok": False, "error": str(e)}
+
+
+def real_fetch_addresses(acc):
+    """Fetch real address list from Meesho GET /api/3.0/addresses"""
+    try:
+        uid = int(acc.get("user_id", 0))
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(
+                f"{MEESHO_API}/3.0/addresses?offset=0&limit=50&check_pin=true"
+                f"&context=cart&cart_identifier=buy_now&user_id={uid}",
+                headers=logged_in_headers(acc))
+            data = resp.json() or {}
+            addrs = data.get("addresses") or []
+            out = []
+            for a in addrs:
+                if not isinstance(a, dict) or not a.get("id"):
+                    continue
+                coords = a.get("coordinates") or {}
+                out.append({
+                    "id": a.get("id"), "name": a.get("name"),
+                    "mobile": str(a.get("mobile") or ""),
+                    "pin": a.get("pin"), "city": a.get("city"), "state": a.get("state"),
+                    "address_line_1": a.get("address_line_1"),
+                    "address_line_2": a.get("address_line_2"),
+                    "landmark": a.get("landmark"),
+                    "address_type": a.get("address_type"),
+                    "latitude": coords.get("latitude") if isinstance(coords, dict) else a.get("latitude"),
+                    "longitude": coords.get("longitude") if isinstance(coords, dict) else a.get("longitude"),
+                    "pin_serviceable": a.get("pin_serviceable", True),
+                })
+            return out
+    except Exception as e:
+        print(f"[FETCH_ADDR] EXCEPTION: {e}", flush=True)
+        return []
+
+
+def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True):
+    """Run review -> bind address -> (paymentinfo) with fresh sessions.
+    Returns dict(cs, addr, amt, order_total, upi_amount) or None."""
+    review = real_cart_review(acc, cart_session)
+    if not review.get("ok") or not review.get("cart_session"):
+        print(f"[FRESH_CHECKOUT] review_failed: {review}", flush=True)
+        return None
+    cs = review["cart_session"]
+    addr = review.get("address") or {}
+    if not addr.get("id") and addr.get("address_id"):
+        addr["id"] = addr["address_id"]
+    if not (addr and addr.get("id")):
+        acc_addrs = real_fetch_addresses(acc)
+        if acc_addrs:
+            addr = acc_addrs[0]
+        else:
+            print(f"[FRESH_CHECKOUT] no_address", flush=True)
+            return None
+    bind_result = real_bind_address(acc, cs, addr["id"], addr.get("pin"))
+    if not bind_result.get("ok"):
+        print(f"[FRESH_CHECKOUT] bind_failed: {bind_result}", flush=True)
+        return None
+    cs = bind_result.get("cart_session") or cs
+    order_total = upi_amount = None
+    if need_paymentinfo:
+        pi = real_paymentinfo(acc, cs, ["upi_qr"])
+        if pi.get("ok"):
+            order_total = pi.get("effective_total")
+            upi_amount = pi.get("effective_total_for_upi_plugin") or order_total
+            new_cs = pi.get("cart_session")
+            if new_cs:
+                cs = new_cs
+        if order_total is None or order_total <= 0:
+            order_total = review.get("effective_total")
+    else:
+        order_total = review.get("effective_total")
+    if order_total is None or order_total <= 0:
+        print(f"[FRESH_CHECKOUT] zero_amt: {order_total}", flush=True)
+        return None
+    return {"cs": cs, "addr": addr, "amt": int(round(order_total)),
+            "order_total": order_total, "upi_amount": upi_amount,
+            "items": review.get("items") or [], "total_quantity": review.get("total_quantity"),
+            "effective_total": review.get("effective_total")}
 
 
 def real_preorder(acc, cart_session, address_id, payment_method="COD",
@@ -868,8 +1053,9 @@ def check_number(phone):
 __all__ = [
     "get_meesho_offer", "search_meesho", "get_meesho_product",
     "send_otp", "verify_otp", "check_number",
-    "logged_in_headers", "real_cart_add", "real_cart_review", "real_cart_remove",
-    "real_cart_clear", "real_cart_sync", "real_bind_address", "real_paymentinfo",
-    "real_address_create", "real_preorder", "real_payment_status",
-    "real_preorder_status", "real_payment_options",
+    "logged_in_headers", "real_cart_add", "real_cart_add_many", "real_cart_review",
+    "real_cart_remove", "real_cart_clear", "real_cart_sync",
+    "real_bind_address", "real_paymentinfo", "real_address_create",
+    "real_fetch_addresses", "real_preorder", "real_payment_status",
+    "real_preorder_status", "real_payment_options", "fresh_checkout_state",
 ]

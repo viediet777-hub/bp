@@ -26,9 +26,10 @@ from gateway import generate_txn_id, create_upi_link, get_qr_url, verify_payment
 from config import ORDER_FEE, WALLET_MIN, WALLET_MAX, GW_UPI_ID, GW_UPI_NAME, ADMIN_IDS
 from meesho import (
     get_meesho_offer, search_meesho, get_meesho_product, send_otp, verify_otp, check_number,
-    real_cart_add, real_cart_review, real_cart_clear, real_cart_sync, real_bind_address,
-    real_paymentinfo, real_address_create, real_preorder, real_payment_status,
-    real_preorder_status, real_payment_options,
+    real_cart_add, real_cart_add_many, real_cart_review, real_cart_clear, real_cart_sync,
+    real_bind_address, real_paymentinfo, real_address_create, real_fetch_addresses,
+    real_preorder, real_payment_status, real_preorder_status, real_payment_options,
+    fresh_checkout_state,
 )
 
 app = Flask(__name__)
@@ -106,6 +107,43 @@ def api_toggle_mode():
         return jsonify({"ok": False, "error": "admin only"})
     new_mode = toggle_user_mode(uid)
     return jsonify({"ok": True, "mode": new_mode})
+
+
+@app.route("/api/meesho/addresses")
+def api_meesho_addresses():
+    uid = get_uid()
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"addresses": []})
+    addrs = real_fetch_addresses(acc)
+    return jsonify({"addresses": addrs})
+
+
+@app.route("/api/cart/sync", methods=["POST"])
+def api_cart_sync():
+    uid = get_uid()
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"ok": False, "error": "no account"})
+    cart = get_cart(uid)
+    if not cart:
+        return jsonify({"ok": True, "message": "cart empty"})
+    cs = get_cart_session(uid)
+    # Push all items to real Meesho cart
+    valid_items = [c for c in cart if c.get("product_id")]
+    if valid_items:
+        # Clear existing
+        existing = real_cart_review(acc, cs)
+        if existing.get("ok") and existing.get("items"):
+            for ei in existing["items"]:
+                if ei.get("identifier") and existing.get("cart_session"):
+                    real_cart_remove(acc, ei["identifier"], existing["cart_session"])
+        # Add all items
+        add_r = real_cart_add_many(acc, valid_items, cs or "")
+        if add_r.get("ok"):
+            cs = add_r.get("cart_session", cs)
+            set_cart_session(uid, cs)
+    return jsonify({"ok": True, "cart_session": cs})
 
 
 @app.route("/api/orders/count")
@@ -241,41 +279,34 @@ def api_place_order():
 
     # Get persisted cart_session, or sync local cart to real Meesho cart
     cart_session = get_cart_session(uid)
-    if not cart_session:
-        sync_r = real_cart_sync(acc, cart, cart_session)
-        cart_session = sync_r.get("cart_session")
-        if cart_session:
-            set_cart_session(uid, cart_session)
 
-    # Sync address to Meesho (reuse meesho_address_id if already created)
-    meesho_addr_id = addr.get("meesho_address_id")
-    if not meesho_addr_id:
-        sync_addr = real_address_create(acc, addr.get("name", ""), addr.get("mobile", ""),
-                                        addr.get("pin", ""), addr.get("city", ""),
-                                        addr.get("state", ""), addr.get("address_line_1", ""),
-                                        addr.get("address_line_2", ""),
-                                        addr.get("landmark", ""), addr.get("address_type", "Home"))
-        meesho_addr_id = sync_addr.get("meesho_address_id")
+    # Push local cart to real Meesho cart via multi-item add
+    valid_items = [c for c in cart if c.get("product_id")]
+    if valid_items:
+        # Clear any existing real cart items first
+        existing_review = real_cart_review(acc, cart_session)
+        if existing_review.get("ok") and existing_review.get("items"):
+            for ei in existing_review["items"]:
+                if ei.get("identifier") and existing_review.get("cart_session"):
+                    real_cart_remove(acc, ei["identifier"], existing_review["cart_session"])
+        # Push the full bag in one call
+        add_r = real_cart_add_many(acc, valid_items, cart_session or "")
+        if add_r.get("ok"):
+            cart_session = add_r.get("cart_session", cart_session)
+            if cart_session:
+                set_cart_session(uid, cart_session)
 
-    if not meesho_addr_id:
+    # Use fresh_checkout_state to run review -> bind -> paymentinfo in one flow
+    st = fresh_checkout_state(acc, cart_session, need_paymentinfo=(payment_method != "COD"))
+    if not st:
         if user_mode == "paid":
             add_wallet(uid, our_total)
-        return jsonify({"error": "Could not create address on Meesho"}), 400
+        return jsonify({"error": "Could not load the live Meesho cart."}), 400
 
-    if meesho_addr_id:
-        bind_r = real_bind_address(acc, cart_session, meesho_addr_id, addr.get("pin"))
-        if bind_r.get("cart_session"):
-            cart_session = bind_r["cart_session"]
-
-    if payment_method == "UPI":
-        pay_modes = ["juspay"]
-    else:
-        pay_modes = ["cod"]
-    payinfo = real_paymentinfo(acc, cart_session, pay_modes)
-    if payinfo.get("ok"):
-        cart_session = payinfo.get("cart_session", cart_session)
-
-    meesho_amount = payinfo.get("effective_total", subtotal) if payinfo.get("ok") else subtotal
+    cart_session = st["cs"]
+    meesho_amount = st["order_total"] or subtotal
+    meesho_addr_id = st["addr"].get("id")
+    set_cart_session(uid, cart_session)
 
     order_r = real_preorder(acc, cart_session, meesho_addr_id,
                             payment_method=payment_method,
@@ -296,12 +327,23 @@ def api_place_order():
     clear_cart(uid)
     set_cart_session(uid, "")
 
+    # QR generation: use Meesho's QR first, fallback to our gateway QR
+    qr_base64 = order_r.get("qr_base64")
+    upi_intent_url = order_r.get("upi_intent_url")
+    if not qr_base64 and not upi_intent_url and payment_method.upper() in ("UPI", "PREPAID"):
+        txn_id = generate_txn_id(uid)
+        upi_intent_url = create_upi_link(txn_id, meesho_amount)
+        qr_url = get_qr_url(upi_intent_url)
+    else:
+        qr_url = ""
+
     return jsonify({
         "ok": True, "order_id": oid, "meesho_order_num": meesho_order_num,
         "total": our_total, "meesho_amount": meesho_amount,
         "payment_method": payment_method, "mode": user_mode,
-        "qr_base64": order_r.get("qr_base64"),
-        "upi_intent_url": order_r.get("upi_intent_url"),
+        "qr_base64": qr_base64,
+        "upi_intent_url": upi_intent_url,
+        "qr_url": qr_url,
         "payment_url": order_r.get("payment_url"),
     })
 
@@ -331,17 +373,34 @@ def api_checkout_summary():
     upi_amount = subtotal
     payinfo_ok = False
 
+    # Try to get real Meesho prices via cart review + paymentinfo
     if acc:
         cs = get_cart_session(uid)
+        if not cs:
+            # Push local cart to real Meesho cart first
+            valid_items = [c for c in cart if c.get("product_id")]
+            if valid_items:
+                add_r = real_cart_add_many(acc, valid_items, "")
+                if add_r.get("ok"):
+                    cs = add_r.get("cart_session")
         if cs:
-            pay_cod = real_paymentinfo(acc, cs, ["cod"])
-            if pay_cod.get("ok"):
-                cod_amount = pay_cod.get("effective_total", subtotal)
+            # Get real cart review
+            review = real_cart_review(acc, cs)
+            if review.get("ok"):
+                cs = review.get("cart_session", cs)
+                set_cart_session(uid, cs)
+                real_subtotal = review.get("effective_total") or subtotal
+                cod_amount = real_subtotal
+                upi_amount = review.get("effective_total_for_upi_plugin") or real_subtotal
                 payinfo_ok = True
-            pay_upi = real_paymentinfo(acc, cs, ["juspay"])
-            if pay_upi.get("ok"):
-                upi_amount = pay_upi.get("effective_total", subtotal)
-                payinfo_ok = True
+                # Get real COD amount
+                pay_cod = real_paymentinfo(acc, cs, ["cod"])
+                if pay_cod.get("ok"):
+                    cod_amount = pay_cod.get("effective_total", cod_amount)
+                # Get real UPI amount
+                pay_upi = real_paymentinfo(acc, cs, ["upi_qr"])
+                if pay_upi.get("ok"):
+                    upi_amount = pay_upi.get("effective_total_for_upi_plugin") or pay_upi.get("effective_total", upi_amount)
 
     return jsonify({
         "items": cart,
@@ -775,6 +834,7 @@ def api_accounts():
     accs = get_meesho_accounts(uid)
     for a in accs:
         a.pop("xo", None)
+        a["phone_display"] = a.get("phone", "xxxx") if a.get("phone") and not a["phone"].startswith("xxxx") else "xxxx" + (a.get("phone", "")[-4:] if a.get("phone") else "????")
     return jsonify(accs)
 
 

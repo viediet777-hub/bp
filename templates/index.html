@@ -727,7 +727,11 @@ async function loadAccount(){
     $('accountsList').innerHTML=list.map(function(a){
       var statusCls=a.meesho_user_id?'active':'inactive';
       var statusText=a.meesho_user_id?'Active':'Inactive';
-      return '<div class="acc-card fade-up"><h4>'+a.phone+'</h4><p>ID: '+a.id+'</p><div class="status '+statusCls+'">'+statusText+'</div></div>';
+      var phone=a.phone_display||a.phone||'Unknown';
+      var userId=a.meesho_user_id||a.id||'';
+      var isFod=a.is_first_order?'First Order':'Regular';
+      var sessInfo=a.app_session_id?'Session: Active':'';
+      return '<div class="acc-card fade-up"><h4>'+phone+'</h4><p>User ID: '+userId+'</p><p style="font-size:11px;color:var(--text3)">'+isFod+(sessInfo?' | '+sessInfo:'')+'</p><div class="status '+statusCls+'">'+statusText+'</div></div>';
     }).join('');
   }catch(e){}
   loadAddresses();
