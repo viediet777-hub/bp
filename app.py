@@ -16,6 +16,7 @@ from database import (
     save_user_offer, get_user_offer,
     get_addresses, get_address, create_address, update_address,
     delete_address, set_default_address, get_default_address,
+    toggle_user_mode, get_user_mode, get_order_count,
 )
 from gateway import generate_txn_id, create_upi_link, get_qr_url, verify_payment
 from config import ORDER_FEE, WALLET_MIN, WALLET_MAX, GW_UPI_ID, GW_UPI_NAME
@@ -66,6 +67,33 @@ def api_delete_user():
     uid = get_uid()
     delete_user(uid)
     return jsonify({"ok": True})
+
+
+@app.route("/api/mode")
+def api_get_mode():
+    uid = get_uid()
+    if not uid:
+        return jsonify({"mode": "paid"})
+    mode = get_user_mode(uid)
+    return jsonify({"mode": mode})
+
+
+@app.route("/api/mode/toggle", methods=["POST"])
+def api_toggle_mode():
+    uid = get_uid()
+    if not uid:
+        return jsonify({"ok": False, "error": "login required"})
+    new_mode = toggle_user_mode(uid)
+    return jsonify({"ok": True, "mode": new_mode})
+
+
+@app.route("/api/orders/count")
+def api_order_count():
+    uid = get_uid()
+    if not uid:
+        return jsonify({"count": 0})
+    count = get_order_count(uid)
+    return jsonify({"count": count})
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -151,7 +179,9 @@ def api_place_order():
         return jsonify({"error": "cart empty"}), 400
 
     subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
-    total = subtotal + ORDER_FEE
+    user_mode = (user.get("mode") or "paid") if user else "paid"
+    fee = 0 if user_mode == "free" else ORDER_FEE
+    total = subtotal + fee
     w = user.get("wallet", 0)
 
     if w < total:
@@ -166,7 +196,7 @@ def api_place_order():
 
     items_str = ", ".join([f"{c.get('name','?')}x{c.get('qty',1)}" for c in cart])
     deduct_wallet(uid, total)
-    oid = create_order(uid, items_str, total, ORDER_FEE, addr_text)
+    oid = create_order(uid, items_str, total, fee, addr_text)
 
     for c in cart:
         if c.get("product_id"):
@@ -350,14 +380,20 @@ def api_check_number():
     if len(phone) < 10:
         return jsonify({"ok": False, "error": "Invalid number"})
     result = check_number(phone)
-    # Map to reference format
-    if result.get("registered"):
-        return jsonify({"ok": True, "eligible": True, "live": True,
-                        "title": "First-order eligible", "subtitle": "This number can use the FREE first-order discount",
-                        "duration": 3})
-    return jsonify({"ok": True, "eligible": False, "live": True,
-                    "title": "Not eligible", "subtitle": result.get("error", "Number not found on Meesho"),
-                    "duration": 0})
+    registered = result.get("registered", False)
+    if registered:
+        return jsonify({
+            "ok": True, "eligible": True, "live": True,
+            "registered": True,
+            "title": "Number Registered on Meesho",
+            "subtitle": "This number has an existing Meesho account. First-order discount may or may not apply — depends on order history.",
+            "duration": 3})
+    return jsonify({
+        "ok": True, "eligible": False, "live": True,
+        "registered": False,
+        "title": "Number NOT Registered",
+        "subtitle": result.get("error", "This number is not found on Meesho. New account = guaranteed 1st order discount!"),
+        "duration": 0})
 
 
 @app.route("/api/geocode")

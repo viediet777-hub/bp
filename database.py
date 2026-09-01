@@ -21,6 +21,7 @@ def init_db():
             address TEXT DEFAULT '',
             upi_id TEXT DEFAULT '',
             wallet INTEGER DEFAULT 0,
+            mode TEXT DEFAULT 'paid',
             referral_link TEXT DEFAULT '',
             created_at REAL DEFAULT 0
         );
@@ -108,6 +109,16 @@ def init_db():
         );
     """)
     conn.commit()
+    # Migrations for existing databases
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN mode TEXT DEFAULT 'paid'")
+    except Exception:
+        pass
+    try:
+        conn.execute("ALTER TABLE meesho_accounts ADD COLUMN instance_id TEXT DEFAULT ''")
+    except Exception:
+        pass
+    conn.commit()
     conn.close()
 
 
@@ -146,6 +157,31 @@ def delete_user(user_id):
     conn.execute("DELETE FROM wallet_tx WHERE user_id=?", (user_id,))
     conn.commit()
     conn.close()
+
+
+def toggle_user_mode(user_id):
+    conn = get_db()
+    row = conn.execute("SELECT mode FROM users WHERE user_id=?", (user_id,)).fetchone()
+    current = dict(row)["mode"] if row and "mode" in row.keys() else "paid"
+    new_mode = "free" if current == "paid" else "paid"
+    conn.execute("UPDATE users SET mode=? WHERE user_id=?", (new_mode, user_id))
+    conn.commit()
+    conn.close()
+    return new_mode
+
+
+def get_user_mode(user_id):
+    row = get_user(user_id)
+    if row and "mode" in row.keys():
+        return row["mode"]
+    return "paid"
+
+
+def get_order_count(user_id):
+    conn = get_db()
+    row = conn.execute("SELECT COUNT(*) as cnt FROM orders WHERE user_id=?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row)["cnt"] if row else 0
 
 
 def add_wallet(user_id, amount):

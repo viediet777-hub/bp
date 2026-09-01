@@ -20,7 +20,7 @@ from telegram.ext import (
     ContextTypes, MessageHandler, filters,
 )
 
-from config import BOT_TOKEN, ADMIN_IDS, GW_UPI_ID, GW_UPI_NAME, WALLET_MIN, WALLET_MAX, WEBAPP_URL
+from config import BOT_TOKEN, ADMIN_IDS, GW_UPI_ID, GW_UPI_NAME, WALLET_MIN, WALLET_MAX, WEBAPP_URL, ORDER_FEE
 from database import (
     get_user, create_user, get_all_orders, add_wallet,
     get_wallet_tx, create_wallet_tx,
@@ -29,6 +29,7 @@ from database import (
     get_orders, get_cart,
     get_addresses, get_address, create_address, update_address,
     delete_address, set_default_address, get_default_address,
+    toggle_user_mode, get_user_mode, get_order_count,
 )
 from gateway import generate_txn_id, create_upi_link, get_qr_url, verify_payment
 from meesho import get_meesho_offer, send_otp, verify_otp, check_number
@@ -57,13 +58,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(uid) or create_user(uid, update.effective_user.first_name)
     wallet = user.get("wallet", 0)
     accs = get_meesho_accounts(uid)
-    offer = get_user_offer(uid)
-
-    offer_text = ""
-    if offer:
-        offer_text = f"\n优惠: {offer.get('title','')} {offer.get('text','')}"
-    else:
-        offer_text = "\n优惠: Koi offer nahi. Roll karo!"
+    mode = user.get("mode", "paid") if user else "paid"
+    order_count = get_order_count(uid)
+    mode_label = "🟢 FREE Mode" if mode == "free" else "🔴 PAID Mode"
+    mode_fee = "No fee" if mode == "free" else f"₹{ORDER_FEE}/order fee"
 
     acc_text = f"\n📦 Accounts: {len(accs)}" if accs else "\n📦 Accounts: 0 (Add karo)"
 
@@ -71,21 +69,21 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🛍️ *SHOP*\n"
         f"{'━'*26}\n\n"
         f"💰 Wallet: *{fmt_price(wallet)}*\n"
-        f"{acc_text}{offer_text}\n\n"
+        f"_Mode: {mode_label} ({mode_fee})_\n"
+        f"📊 Total Orders: *{order_count}*"
+        f"{acc_text}\n\n"
         f"Neeche buttons se sab karo:"
     )
 
     rows = [
-        [InlineKeyboardButton("🎯 Roll Offer", callback_data="offer_roll"),
-         InlineKeyboardButton("💰 Add Wallet", callback_data="wallet_add")],
+        [InlineKeyboardButton("🛍️ Open Shop", web_app=WebAppInfo(url=WEBAPP_URL))],
+        [InlineKeyboardButton("💰 Add Wallet", callback_data="wallet_add"),
+         InlineKeyboardButton(f"🔄 Switch to {'PAID' if mode=='free' else 'FREE'}", callback_data="toggle_mode")],
         [InlineKeyboardButton("📍 My Address", callback_data="addr_list"),
          InlineKeyboardButton("📦 My Orders", callback_data="orders")],
         [InlineKeyboardButton("👤 My Account", callback_data="account_menu")],
         [InlineKeyboardButton("💳 Wallet History", callback_data="wallet_history")],
     ]
-
-    if WEBAPP_URL.startswith("https://"):
-        rows.insert(0, [InlineKeyboardButton("🛍️ Open Shop", web_app=WebAppInfo(url=WEBAPP_URL))])
 
     if is_admin(uid):
         rows.append([InlineKeyboardButton("👑 Admin Panel", callback_data="admin_panel")])
@@ -668,32 +666,29 @@ async def cb_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(uid) or create_user(uid, q.from_user.first_name)
     wallet = user.get("wallet", 0)
     accs = get_meesho_accounts(uid)
-    offer = get_user_offer(uid)
-
-    offer_text = ""
-    if offer:
-        offer_text = f"\n优惠: {offer.get('title','')} {offer.get('text','')}"
-    else:
-        offer_text = "\n优惠: Koi offer nahi. Roll karo!"
+    mode = user.get("mode", "paid") if user else "paid"
+    order_count = get_order_count(uid)
+    mode_label = "🟢 FREE Mode" if mode == "free" else "🔴 PAID Mode"
+    mode_fee = "No fee" if mode == "free" else f"₹{ORDER_FEE}/order fee"
 
     text = (
         f"🛍️ *SHOP*\n"
         f"{'━'*26}\n\n"
         f"💰 Wallet: *{fmt_price(wallet)}*\n"
-        f"📦 Accounts: {len(accs)}{offer_text}\n\n"
+        f"_Mode: {mode_label} ({mode_fee})_\n"
+        f"📊 Total Orders: *{order_count}*\n\n"
         f"Neeche buttons se sab karo:"
     )
 
     rows = [
-        [InlineKeyboardButton("🎯 Roll Offer", callback_data="offer_roll"),
-         InlineKeyboardButton("💰 Add Wallet", callback_data="wallet_add")],
+        [InlineKeyboardButton("🛍️ Open Shop", web_app=WebAppInfo(url=WEBAPP_URL))],
+        [InlineKeyboardButton("💰 Add Wallet", callback_data="wallet_add"),
+         InlineKeyboardButton(f"🔄 Switch to {'PAID' if mode=='free' else 'FREE'}", callback_data="toggle_mode")],
         [InlineKeyboardButton("📍 My Address", callback_data="addr_list"),
          InlineKeyboardButton("📦 My Orders", callback_data="orders")],
         [InlineKeyboardButton("👤 My Account", callback_data="account_menu")],
         [InlineKeyboardButton("💳 Wallet History", callback_data="wallet_history")],
     ]
-    if WEBAPP_URL.startswith("https://"):
-        rows.insert(0, [InlineKeyboardButton("🛍️ Open Shop", web_app=WebAppInfo(url=WEBAPP_URL))])
     if is_admin(uid):
         rows.append([InlineKeyboardButton("👑 Admin Panel", callback_data="admin_panel")])
 
@@ -923,6 +918,18 @@ async def cb_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cb_admin_panel(update, context)
     elif d == "admin_orders":
         await cb_admin_orders(update, context)
+    elif d == "toggle_mode":
+        await cb_toggle_mode(update, context)
+
+
+async def cb_toggle_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    uid = q.from_user.id
+    new_mode = toggle_user_mode(uid)
+    mode_label = "🟢 FREE Mode" if new_mode == "free" else "🔴 PAID Mode"
+    mode_fee = "No fee" if new_mode == "free" else f"₹{ORDER_FEE}/order fee"
+    await q.answer(f"Switched to {new_mode.upper()} mode!")
+    await cb_back(update, context)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -931,7 +938,9 @@ async def cb_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def run_flask():
     from app import app as flask_app
-    flask_app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
+    import os
+    port = int(os.environ.get("PORT", 5000))
+    flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 
 # ═══════════════════════════════════════════════════════════════

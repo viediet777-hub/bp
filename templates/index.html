@@ -185,6 +185,8 @@ input,button{font-family:inherit;outline:none;border:none}
   <div class="topbar"><h1>Account</h1></div>
   <div class="profile-card"><h3 id="userName">Guest User</h3><p id="userPhone">Tap to login</p></div>
   <div class="wallet-card"><div class="wl"><h4>Wallet Balance</h4><div class="wbal" id="walletBal">Rs.0</div></div></div>
+  <div style="margin:0 16px 8px" id="modeStatus"></div>
+  <div style="margin:0 16px 8px" id="orderCount"></div>
   <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
     <span>Delivery Addresses</span>
     <span style="font-size:12px;color:var(--accent);cursor:pointer" onclick="openAddAddress()">+ Add New</span>
@@ -284,7 +286,7 @@ input,button{font-family:inherit;outline:none;border:none}
 </nav>
 
 <script>
-var API=(location.hostname==='localhost'||location.hostname==='127.0.0.1')?'':'https://cheerful-adaptation.up.railway.app';
+var API='';
 var userId=localStorage.getItem('userId')||('u'+Math.random().toString(36).slice(2,10));
 localStorage.setItem('userId',userId);
 var cartCount=0,currentTab=0,exploreOffset=0,exploreQuery='',exploreLoading=false,exploreDone=false;
@@ -400,31 +402,13 @@ async function loadBanner(){
     var o=d.offer;
     if(o){
       var offerText=o.display_text||o.text||'Upto ₹180 OFF';
-      $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner"><h2>'+o.title+'</h2><p>'+o.subtitle+'</p><div class="banner-offer">'+offerText+'</div><button class="banner-btn" onclick="rollOffer()">Roll My Offer</button></div></div>';
+      $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner"><h2>'+o.title+'</h2><p>'+o.subtitle+'</p><div class="banner-offer">'+offerText+'</div></div></div>';
     }else{
-      $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner"><h2>Today\'s Special Deal</h2><p>Roll to unlock an exclusive discount!</p><button class="banner-btn" onclick="rollOffer()">Roll My Offer</button></div></div>';
+      $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner"><h2>180 OFF Auto-Applied</h2><p>Special discount on all products!</p><div class="banner-offer">Upto ₹180 OFF</div></div></div>';
     }
   }catch(e){
-    $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner"><h2>Today\'s Special Deal</h2><p>Roll to unlock an exclusive discount!</p><button class="banner-btn" onclick="rollOffer()">Roll My Offer</button></div></div>';
+    $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner"><h2>180 OFF Auto-Applied</h2><p>Special discount on all products!</p><div class="banner-offer">Upto ₹180 OFF</div></div></div>';
   }
-}
-
-async function rollOffer(){
-  try{
-    var btn=document.querySelector('.banner-btn');
-    if(btn){btn.disabled=true;btn.textContent='Rolling...'}
-    var r=await fetch(API+'/api/offers/roll',{method:'POST',headers:headers()});
-    var d=await r.json();
-    if(d.ok&&d.offer){
-      var o=d.offer;
-      var offerText=o.display_text||o.text||'Upto ₹180 OFF';
-      $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner" style="animation:pop .4s ease"><h2>'+o.title+'</h2><p>'+o.subtitle+'</p><div class="banner-offer">'+offerText+'</div><button class="banner-btn" onclick="rollOffer()">Roll Again</button></div></div>';
-      toast('Offer rolled!');
-    }else{
-      toast('No offer available');
-      if(btn){btn.disabled=false;btn.textContent='Roll My Offer'}
-    }
-  }catch(e){toast('Failed to roll offer')}
 }
 
 async function loadProducts(gridId){
@@ -563,6 +547,20 @@ async function loadAccount(){
     $('walletBal').textContent='Rs.'+(d.balance||0);
   }catch(e){}
   try{
+    var r=await fetch(API+'/api/mode',{headers:headers()});
+    var d=await r.json();
+    var mode=d.mode||'paid';
+    var modeLabel=mode==='free'?'🟢 FREE Mode':'🔴 PAID Mode';
+    var modeDesc=mode==='free'?'No order fee — ₹0':'Order fee: ₹5 per order';
+    var switchLabel=mode==='free'?'Switch to PAID':'Switch to FREE';
+    $('modeStatus').innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg);border-radius:10px"><div><b style="font-size:14px">'+modeLabel+'</b><br><span style="font-size:11px;color:var(--text2)">'+modeDesc+'</span></div><button onclick="switchMode()" style="padding:8px 14px;border-radius:8px;background:var(--accent);color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">'+switchLabel+'</button></div>';
+  }catch(e){}
+  try{
+    var r=await fetch(API+'/api/orders/count',{headers:headers()});
+    var d=await r.json();
+    $('orderCount').innerHTML='<div style="padding:10px 14px;background:var(--bg);border-radius:10px;text-align:center"><b style="font-size:20px;color:var(--accent)">'+(d.count||0)+'</b><br><span style="font-size:12px;color:var(--text2)">Total Orders Placed</span></div>';
+  }catch(e){}
+  try{
     var r=await fetch(API+'/api/accounts',{headers:headers()});
     var accs=await r.json();
     var list=Array.isArray(accs)?accs:[];
@@ -574,6 +572,15 @@ async function loadAccount(){
     }).join('');
   }catch(e){}
   loadAddresses();
+}
+
+async function switchMode(){
+  try{
+    var r=await fetch(API+'/api/mode/toggle',{method:'POST',headers:headers()});
+    var d=await r.json();
+    if(d.ok){toast('Switched to '+d.mode.toUpperCase()+' mode!');loadAccount()}
+    else toast('Failed to switch');
+  }catch(e){toast('Failed to switch mode')}
 }
 
 async function exportData(){
@@ -758,9 +765,13 @@ async function runNumberCheck(){
     var r=await fetch(API+'/api/check_number',{method:'POST',headers:headers(),body:JSON.stringify({phone_number:phone})});
     var d=await r.json();
     if(d.error){$('ncResult').innerHTML='<div style="padding:10px;background:#fdecea;border-radius:8px;color:#c0392b;font-size:13px">'+d.error+'</div>';return}
-    var cls=d.eligible?'background:#e8f5e9;color:#27ae60':'background:#fdecea;color:#c0392b';
-    var icon=d.eligible?'✅':'❌';
-    var title=d.eligible?'First-order ELIGIBLE':'Not eligible';
+    var registered=d.registered;
+    var cls,icon,title;
+    if(registered){
+      cls='background:#fff3cd;color:#856404';icon='&#9888;';title='Already Registered on Meesho';
+    }else{
+      cls='background:#e8f5e9;color:#27ae60';icon='&#10004;';title='NEW Number — First-order Discount Guaranteed!';
+    }
     var sub=d.subtitle||'';
     $('ncResult').innerHTML='<div style="padding:10px;border-radius:8px;font-size:13px;'+cls+'"><b>'+icon+' +91 '+phone+'</b><br>'+title+'<br><span style="font-size:11px;opacity:.8">'+sub+'</span></div>';
   }catch(e){$('ncResult').innerHTML='<div style="padding:10px;background:#fdecea;border-radius:8px;color:#c0392b;font-size:13px">Network error</div>'}
