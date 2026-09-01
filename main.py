@@ -30,7 +30,7 @@ from database import (
     get_orders, get_cart, get_all_users,
     get_addresses, get_address, create_address, update_address,
     delete_address, set_default_address, get_default_address,
-    toggle_user_mode, get_user_mode, get_order_count,
+    toggle_user_mode, get_user_mode, get_global_mode, set_global_mode, get_order_count,
 )
 from gateway import generate_txn_id, create_upi_link, get_qr_url, verify_payment
 from meesho import get_meesho_offer, send_otp, verify_otp, check_number
@@ -704,23 +704,15 @@ async def cb_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("Not admin!", show_alert=True)
         return
     orders = get_all_orders()
-    users = get_all_users()
-    user_lines = []
-    btns = []
-    for u in users[:20]:
-        mode_icon = "🟢" if u.get("mode") == "free" else "🔴"
-        uid = u["user_id"]
-        name = u.get("name", "") or str(uid)
-        wallet = u.get("wallet", 0)
-        user_lines.append(f"{mode_icon} {name} ({uid}) - ₹{wallet}")
-        btns.append([InlineKeyboardButton(
-            f"{mode_icon} {name}: {u.get('mode','paid').upper()}",
-            callback_data=f"admin_toggle_{uid}")])
-    users_text = "\n".join(user_lines) if user_lines else "No users yet"
-    btns.append([InlineKeyboardButton(f"📦 Orders ({len(orders)})", callback_data="admin_orders")])
-    btns.append([InlineKeyboardButton("⬅️ Back", callback_data="back")])
+    gm = get_global_mode()
+    gm_icon = "🟢 FREE" if gm == "free" else "🔴 PAID"
+    btns = [
+        [InlineKeyboardButton(f"🔄 Mode: {gm_icon} (tap to toggle)", callback_data="admin_toggle_global")],
+        [InlineKeyboardButton(f"📦 Orders ({len(orders)})", callback_data="admin_orders")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="back")],
+    ]
     await q.edit_message_text(
-        f"👑 *Admin Panel*\n\nTotal Orders: {len(orders)}\nTotal Users: {len(users)}\n\n*Users:*\n{users_text}",
+        f"👑 *Admin Panel*\n\nGlobal Mode: *{gm_icon}*\n(All users see this mode)\n\nTotal Orders: {len(orders)}",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(btns))
 
@@ -932,8 +924,8 @@ async def cb_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cb_admin_orders(update, context)
     elif d == "toggle_mode":
         await cb_toggle_mode(update, context)
-    elif d.startswith("admin_toggle_"):
-        await cb_admin_toggle_user(update, context)
+    elif d == "admin_toggle_global":
+        await cb_admin_toggle_global(update, context)
 
 
 async def cb_toggle_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -941,28 +933,20 @@ async def cb_toggle_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(q.from_user.id):
         await q.answer("Admin only!", show_alert=True)
         return
-    uid = q.from_user.id
-    new_mode = toggle_user_mode(uid)
+    new_mode = toggle_user_mode(q.from_user.id)
     mode_label = "🟢 FREE Mode" if new_mode == "free" else "🔴 PAID Mode"
-    mode_fee = "No fee" if new_mode == "free" else f"₹{ORDER_FEE}/order fee"
-    await q.answer(f"Switched to {new_mode.upper()} mode!")
-    await cb_back(update, context)
+    await q.answer(f"All users: {new_mode.upper()} mode!")
+    await cb_admin_panel(update, context)
 
 
-async def cb_admin_toggle_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cb_admin_toggle_global(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if not is_admin(q.from_user.id):
         await q.answer("Admin only!", show_alert=True)
         return
-    parts = q.data.split("_")
-    try:
-        target_uid = int(parts[2])
-    except (IndexError, ValueError):
-        await q.answer("Invalid user ID", show_alert=True)
-        return
-    new_mode = toggle_user_mode(target_uid)
+    new_mode = toggle_user_mode(q.from_user.id)
     mode_label = "🟢 FREE" if new_mode == "free" else "🔴 PAID"
-    await q.answer(f"User {target_uid} → {mode_label}")
+    await q.answer(f"Global mode: {mode_label} for ALL users!")
     await cb_admin_panel(update, context)
 
 

@@ -270,13 +270,23 @@ input,button{font-family:inherit;outline:none;border:none}
 <div class="modal-overlay" id="loginModal">
   <div class="modal">
     <h2 id="loginTitle">Login</h2>
-    <p id="loginSub">Enter your phone number to continue</p>
-    <input type="tel" id="loginPhone" placeholder="Phone number" maxlength="10">
-    <div id="refWrap" style="margin-top:0;margin-bottom:12px">
-      <input type="text" id="loginRef" placeholder="Referral link (optional)" style="width:100%;padding:14px 16px;border-radius:12px;background:var(--bg);border:1px solid var(--border);font-size:13px">
-      <p style="font-size:11px;color:var(--text3);margin-top:4px">Leave blank to use default referral</p>
+    <p id="loginSub">Choose login method</p>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button onclick="switchLoginMethod('otp')" id="loginTabOtp" style="flex:1;padding:10px;border-radius:10px;background:var(--accent);color:#fff;font-weight:700;font-size:13px;cursor:pointer">OTP Login</button>
+      <button onclick="switchLoginMethod('json')" id="loginTabJson" style="flex:1;padding:10px;border-radius:10px;background:var(--bg);color:var(--text2);font-weight:700;font-size:13px;cursor:pointer;border:1px solid var(--border)">JSON Login</button>
     </div>
-    <div id="otpWrap" style="display:none"><input type="tel" id="loginOtp" placeholder="Enter OTP" maxlength="6"></div>
+    <div id="loginOtpWrap">
+      <input type="tel" id="loginPhone" placeholder="Phone number" maxlength="10">
+      <div id="refWrap" style="margin-top:0;margin-bottom:12px">
+        <input type="text" id="loginRef" placeholder="Referral link (optional)" style="width:100%;padding:14px 16px;border-radius:12px;background:var(--bg);border:1px solid var(--border);font-size:13px">
+        <p style="font-size:11px;color:var(--text3);margin-top:4px">Leave blank to use default referral</p>
+      </div>
+      <div id="otpWrap" style="display:none"><input type="tel" id="loginOtp" placeholder="Enter OTP" maxlength="6"></div>
+    </div>
+    <div id="loginJsonWrap" style="display:none">
+      <textarea id="loginJson" placeholder='Paste your Meesho session JSON here...' style="width:100%;min-height:120px;padding:12px;border-radius:12px;background:var(--bg);border:1px solid var(--border);font-size:12px;font-family:monospace;resize:vertical"></textarea>
+      <p style="font-size:11px;color:var(--text3);margin-top:4px">Paste JSON with user_id, xo, instance_id fields</p>
+    </div>
     <button id="loginBtn" onclick="handleLogin()">Send OTP</button>
     <button class="cancel-btn" onclick="closeLogin()">Cancel</button>
   </div>
@@ -339,7 +349,7 @@ localStorage.setItem('userId',userId);
 console.log('[INIT] userId =',userId);
 
 var cartCount=0,currentTab=0,exploreOffset=0,exploreQuery='',exploreLoading=false,exploreDone=false;
-var loginStep=1,loginPhone='';
+var loginStep=1,loginPhone='',loginMethod='otp';
 const DEFAULT_REF='https://app.meesho.com/2yoV/r99th0qd?via=8ghwzu&from=account_section';
 
 function headers(){return{'Content-Type':'application/json','X-User-Id':userId}}
@@ -744,8 +754,41 @@ async function refreshSession(){
   }catch(e){toast('Refresh failed')}
 }
 
-function openLogin(){$('loginModal').classList.add('show')}
-function closeLogin(){$('loginModal').classList.remove('show');loginStep=1;$('otpWrap').style.display='none';$('refWrap').style.display='block';$('loginBtn').textContent='Send OTP';$('loginTitle').textContent='Login';$('loginSub').textContent='Enter your phone number to continue';$('loginRef').value='';$('loginPhone').value='';$('loginOtp').value='';}
+function switchLoginMethod(method){
+  loginMethod=method;
+  if(method==='json'){
+    $('loginTabJson').style.background='var(--accent)';$('loginTabJson').style.color='#fff';
+    $('loginTabOtp').style.background='var(--bg)';$('loginTabOtp').style.color='var(--text2)';$('loginTabOtp').style.border='1px solid var(--border)';
+    $('loginJsonWrap').style.display='block';$('loginOtpWrap').style.display='none';
+    $('loginBtn').textContent='Login with JSON';$('loginBtn').onclick=handleJsonLogin;
+    $('loginTitle').textContent='JSON Login';$('loginSub').textContent='Paste your Meesho session JSON';
+  }else{
+    $('loginTabOtp').style.background='var(--accent)';$('loginTabOtp').style.color='#fff';$('loginTabOtp').style.border='none';
+    $('loginTabJson').style.background='var(--bg)';$('loginTabJson').style.color='var(--text2)';$('loginTabJson').style.border='1px solid var(--border)';
+    $('loginJsonWrap').style.display='none';$('loginOtpWrap').style.display='block';
+    $('loginBtn').textContent='Send OTP';$('loginBtn').onclick=handleLogin;
+    $('loginTitle').textContent='Login';$('loginSub').textContent='Enter your phone number to continue';
+  }
+}
+
+async function handleJsonLogin(){
+  var raw=$('loginJson').value.trim();
+  if(!raw){toast('Paste JSON first');return}
+  var data;
+  try{data=JSON.parse(raw)}catch(e){toast('Invalid JSON format');return}
+  if(!data.user_id||!data.xo){toast('JSON must have user_id and xo');return}
+  $('loginBtn').disabled=true;$('loginBtn').textContent='Logging in...';
+  try{
+    var r=await fetch(API+'/api/auth/json_login',{method:'POST',headers:headers(),body:JSON.stringify(data)});
+    var d=await r.json();
+    if(d.ok){toast('Logged in!');closeLogin();loadAccount();switchTab(2)}
+    else toast(d.error||'JSON login failed');
+  }catch(e){toast('Login failed')}
+  $('loginBtn').disabled=false;$('loginBtn').textContent='Login with JSON';
+}
+
+function openLogin(){$('loginModal').classList.add('show');switchLoginMethod('otp')}
+function closeLogin(){$('loginModal').classList.remove('show');loginStep=1;$('otpWrap').style.display='none';$('refWrap').style.display='block';$('loginBtn').textContent='Send OTP';$('loginTitle').textContent='Login';$('loginSub').textContent='Choose login method';$('loginRef').value='';$('loginPhone').value='';$('loginOtp').value='';$('loginJson').value='';}
 
 async function handleLogin(){
   if(loginStep===1){

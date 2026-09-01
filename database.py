@@ -87,6 +87,9 @@ def init_db():
             xo_exp REAL DEFAULT 0,
             instance_id TEXT DEFAULT '',
             is_first_order INTEGER DEFAULT 1,
+            app_session_id TEXT DEFAULT '',
+            shield_session_id TEXT DEFAULT '',
+            gaid TEXT DEFAULT '',
             created_at REAL DEFAULT 0
         );
 
@@ -115,6 +118,11 @@ def init_db():
             is_default INTEGER DEFAULT 0,
             created_at REAL DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT DEFAULT ''
+        );
     """)
     conn.commit()
     # Migrations for existing databases
@@ -133,6 +141,9 @@ def init_db():
         ("meesho_amount", "orders", "0"),
         ("cart_session", "users", "''"),
         ("meesho_address_id", "addresses", "0"),
+        ("app_session_id", "meesho_accounts", "''"),
+        ("shield_session_id", "meesho_accounts", "''"),
+        ("gaid", "meesho_accounts", "''"),
     ]:
         try:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {default}")
@@ -187,21 +198,28 @@ def get_all_users():
 
 
 def toggle_user_mode(user_id):
-    conn = get_db()
-    row = conn.execute("SELECT mode FROM users WHERE user_id=?", (user_id,)).fetchone()
-    current = dict(row)["mode"] if row and "mode" in row.keys() else "paid"
+    current = get_global_mode()
     new_mode = "free" if current == "paid" else "paid"
-    conn.execute("UPDATE users SET mode=? WHERE user_id=?", (new_mode, user_id))
-    conn.commit()
-    conn.close()
+    set_global_mode(new_mode)
     return new_mode
 
 
 def get_user_mode(user_id):
-    row = get_user(user_id)
-    if row and "mode" in row.keys():
-        return row["mode"]
-    return "paid"
+    return get_global_mode()
+
+
+def get_global_mode():
+    conn = get_db()
+    row = conn.execute("SELECT value FROM settings WHERE key='global_mode'").fetchone()
+    conn.close()
+    return dict(row)["value"] if row else "paid"
+
+
+def set_global_mode(mode):
+    conn = get_db()
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('global_mode', ?)", (mode,))
+    conn.commit()
+    conn.close()
 
 
 def get_order_count(user_id):
@@ -414,11 +432,15 @@ def get_wallet_tx(user_id):
 
 # ─── MEESHO ACCOUNTS ───
 
-def save_meesho_account(user_id, phone, meesho_user_id, xo, xo_exp=0, instance_id="", is_first_order=1):
+def save_meesho_account(user_id, phone, meesho_user_id, xo, xo_exp=0, instance_id="", is_first_order=1,
+                        app_session_id="", shield_session_id="", gaid=""):
     conn = get_db()
     conn.execute(
-        "INSERT INTO meesho_accounts (user_id, phone, meesho_user_id, xo, xo_exp, instance_id, is_first_order, created_at) VALUES (?,?,?,?,?,?,?,?)",
-        (user_id, phone, str(meesho_user_id), xo, xo_exp, instance_id, int(is_first_order), time.time()))
+        """INSERT INTO meesho_accounts (user_id, phone, meesho_user_id, xo, xo_exp, instance_id,
+           is_first_order, app_session_id, shield_session_id, gaid, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (user_id, phone, str(meesho_user_id), xo, xo_exp, instance_id, int(is_first_order),
+         app_session_id, shield_session_id, gaid, time.time()))
     conn.commit()
     conn.close()
 

@@ -18,7 +18,7 @@ from database import (
     save_user_offer, get_user_offer,
     get_addresses, get_address, create_address, update_address,
     delete_address, set_default_address, get_default_address,
-    toggle_user_mode, get_user_mode, get_order_count,
+    toggle_user_mode, get_user_mode, get_global_mode, set_global_mode, get_order_count,
     get_cart_session, set_cart_session,
     get_all_users,
 )
@@ -93,9 +93,7 @@ def api_delete_user():
 @app.route("/api/mode")
 def api_get_mode():
     uid = get_uid()
-    if not uid:
-        return jsonify({"mode": "paid"})
-    mode = get_user_mode(uid)
+    mode = get_global_mode()
     return jsonify({"mode": mode})
 
 
@@ -678,21 +676,26 @@ def api_otp_send():
 @app.route("/api/auth/otp_verify", methods=["POST"])
 def api_otp_verify():
     data = request.json or {}
+    uid = get_uid()
     phone = str(data.get("phone_number", ""))[-10:]
     otp = str(data.get("otp", "")).strip()
+    print(f"[APP_OTP_VERIFY] uid={uid} phone={phone} otp={otp}", flush=True)
     session = _meesho_otp_sessions.get(phone)
     if not session:
-        return jsonify({"ok": False, "error": "No pending OTP."})
+        print(f"[APP_OTP_VERIFY] No session for phone={phone}, sessions={list(_meesho_otp_sessions.keys())}", flush=True)
+        return jsonify({"ok": False, "error": "No pending OTP. Send OTP again."})
     result = verify_otp(phone, otp, session)
+    print(f"[APP_OTP_VERIFY] result ok={result.get('ok')} error={result.get('error')}", flush=True)
     if result.get("ok"):
         _meesho_otp_sessions.pop(phone, None)
-        is_first = 1 if result.get("is_new") else 0
-        save_meesho_account(uid, phone,
-            result.get("user_id", ""),
-            result.get("xo", ""),
-            0,
-            result.get("instance_id", ""),
-            is_first_order=is_first)
+        if uid:
+            is_first = 1 if result.get("is_new") else 0
+            save_meesho_account(uid, phone,
+                result.get("user_id", ""),
+                result.get("xo", ""),
+                0,
+                result.get("instance_id", ""),
+                is_first_order=is_first)
         acc = {
             "id": str(int(time.time() * 1000))[-8:],
             "mobile": phone,
@@ -703,6 +706,41 @@ def api_otp_verify():
         }
         return jsonify({"ok": True, "account": acc})
     return jsonify({"ok": False, "error": result.get("error") or "Wrong OTP"})
+
+
+@app.route("/api/auth/json_login", methods=["POST"])
+def api_json_login():
+    """Login with Meesho session JSON (user_id, xo, instance_id, etc.)"""
+    uid = get_uid()
+    if not uid:
+        return jsonify({"ok": False, "error": "no user logged in"})
+    data = request.json or {}
+    print(f"[JSON_LOGIN] uid={uid} keys={list(data.keys())}", flush=True)
+
+    user_id = data.get("user_id")
+    xo = data.get("xo")
+    instance_id = data.get("instance_id") or data.get("identity", {}).get("instance_id", "")
+    app_session_id = data.get("app_session_id") or data.get("identity", {}).get("app_session_id", "")
+    shield_session_id = data.get("shield_session_id", "")
+    gaid = data.get("gaid") or data.get("identity", {}).get("gaid", "")
+    phone = data.get("phone", "")
+    phone_last4 = data.get("phone_last4", "")
+    is_first = data.get("is_first_order", 1)
+
+    if not user_id or not xo:
+        return jsonify({"ok": False, "error": "user_id and xo are required"})
+
+    if not phone and phone_last4:
+        phone = f"xxxx{phone_last4}"
+
+    save_meesho_account(uid, phone, str(user_id), xo, 0, instance_id,
+                        is_first_order=int(is_first),
+                        app_session_id=app_session_id,
+                        shield_session_id=shield_session_id,
+                        gaid=gaid)
+
+    print(f"[JSON_LOGIN] Saved account: user_id={user_id} instance_id={instance_id}", flush=True)
+    return jsonify({"ok": True, "user_id": user_id, "message": "Account logged in successfully!"})
 
 
 @app.route("/api/auth/me")

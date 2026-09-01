@@ -407,27 +407,37 @@ def verify_meesho_otp_sync(phone, otp, session):
         "loginUri": OTPLESS_LOGIN_URI, "appId": OTPLESS_APP_ID, "isHeadless": True,
         "packageName": OTPLESS_PACKAGE, "package": OTPLESS_PACKAGE,
         "otpHash": OTPLESS_OTP_HASH, "platform": "HEADLESS"}
+    print(f"[OTP_VERIFY] phone={phone} otp={otp} state={session['state'][:20]}...", flush=True)
     with httpx.Client(timeout=20.0) as client:
         verify_resp = client.post(f"https://user-auth.otpless.app/v3/lp/user/transaction/otp/{session['state']}",
             headers=otp_headers, json=otp_body)
         data = verify_resp.json() or {}
+        print(f"[OTP_VERIFY] otple_resp status={verify_resp.status_code} keys={list(data.keys())}", flush=True)
+        auth_detail = data.get("authDetail") or {}
+        print(f"[OTP_VERIFY] authDetail={str(auth_detail)[:200]}", flush=True)
         one_tap = data.get("oneTap") or {}
         token = one_tap.get("token")
         id_token = (one_tap.get("merchantUserInfo") or {}).get("idToken")
         if not token or not id_token:
-            return {"ok": False, "error": "OTP verify failed"}
+            err_detail = auth_detail.get("status") or data.get("errorMessage") or str(data)[:300]
+            print(f"[OTP_VERIFY] FAILED: {err_detail}", flush=True)
+            return {"ok": False, "error": f"OTP verify failed: {err_detail}"}
+        print(f"[OTP_VERIFY] OTP verified, logging in to Meesho...", flush=True)
         key = _gen_key()
         login_body = {"login_type": "otpless", "otpless": {"token": token,
             "id_token": _aes_gcm_encrypt(id_token.encode(), key), "aes_key_encrypted": _rsa_encrypt(key), "version": "v2"},
             "ga_id": str(uuid.uuid4())}
         login_resp = client.post(f"{MEESHO_API}/2.0/user/login",
             headers=_api_headers(session["instance_id"], ANON_XO, "anonymous"), json=login_body)
+        print(f"[OTP_VERIFY] meesho_login status={login_resp.status_code}", flush=True)
         if login_resp.status_code != 200:
             return {"ok": False, "error": f"Login failed HTTP {login_resp.status_code}"}
         ldata = login_resp.json() or {}
         user = ldata.get("user") or {}
         xo = (ldata.get("xoox") or {}).get("xo") or ""
+        print(f"[OTP_VERIFY] login result: user_id={user.get('user_id')} xo={'yes' if xo else 'no'} new={user.get('new')}", flush=True)
         if not xo:
+            print(f"[OTP_VERIFY] login raw: {str(ldata)[:500]}", flush=True)
             return {"ok": False, "error": "Login failed: no xo."}
         return {"ok": True, "user_id": user.get("user_id"), "phone": user.get("phone"),
             "xo": xo, "xo_exp": _xo_expiry(xo), "instance_id": session["instance_id"],
@@ -463,16 +473,17 @@ def logged_in_headers(acc, location=None):
     uid = str(acc.get("user_id", ""))
     instance_id = acc.get("instance_id", "")
     xo = acc.get("xo", "")
+    app_sid = acc.get("app_session_id") or uuid.uuid4().hex
     h = _api_headers(instance_id, xo, "logged_in",
-                     session_id=acc.get("app_session_id") or uuid.uuid4().hex,
+                     session_id=app_sid,
                      ua="Cronet")
     h["app-version"] = acc.get("app_version") or "29.1"
     h["app-version-code"] = acc.get("app_version_code") or "858"
     h["app-sdk-version"] = "31"
     h["app-user-id"] = uid
-    h["shield-session-id"] = acc.get("shield_session_id") or ""
+    h["shield-session-id"] = acc.get("shield_session_id") or "bca1ee85f80f45a2b0e4dc480495a192"
     h["accept-encoding"] = "gzip"
-    if phone:
+    if phone and not phone.startswith("xxxx"):
         h["u-token"] = base64.b64encode(("+91" + phone).encode()).decode()
     if location:
         h["app-user-location"] = base64.b64encode(json.dumps(location).encode()).decode()
