@@ -39,6 +39,10 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
             product_id INTEGER,
+            name TEXT DEFAULT '',
+            price INTEGER DEFAULT 0,
+            image TEXT DEFAULT '',
+            source TEXT DEFAULT 'local',
             qty INTEGER DEFAULT 1,
             created_at REAL DEFAULT 0
         );
@@ -61,6 +65,25 @@ def init_db():
             type TEXT DEFAULT 'credit',
             status TEXT DEFAULT 'pending',
             txn_id TEXT DEFAULT '',
+            created_at REAL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS meesho_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            phone TEXT DEFAULT '',
+            meesho_user_id TEXT DEFAULT '',
+            xo TEXT DEFAULT '',
+            xo_exp REAL DEFAULT 0,
+            instance_id TEXT DEFAULT '',
+            is_first_order INTEGER DEFAULT 1,
+            created_at REAL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS user_offers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER UNIQUE,
+            offer_json TEXT DEFAULT '',
             created_at REAL DEFAULT 0
         );
     """)
@@ -167,14 +190,22 @@ def update_stock(pid, qty):
 def get_cart(user_id):
     conn = get_db()
     rows = conn.execute(
-        """SELECT c.*, p.name, p.price, p.image_url
-           FROM cart c JOIN products p ON c.product_id=p.id
-           WHERE c.user_id=?""", (user_id,)).fetchall()
+        "SELECT * FROM cart WHERE user_id=?", (user_id,)).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        if not d.get("name"):
+            p = get_product(d.get("product_id"))
+            if p:
+                d["name"] = p.get("name", "")
+                d["price"] = p.get("price", 0)
+                d["image"] = p.get("image_url", "")
+        result.append(d)
     conn.close()
-    return [dict(r) for r in rows]
+    return result
 
 
-def add_to_cart(user_id, product_id, qty=1):
+def add_to_cart(user_id, product_id, qty=1, name="", price=0, image="", source="local"):
     conn = get_db()
     existing = conn.execute(
         "SELECT id, qty FROM cart WHERE user_id=? AND product_id=?",
@@ -182,8 +213,9 @@ def add_to_cart(user_id, product_id, qty=1):
     if existing:
         conn.execute("UPDATE cart SET qty=qty+? WHERE id=?", (qty, existing["id"]))
     else:
-        conn.execute("INSERT INTO cart (user_id, product_id, qty, created_at) VALUES (?,?,?,?)",
-                     (user_id, product_id, qty, time.time()))
+        conn.execute(
+            "INSERT INTO cart (user_id, product_id, name, price, image, source, qty, created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (user_id, product_id, name, price, image, source, qty, time.time()))
     conn.commit()
     conn.close()
 
@@ -287,6 +319,71 @@ def get_wallet_tx(user_id):
         (user_id,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ─── MEESHO ACCOUNTS ───
+
+def save_meesho_account(user_id, phone, meesho_user_id, xo, xo_exp=0, instance_id=""):
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO meesho_accounts (user_id, phone, meesho_user_id, xo, xo_exp, instance_id, created_at) VALUES (?,?,?,?,?,?,?)",
+        (user_id, phone, str(meesho_user_id), xo, xo_exp, instance_id, time.time()))
+    conn.commit()
+    conn.close()
+
+
+def get_meesho_accounts(user_id):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM meesho_accounts WHERE user_id=? ORDER BY created_at DESC", (user_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_active_meesho_account(user_id):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM meesho_accounts WHERE user_id=? ORDER BY created_at DESC LIMIT 1",
+        (user_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def delete_meesho_account(user_id, acc_id):
+    conn = get_db()
+    conn.execute("DELETE FROM meesho_accounts WHERE user_id=? AND id=?", (user_id, acc_id))
+    conn.commit()
+    conn.close()
+
+
+def update_meesho_xo(acc_id, xo, xo_exp=0):
+    conn = get_db()
+    conn.execute("UPDATE meesho_accounts SET xo=?, xo_exp=? WHERE id=?", (xo, xo_exp, acc_id))
+    conn.commit()
+    conn.close()
+
+
+# ─── USER OFFERS ───
+
+def save_user_offer(user_id, offer_json):
+    conn = get_db()
+    conn.execute("INSERT OR REPLACE INTO user_offers (user_id, offer_json, created_at) VALUES (?,?,?)",
+                 (user_id, offer_json, time.time()))
+    conn.commit()
+    conn.close()
+
+
+def get_user_offer(user_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM user_offers WHERE user_id=?", (user_id,)).fetchone()
+    conn.close()
+    if row:
+        import json as _json
+        try:
+            return _json.loads(row["offer_json"])
+        except Exception:
+            return None
+    return None
 
 
 init_db()

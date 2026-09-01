@@ -11,6 +11,9 @@ from database import (
     get_cart, add_to_cart, update_cart_qty, clear_cart,
     create_order, get_orders, get_order,
     create_wallet_tx, get_wallet_tx,
+    save_meesho_account, get_meesho_accounts, get_active_meesho_account,
+    delete_meesho_account, update_meesho_xo,
+    save_user_offer, get_user_offer,
 )
 from gateway import generate_txn_id, create_upi_link, get_qr_url, verify_payment
 from config import ORDER_FEE, WALLET_MIN, WALLET_MAX, GW_UPI_ID, GW_UPI_NAME
@@ -100,7 +103,11 @@ def api_cart_add():
     data = request.json
     pid = data.get("product_id")
     qty = data.get("qty", 1)
-    add_to_cart(uid, pid, qty)
+    name = data.get("name", "")
+    price = int(data.get("price", 0))
+    image = data.get("image", "")
+    source = data.get("source", "local")
+    add_to_cart(uid, pid, qty, name=name, price=price, image=image, source=source)
     return jsonify({"ok": True})
 
 
@@ -355,7 +362,106 @@ def api_fod_continue():
         return jsonify({"ok": False, "error": "No offer"})
     global _meesho_offer
     _meesho_offer = offer
+    uid = get_uid()
+    if uid:
+        import json as _json
+        save_user_offer(uid, _json.dumps(offer))
     return jsonify({"ok": True, "offer": offer})
+
+
+# ═══════════════════════════════════════════════════════════════
+# MEESHO ACCOUNT MANAGEMENT
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/accounts")
+def api_accounts():
+    uid = get_uid()
+    if not uid:
+        return jsonify([])
+    accs = get_meesho_accounts(uid)
+    for a in accs:
+        a.pop("xo", None)
+    return jsonify(accs)
+
+
+@app.route("/api/accounts/add", methods=["POST"])
+def api_account_add():
+    uid = get_uid()
+    if not uid:
+        return jsonify({"ok": False, "error": "no user"})
+    data = request.json or {}
+    phone = str(data.get("phone", ""))[-10:]
+    session_data = data.get("session", {})
+    meesho_uid = data.get("meesho_user_id", "")
+    xo = data.get("xo", "")
+    instance_id = data.get("instance_id", "")
+    save_meesho_account(uid, phone, meesho_uid, xo, 0, instance_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/accounts/delete", methods=["POST"])
+def api_account_delete():
+    uid = get_uid()
+    data = request.json or {}
+    acc_id = data.get("id")
+    if uid and acc_id:
+        delete_meesho_account(uid, acc_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/accounts/refresh", methods=["POST"])
+def api_account_refresh():
+    uid = get_uid()
+    if not uid:
+        return jsonify({"ok": False, "error": "no user"})
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"ok": False, "error": "no account"})
+    import json as _json
+    try:
+        offer_data = get_user_offer(uid)
+        result = roll_fod_sync()
+        if result.get("ok") and result.get("offer"):
+            save_user_offer(uid, _json.dumps(result["offer"]))
+            return jsonify({"ok": True, "offer": result["offer"]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+    return jsonify({"ok": False, "error": "refresh failed"})
+
+
+@app.route("/api/offers/roll", methods=["POST"])
+def api_offer_roll():
+    uid = get_uid()
+    result = get_meesho_offer()
+    if result.get("ok") and result.get("offer"):
+        global _meesho_offer
+        _meesho_offer = result["offer"]
+        if uid:
+            import json as _json
+            save_user_offer(uid, _json.dumps(result["offer"]))
+    return jsonify(result)
+
+
+@app.route("/api/user/export")
+def api_user_export():
+    uid = get_uid()
+    if not uid:
+        return jsonify({"error": "no user"})
+    user = get_user(uid) or {}
+    accs = get_meesho_accounts(uid)
+    offer = get_user_offer(uid)
+    wallet_txs = get_wallet_tx(uid)
+    orders = get_orders(uid)
+    user.pop("wallet", None)
+    for a in accs:
+        a.pop("xo", None)
+    return jsonify({
+        "user": user,
+        "meesho_accounts": accs,
+        "offer": offer,
+        "wallet_transactions": wallet_txs,
+        "orders": orders,
+    })
 
 
 if __name__ == "__main__":
