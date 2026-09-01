@@ -299,6 +299,38 @@ def api_meesho_search():
     return jsonify(result or {"catalogs": []})
 
 
+@app.route("/api/search/suggest", methods=["POST"])
+def api_search_suggest():
+    data = request.json or {}
+    prefix = data.get("prefix", "").strip()[:40]
+    if not prefix:
+        return jsonify([])
+    # Simple suggest from recent/common searches
+    suggestions = [
+        "fashion trending", "women kurti", "men tshirt", "saree",
+        "phone case", "shoes", "watch", "bag", "earring", "kids wear",
+        "home decor", "kitchen", "toys", "beauty", "fitness"
+    ]
+    matches = [s for s in suggestions if prefix.lower() in s.lower()][:5]
+    return jsonify([{"text": s} for s in matches])
+
+
+@app.route("/api/product/by_link", methods=["POST"])
+def api_product_by_link():
+    import re as _re
+    data = request.json or {}
+    link = data.get("link", "").strip()
+    m = _re.search(r"product/(\d+)", link)
+    if not m:
+        return jsonify({"error": "bad_link", "message": "Not a valid Meesho product link"})
+    pid = m.group(1)
+    offer = _meesho_offer
+    result = get_meesho_product(pid, offer=offer)
+    if result:
+        return jsonify(result)
+    return jsonify({"error": "not found"})
+
+
 @app.route("/api/product")
 def api_meesho_product():
     pid = request.args.get("product_id", "")
@@ -318,7 +350,71 @@ def api_check_number():
     if len(phone) < 10:
         return jsonify({"ok": False, "error": "Invalid number"})
     result = check_number(phone)
-    return jsonify(result)
+    # Map to reference format
+    if result.get("registered"):
+        return jsonify({"ok": True, "eligible": True, "live": True,
+                        "title": "First-order eligible", "subtitle": "This number can use the FREE first-order discount",
+                        "duration": 3})
+    return jsonify({"ok": True, "eligible": False, "live": True,
+                    "title": "Not eligible", "subtitle": result.get("error", "Number not found on Meesho"),
+                    "duration": 0})
+
+
+@app.route("/api/geocode")
+def api_geocode():
+    """Simple geocode: forward (q -> city/state/pin) and reverse (lat,lng -> city/state/pin)."""
+    import math
+    q = request.args.get("q", "").strip()
+    lat = request.args.get("lat", type=float)
+    lng = request.args.get("lng", type=float)
+
+    # Simple India geocode fallback (major cities with pincodes)
+    CITIES = [
+        {"city": "New Delhi", "state": "Delhi", "pin": "110001", "lat": 28.6139, "lng": 77.2090},
+        {"city": "Mumbai", "state": "Maharashtra", "pin": "400001", "lat": 19.0760, "lng": 72.8777},
+        {"city": "Bangalore", "state": "Karnataka", "pin": "560001", "lat": 12.9716, "lng": 77.5946},
+        {"city": "Chennai", "state": "Tamil Nadu", "pin": "600001", "lat": 13.0827, "lng": 80.2707},
+        {"city": "Kolkata", "state": "West Bengal", "pin": "700001", "lat": 22.5726, "lng": 88.3639},
+        {"city": "Hyderabad", "state": "Telangana", "pin": "500001", "lat": 17.3850, "lng": 78.4867},
+        {"city": "Pune", "state": "Maharashtra", "pin": "411001", "lat": 18.5204, "lng": 73.8567},
+        {"city": "Ahmedabad", "state": "Gujarat", "pin": "380001", "lat": 23.0225, "lng": 72.5714},
+        {"city": "Jaipur", "state": "Rajasthan", "pin": "302001", "lat": 26.9124, "lng": 75.7873},
+        {"city": "Lucknow", "state": "Uttar Pradesh", "pin": "226001", "lat": 26.8467, "lng": 80.9462},
+        {"city": "Bhopal", "state": "Madhya Pradesh", "pin": "462001", "lat": 23.2599, "lng": 77.4126},
+        {"city": "Patna", "state": "Bihar", "pin": "800001", "lat": 25.6093, "lng": 85.1376},
+        {"city": "Indore", "state": "Madhya Pradesh", "pin": "452001", "lat": 22.7196, "lng": 75.8577},
+        {"city": "Nagpur", "state": "Maharashtra", "pin": "440001", "lat": 21.1458, "lng": 79.0882},
+        {"city": "Chandigarh", "state": "Chandigarh", "pin": "160001", "lat": 30.7333, "lng": 76.7794},
+    ]
+
+    def _closest(lat, lng):
+        best, best_d = CITIES[0], 9999
+        for c in CITIES:
+            d = math.sqrt((lat - c["lat"]) ** 2 + (lng - c["lng"]) ** 2)
+            if d < best_d:
+                best, best_d = c, d
+        return best
+
+    results = []
+    if lat and lng:
+        city = _closest(lat, lng)
+        results.append({"formatted": f"{city['city']}, {city['state']} - {city['pin']}",
+                        "city": city["city"], "state": city["state"], "pin": city["pin"],
+                        "lat": city["lat"], "lng": city["lng"]})
+    elif q:
+        ql = q.lower()
+        for c in CITIES:
+            if ql in c["city"].lower() or ql in c["state"].lower() or ql in c["pin"]:
+                results.append({"formatted": f"{c['city']}, {c['state']} - {c['pin']}",
+                                "city": c["city"], "state": c["state"], "pin": c["pin"],
+                                "lat": c["lat"], "lng": c["lng"]})
+        if not results:
+            # Default to Delhi
+            results.append({"formatted": "New Delhi, Delhi - 110001",
+                            "city": "New Delhi", "state": "Delhi", "pin": "110001",
+                            "lat": 28.6139, "lng": 77.2090})
+
+    return jsonify({"results": results})
 
 
 @app.route("/api/auth/otp_send", methods=["POST"])
