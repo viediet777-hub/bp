@@ -37,7 +37,11 @@ def log_request():
 
 def get_uid():
     """Get user_id from request header"""
-    return int(request.headers.get("X-User-Id", 0))
+    uid = request.headers.get("X-User-Id", "0")
+    try:
+        return int(uid)
+    except (ValueError, TypeError):
+        return uid
 
 
 # ═══════════════════════════════════════════════════════════════

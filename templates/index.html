@@ -287,8 +287,20 @@ input,button{font-family:inherit;outline:none;border:none}
 
 <script>
 var API='';
-var userId=localStorage.getItem('userId')||('u'+Math.random().toString(36).slice(2,10));
+
+// Telegram WebApp se user ID lo, nahi toh random
+var userId=(function(){
+  try{
+    if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initDataUnsafe&&window.Telegram.WebApp.initDataUnsafe.user){
+      return String(window.Telegram.WebApp.initDataUnsafe.user.id);
+    }
+  }catch(e){}
+  return localStorage.getItem('userId')||('u'+Math.random().toString(36).slice(2,10));
+})();
 localStorage.setItem('userId',userId);
+
+// Telegram WebApp ready
+try{if(window.Telegram&&window.Telegram.WebApp){window.Telegram.WebApp.ready();window.Telegram.WebApp.expand()}}catch(e){}
 var cartCount=0,currentTab=0,exploreOffset=0,exploreQuery='',exploreLoading=false,exploreDone=false;
 var loginStep=1,loginPhone='';
 const DEFAULT_REF='https://app.meesho.com/2yoV/r99th0qd?via=8ghwzu&from=account_section';
@@ -713,24 +725,44 @@ async function deleteAddressConfirm(id){
 }
 
 function detectMyLocation(){
-  if(!navigator.geolocation){toast('Location not available');return}
   toast('Detecting location...');
-  navigator.geolocation.getCurrentPosition(async function(pos){
-    try{
-      var lat=pos.coords.latitude;var lng=pos.coords.longitude;
-      savedCoords={latitude:String(lat),longitude:String(lng),accuracy:String(Math.round(pos.coords.accuracy||20))};
-      $('coordPill').innerHTML='<span style="font-size:11px;color:var(--green);font-weight:600">✓ Location pinned</span>';
-      var r=await fetch(API+'/api/geocode?lat='+lat+'&lng='+lng);
-      var d=await r.json();
-      var res=(d.results&&d.results[0])||null;
-      if(res){
-        if(res.pin)$('addrPin').value=res.pin;
-        if(res.city)$('addrCity').value=res.city;
-        if(res.state)$('addrState').value=res.state;
-        toast('Location detected! Fill remaining fields.');
-      }else{toast('Location pinned — fill address manually')}
-    }catch(e){toast('Could not resolve location')}
-  },function(){toast('Location permission denied')},{enableHighAccuracy:true,timeout:10000});
+  // Try native geolocation first (works in browser, may fail in Telegram WebView)
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(async function(pos){
+      try{
+        var lat=pos.coords.latitude;var lng=pos.coords.longitude;
+        savedCoords={latitude:String(lat),longitude:String(lng),accuracy:String(Math.round(pos.coords.accuracy||20))};
+        $('coordPill').innerHTML='<span style="font-size:11px;color:var(--green);font-weight:600">✓ Location pinned</span>';
+        var r=await fetch(API+'/api/geocode?lat='+lat+'&lng='+lng);
+        var d=await r.json();
+        var res=(d.results&&d.results[0])||null;
+        if(res){
+          if(res.pin)$('addrPin').value=res.pin;
+          if(res.city)$('addrCity').value=res.city;
+          if(res.state)$('addrState').value=res.state;
+          toast('Location detected! Fill remaining fields.');
+        }else{toast('Location pinned — fill address manually')}
+      }catch(e){toast('Could not resolve location')}
+    },function(){
+      // Geolocation denied - try IP-based fallback
+      ipLocationFallback();
+    },{enableHighAccuracy:true,timeout:10000});
+  }else{
+    ipLocationFallback();
+  }
+}
+
+async function ipLocationFallback(){
+  try{
+    var r=await fetch('https://ipapi.co/json/');
+    var d=await r.json();
+    if(d.city){
+      $('addrCity').value=d.city||'';
+      $('addrState').value=d.region||'';
+      $('addrPin').value=d.postal||'';
+      toast('City detected from IP: '+d.city+'. Fill remaining fields.');
+    }else{toast('Could not detect location. Enter manually.')}
+  }catch(e){toast('Location detection failed. Enter address manually.')}
 }
 
 async function useMySavedAddress(){
