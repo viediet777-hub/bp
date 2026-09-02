@@ -458,6 +458,121 @@ async function getCart(){
   return { total_quantity, effective_total, items, cart_session, raw: data };
 }
 
+// ==================== STEP 5: REMOVE FROM CART ====================
+async function removeFromCart(productId){
+  const cartSession = localStorage.getItem("meesho_cart_session") || null;
+  const body = {
+    "context": "cart",
+    "identifier": "default",
+    "cart_session": cartSession,
+    "items": [{ "product_id": Number(productId) }]
+  };
+  const data = await meeshoAPI("/1.0/cart/remove", "POST", body);
+  if(data?.cart_session) localStorage.setItem("meesho_cart_session", data.cart_session);
+  return { cart_session: data?.cart_session || cartSession, raw: data };
+}
+
+// ==================== STEP 6: LOGIN / ADD ACCOUNT ====================
+async function sendOTP(mobile){
+  const clean = String(mobile).replace(/\D/g,"").slice(-10);
+  const data = await meeshoAPI("/1.0/auth/login/send-otp", "POST", { mobile: clean, phone: clean, phone_number: clean });
+  return data;
+}
+async function verifyOTP(mobile, otp){
+  const clean = String(mobile).replace(/\D/g,"").slice(-10);
+  const data = await meeshoAPI("/1.0/auth/login/verify-otp", "POST", { mobile: clean, phone: clean, phone_number: clean, otp: String(otp).trim() });
+  const auth_token = data?.auth_token || data?.token || data?.result?.auth_token || "";
+  const user_id = data?.user_id || data?.userId || data?.result?.user_id || "";
+  const xo = data?.xo || data?.xoox?.xo || data?.result?.xo || "";
+  if(auth_token) localStorage.setItem("meesho_auth_token", auth_token);
+  if(user_id) localStorage.setItem("meesho_user_id", String(user_id));
+  if(xo) localStorage.setItem("meesho_xo", xo);
+  // MEESHO_CONFIG bhi update karo taaki agle calls me naya token lage
+  if(auth_token) MEESHO_CONFIG["u-token"] = auth_token;
+  if(user_id) MEESHO_CONFIG["app-user-id"] = String(user_id);
+  if(xo) MEESHO_CONFIG.xo = xo;
+  return { auth_token, user_id, xo, raw: data };
+}
+
+// ==================== STEP 7: ₹180 DISCOUNT APPLY ====================
+async function getCartWithDiscount(){
+  const cartData = await getCart();
+  const raw = cartData.raw || {};
+  const priceBreakUp = raw?.price_break_up || raw?.result?.price_break_up || raw?.priceBreakUp || [];
+  let productPrice = 0, totalDiscounts = 0, orderTotal = cartData.effective_total;
+  let isFirstOrderDiscount = false;
+  if(Array.isArray(priceBreakUp) && priceBreakUp.length){
+    priceBreakUp.forEach(p => {
+      const title = (p.title || p.name || p.label || "").toLowerCase();
+      const val = Number(p.value || p.amount || p.price || 0);
+      if(title.includes("product price") || title.includes("mrp") || title.includes("item total")) productPrice = val;
+      if(title.includes("discount")) totalDiscounts += Math.abs(val);
+      if(title.includes("order total") || title.includes("payable") || title.includes("effective")) orderTotal = val;
+      if(title.includes("first order")) isFirstOrderDiscount = true;
+    });
+  }
+  // fallback: agar price_break_up me discount na mile to raw se check
+  if(!isFirstOrderDiscount){
+    const str = JSON.stringify(raw).toLowerCase();
+    if(str.includes("first order") || str.includes("first_order")) isFirstOrderDiscount = true;
+  }
+  if(!productPrice) productPrice = raw?.total_mrp || raw?.result?.total_mrp || cartData.effective_total + totalDiscounts;
+  return { productPrice, totalDiscounts, orderTotal, isFirstOrderDiscount, price_break_up: priceBreakUp, raw };
+}
+
+// ==================== STEP 8: PLACE ORDER (REAL API) ====================
+async function createOrder(addressId, paymentMethod){
+  const cartSession = localStorage.getItem("meesho_cart_session") || null;
+  const body = {
+    address_id: addressId ? Number(addressId) : null,
+    payment_method: paymentMethod || "UPI_INTENT",
+    cart_session: cartSession,
+    user_id: Number(MEESHO_CONFIG["app-user-id"])
+  };
+  const data = await meeshoAPI("/1.0/order/create", "POST", body);
+  const orderId = data?.order_id || data?.orderId || data?.result?.order_id || null;
+  if(data?.cart_session) localStorage.setItem("meesho_cart_session", data.cart_session);
+  return { orderId, raw: data };
+}
+async function confirmOrder(orderId){
+  const data = await meeshoAPI("/1.0/order/confirm", "POST", { order_id: orderId, orderId: orderId });
+  return data;
+}
+
+// ==================== STEP 9: MY ORDERS (REAL API) ====================
+async function getMyOrders(){
+  const data = await meeshoAPI("/1.0/orders?limit=20&offset=0", "GET");
+  const list = data?.orders || data?.result?.orders || data?.data || [];
+  return list.map(o => ({
+    order_id: o.order_id || o.orderId || o.id,
+    order_date: o.order_date || o.created_at || o.date,
+    total_amount: o.total_amount || o.total || o.payable_amount,
+    status: o.status || o.order_status,
+    products: o.products || o.items || o.order_items || [],
+    raw: o
+  }));
+}
+
+// ==================== STEP 10: SYNC FIX (CART ↔ REAL MEESHO) ====================
+async function syncCart(){
+  // real cart
+  const real = await getCart();
+  const realIds = new Set((real.items || []).map(i => Number(i.product_id || i.productId || i.id)));
+  // local cart - localStorage["cart"] ya server cart
+  let localCart = [];
+  try { localCart = JSON.parse(localStorage.getItem("cart") || localStorage.getItem("local_cart") || "[]"); } catch(e){ localCart = []; }
+  const localIds = new Set(localCart.map(i => Number(i.product_id || i.productId || i.id)));
+  const toAdd = localCart.filter(i => !realIds.has(Number(i.product_id || i.productId || i.id)));
+  const toRemove = [...realIds].filter(id => !localIds.has(id));
+  for(const item of toAdd){
+    await addToCart(item.product_id || item.productId || item.id, item.supplier_id || item.supplierId || 1856590, item.quantity || item.qty || 1);
+  }
+  for(const pid of toRemove){
+    await removeFromCart(pid);
+  }
+  return { added: toAdd.length, removed: toRemove.length, real, localCart };
+}
+
 function headers(){return{'Content-Type':'application/json','X-User-Id':userId}}
 function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2200)}
 function showEl(id,v){document.getElementById(id).style.display=v?'block':'none'}
