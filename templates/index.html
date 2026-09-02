@@ -1280,6 +1280,57 @@ function saveOrderAfterManualPayment(orderData){
   try{ showPage('orders'); renderOrders(); }catch(e){}
   return order;
 }
+
+// ==================== TUMHARI 4 CHEEZEIN (exact naam se, paste-ready) ====================
+// Cheez 1: UPI Link + QR (tumhare snippet jaisa - qrcode.js)
+function generateUPIQR(upiId, amount, orderRef){
+  const upiLink = `upi://pay?pa=${encodeURIComponent(upiId)}&am=${amount}&cu=INR&tn=${encodeURIComponent(orderRef)}`;
+  const box = document.getElementById('qrcode');
+  if(box){
+    box.innerHTML = '';
+    box.style.display='flex';
+    new QRCode(box, upiLink);
+  }
+  const linkText = document.getElementById('upiLinkText');
+  if(linkText){ linkText.textContent = upiLink; linkText.style.display='block'; }
+  // modal bhi kholo taaki QR dikhe
+  document.getElementById('payConfirmModal')?.classList.add('show');
+  return upiLink;
+}
+// Cheez 2: Copy + Manual Confirm
+function copyUPILink(link){
+  const l = link || currentUpiLink;
+  if(!l) return toast('No UPI link');
+  navigator.clipboard.writeText(l).then(()=> toast('UPI Link copy ho gaya!')).catch(()=>{ alert(l); });
+}
+function confirmManualPayment(){
+  // tumhara snippet: orders + currentOrder
+  // yahan hum existing cart + currentUpiLink/currentRef se banate hain
+  const cart = getCart();
+  if(cart.length===0) return toast('Cart empty');
+  const amount = cart.reduce((s,x)=>s + (parseFloat(x.price)||0)*(parseInt(x.qty)||1),0);
+  const ref = currentRef || ('ORD'+Date.now());
+  const upi = currentUpiLink || '';
+  // getSellerUPI se seller ka UPI
+  const sellerUpi = getSellerUPI(cart);
+  return saveOrderAfterManualPayment({ cartItems: cart, amount, refId: ref, sellerUpi, upiLink: upi });
+}
+// Cheez 3: Multi-Account (simple wala - tumhara snippet)
+function addAccount(name, phone){
+  let accounts = JSON.parse(localStorage.getItem('accounts') || localStorage.getItem(LS_ACCS) || "[]");
+  accounts.push({ id: Date.now(), name, phone, discount: 180, isFirstOrder:true, usedFirst:false });
+  localStorage.setItem('accounts', JSON.stringify(accounts));
+  localStorage.setItem(LS_ACCS, JSON.stringify(accounts));
+  try{ renderAccount(); }catch(e){}
+  toast('Account added');
+  return accounts[accounts.length-1];
+}
+// Cheez 4: Dynamic UPI ID (seller ke hisaab se)
+function getSellerUPI(cartItems){
+  if(!Array.isArray(cartItems) || cartItems.length===0) return 'default@paytm';
+  // pehle product ka sellerUPI
+  return cartItems[0]?.sellerUPI || cartItems[0]?.seller_upi || cartItems[0]?.upi || cartItems[0]?.sellerUpi || 'default@paytm';
+}
 </script>
 </body>
 </html>
