@@ -439,19 +439,34 @@ def api_place_order():
     clear_cart(uid)
     set_cart_session(uid, "")
 
-    # QR generation: use Meesho's QR first, fallback to our gateway QR
+    # QR generation: always generate for UPI using seller UPI from cart
     qr_base64 = order_r.get("qr_base64")
     upi_intent_url = order_r.get("upi_intent_url")
     qr_url = ""
-    if payment_method.upper() in ("UPI", "PREPAID") and not qr_base64:
-        if upi_intent_url:
-            # Meesho returned the intent link but no image (the real app renders
-            # the QR client-side via JusPay) -> render it ourselves.
-            qr_url = get_qr_url(upi_intent_url)
-        else:
-            txn_id = generate_txn_id(uid)
-            upi_intent_url = create_upi_link(txn_id, meesho_amount)
-            qr_url = get_qr_url(upi_intent_url)
+    seller_upi = ""
+    seller_name = ""
+    if payment_method.upper() in ("UPI", "PREPAID"):
+        # Get seller UPI from cart items
+        for c in cart:
+            supi = c.get("sellerUPI") or c.get("seller_upi") or c.get("sellerUpi")
+            if supi:
+                seller_upi = supi
+                seller_name = c.get("sellerName") or c.get("seller_name") or supi.split("@")[0]
+                break
+        if not seller_upi:
+            _map = {"winglet":"winglet.seller@paytm","ridhi":"ridhi.fashion@upi","alisha":"alisha.clothing@paytm"}
+            sid = cart[0].get("sellerId") or cart[0].get("seller_id") if cart else None
+            if sid and sid in _map:
+                seller_upi = _map[sid]
+                seller_name = sid
+        if not seller_upi:
+            seller_upi = GW_UPI_ID
+            seller_name = "Meesho Seller"
+        # Build UPI link with seller UPI + Meesho order ref
+        import urllib.parse as _up
+        txn_id = meesho_order_num or generate_txn_id(uid)
+        upi_intent_url = f"upi://pay?pa={_up.quote(seller_upi, safe='')}&pn={_up.quote(seller_name, safe='')}&am={meesho_amount}&cu=INR&tn={_up.quote(str(txn_id), safe='')}"
+        qr_url = get_qr_url(upi_intent_url)
 
     return jsonify({
         "ok": True, "order_id": oid, "meesho_order_num": meesho_order_num,
@@ -459,6 +474,8 @@ def api_place_order():
         "fee_charged": fee,
         "payment_method": payment_method, "mode": user_mode,
         "qr_base64": qr_base64,
+        "seller_upi": seller_upi,
+        "seller_name": seller_name,
         "upi_intent_url": upi_intent_url,
         "qr_url": qr_url,
         "payment_url": order_r.get("payment_url"),
@@ -1221,16 +1238,29 @@ def api_address_create():
     landmark = data.get("landmark", "").strip()
     addr_type = data.get("address_type", "Home")
     is_def = int(data.get("is_default", 0))
-    acc_id = int(data.get("meesho_account_id", 0))
     lat = data.get("latitude", "")
     lng = data.get("longitude", "")
 
     if not (name and mobile and pin and line1):
         return jsonify({"ok": False, "error": "Name, mobile, pin, address required"})
 
-    aid = create_address(uid, acc_id, name, mobile, pin, city, state,
+    # Sync to Meesho server FIRST - if Meesho account is active, save there too
+    meesho_addr_id = 0
+    acc = get_active_meesho_account(uid)
+    if acc:
+        try:
+            mr = real_address_create(acc, name, mobile, pin, city, state, line1, line2, landmark, addr_type)
+            print(f"[ADDR_CREATE] meesho sync result: {mr}", flush=True)
+            if mr.get("ok") and mr.get("meesho_address_id"):
+                meesho_addr_id = int(mr["meesho_address_id"])
+        except Exception as e:
+            print(f"[ADDR_CREATE] meesho sync failed: {e}", flush=True)
+
+    aid = create_address(uid, 0, name, mobile, pin, city, state,
                          line1, line2, landmark, addr_type, lat, lng, is_def)
     addr = get_address(aid)
+    if addr:
+        addr["meesho_address_id"] = meesho_addr_id
     return jsonify({"ok": True, "address": addr})
 
 
