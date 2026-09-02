@@ -805,43 +805,62 @@ def real_bind_address(acc, cart_session, address_id, dest_pin=None):
 
 def real_paymentinfo(acc, cart_session, payment_modes=None):
     """Get payment info via /api/1.0/cart/paymentinfo.
-    CRITICAL: context='payment_summary' + identifier='buy_now' matches real app."""
-    body = {
-        "context": "payment_summary", "identifier": "buy_now",
-        "cart_session": cart_session,
-        "dest_pin": None,
-        "address_id": None,
-        "customerAmount": None,
-        "payment_modes": payment_modes or ["upi_qr"],
-        "replaceable": None,
-        "item": None,
-        "payment_instrument": None,
-        "bank_offers": None,
-        "filter_products": None,
-        "is_self_pickup": None,
-        "self_pickup_address": None,
-        "is_emi": None,
-        "user_id": _acc_uid(acc),
-    }
-    try:
-        with httpx.Client(timeout=20.0) as client:
-            resp = client.post(f"{MEESHO_API}/1.0/cart/paymentinfo",
-                               headers=logged_in_headers(acc), json=body)
-            data = resp.json() or {}
-            if data.get("success"):
-                result = data.get("result", {})
-                return {
-                    "ok": True,
-                    "effective_total": result.get("effective_total"),
-                    "effective_total_for_upi_plugin": result.get("effective_total_for_upi_plugin"),
-                    "effective_total_with_ppd": result.get("effective_total_with_ppd"),
-                    "effective_total_without_ppd": result.get("effective_total_without_ppd"),
-                    "payment_details": result.get("payment_details", {}),
-                    "cart_session": data.get("cart_session"),
-                }
-            return {"ok": False, "error": data.get("error_type", "paymentinfo_failed"), "raw": data}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    Tries both atc_payment_summary/default (real Meesho cart) and payment_summary/buy_now (buy_now flow)."""
+    tried = []
+    for ctx, ident in [("atc_payment_summary","default"), ("payment_summary","buy_now"), ("atc_payment_summary","buy_now")]:
+        body = {
+            "context": ctx, "identifier": ident,
+            "cart_session": cart_session,
+            "dest_pin": None,
+            "address_id": None,
+            "customerAmount": None,
+            "payment_modes": payment_modes if payment_modes is not None else ["juspay"],
+            "replaceable": None,
+            "item": None,
+            "payment_instrument": None,
+            "bank_offers": None,
+            "filter_products": None,
+            "is_self_pickup": None,
+            "self_pickup_address": None,
+            "is_emi": None,
+            "user_id": _acc_uid(acc),
+        }
+        # normalize payment_modes: [] for COD, ["juspay"] for prepaid (captured)
+        if payment_modes == []:
+            body["payment_modes"] = []
+        elif payment_modes == ["juspay"] or payment_modes == ["upi_qr"]:
+            body["payment_modes"] = ["juspay"]
+        tried.append((ctx,ident))
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                resp = client.post(f"{MEESHO_API}/1.0/cart/paymentinfo",
+                                   headers=logged_in_headers(acc), json=body)
+                data = resp.json() or {}
+                if data.get("success"):
+                    result = data.get("result", {})
+                    return {
+                        "ok": True,
+                        "effective_total": result.get("effective_total"),
+                        "effective_total_for_upi_plugin": result.get("effective_total_for_upi_plugin"),
+                        "effective_total_with_ppd": result.get("effective_total_with_ppd"),
+                        "effective_total_without_ppd": result.get("effective_total_without_ppd"),
+                        "payment_details": result.get("payment_details", {}),
+                        "cart_session": data.get("cart_session"),
+                        "price_break_up": result.get("price_break_up", []),
+                        "prepaid_discount_offered": (result.get("payment_details") or {}).get("prepaid_discount_offered", 0),
+                    }
+                # not success, try next context
+                last_err = data.get("error_type") or data.get("message") or str(data)[:200]
+                # if last context, return error else continue
+                if (ctx,ident) == [("atc_payment_summary","default"), ("payment_summary","buy_now"), ("atc_payment_summary","buy_now")][-1]:
+                    return {"ok": False, "error": last_err, "raw": data}
+                continue
+        except Exception as e:
+            last_exc = str(e)
+            if (ctx,ident) == [("atc_payment_summary","default"), ("payment_summary","buy_now"), ("atc_payment_summary","buy_now")][-1]:
+                return {"ok": False, "error": last_exc}
+            continue
+    return {"ok": False, "error": "paymentinfo_failed all contexts", "tried": tried}
 
 
 def real_address_create(acc, name, mobile, pin, city, state, line1, line2="", landmark="", addr_type="Home"):

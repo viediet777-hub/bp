@@ -1480,13 +1480,29 @@ def api_cart_sync_pull():
         local = get_cart(uid)
         local_ids = {int(c.get("product_id")) for c in local if c.get("product_id")}
         meesho_ids = {int(m.get("product_id")) for m in meesho_items if m.get("product_id")}
-        # Import missing Meesho items into local
-        imported=0
+        # Import missing Meesho items into local and update price for existing to match Meesho's real price
+        imported=0; updated=0
         for m in meesho_items:
             pid=int(m.get("product_id") or 0)
-            if not pid or pid in local_ids: continue
-            add_to_cart(uid, pid, m.get("quantity",1), name=m.get("name",""), price=int(m.get("price",0) or 0), image=m.get("image","") or "", supplier_id=int(m.get("supplier_id") or 0), variation_id=int(m.get("variation_id") or 0), variation_name=m.get("variation","Free Size"))
-            imported+=1
+            meesho_price = int(m.get("price") or m.get("effective") or 0)
+            # price may be in different field; try to get from result if needed
+            if not meesho_price:
+                # fallback: try to get from splits product price if available in raw
+                try: meesho_price = int(m.get("mrp") or 0)
+                except: pass
+            if not pid: continue
+            if pid not in local_ids:
+                add_to_cart(uid, pid, m.get("quantity",1), name=m.get("name",""), price=meesho_price or 0, image=m.get("image","") or "", supplier_id=int(m.get("supplier_id") or 0), variation_id=int(m.get("variation_id") or 0), variation_name=m.get("variation","Free Size"))
+                imported+=1
+            else:
+                # update price if mismatch (so card Rs.136 vs real 306 mismatch fixed)
+                if meesho_price and meesho_price>0:
+                    for c in local:
+                        if int(c.get("product_id"))==pid and int(c.get("price") or 0) != meesho_price:
+                            from database import get_db
+                            conn=get_db(); conn.execute("UPDATE cart SET price=? WHERE user_id=? AND product_id=?", (meesho_price, uid, pid)); conn.commit(); conn.close()
+                            updated+=1
+                            break
         # Remove local items that Meesho no longer has (if user removed in Meesho app, reflect in mini app after sync)
         # Only if Meesho has definitive list (not empty due to error) we remove
         removed=0
@@ -1496,7 +1512,7 @@ def api_cart_sync_pull():
                 if pid and pid not in meesho_ids:
                     # don't auto-remove if Meesho cart was empty due to error - require explicit
                     pass
-        return jsonify({"ok": True, "meesho_items": meesho_items, "imported": imported, "cart_session": review.get("cart_session")})
+        return jsonify({"ok": True, "meesho_items": meesho_items, "imported": imported, "updated": updated, "cart_session": review.get("cart_session")})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 
