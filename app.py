@@ -242,52 +242,95 @@ def api_cart_update():
     data = request.json
     cid = data.get("cart_id")
     qty = data.get("qty", 1)
-    # capture product info before local delete for Meesho sync
+    # capture product info before local delete for Meesho sync - try id first, then product_id fallback (for single-item edge)
     cart_before = get_cart(uid)
     target = next((c for c in cart_before if str(c.get("id")) == str(cid)), None)
+    if not target:
+        # fallback: cid may be product_id when only one item or frontend bug
+        target = next((c for c in cart_before if str(c.get("product_id")) == str(cid)), None)
+        if target:
+            cid = target.get("id")  # correct to real cart id for delete
     prod_id = target.get("product_id") if target else None
     sup_id = target.get("supplier_id") if target else 0
     var_id = target.get("variation_id") if target else 0
     var_name = target.get("variation_name") if target else "Free Size"
-    update_cart_qty(cid, qty)
-    # sync to real Meesho cart
+    # If still no target but qty==0 and single item in cart, delete that single item
+    if not target and int(qty) <= 0 and len(cart_before)==1:
+        target = cart_before[0]
+        cid = target.get("id")
+        prod_id = target.get("product_id")
+        sup_id = target.get("supplier_id",0)
+        var_id = target.get("variation_id",0)
+        var_name = target.get("variation_name","Free Size")
+    if cid:
+        update_cart_qty(cid, qty)
+    else:
+        # safety: clear if no cid but qty 0
+        if int(qty) <=0 and prod_id:
+            # delete by product_id
+            from database import get_db
+            conn=get_db(); conn.execute("DELETE FROM cart WHERE user_id=? AND product_id=?", (uid, prod_id)); conn.commit(); conn.close()
+    # sync to real Meesho cart - robust for single-item remove
     try:
         acc = get_active_meesho_account(uid)
         if acc and prod_id:
             cs = get_cart_session(uid)
-            review = real_cart_review(acc, cs)
-            if review.get("ok"):
-                if review.get("cart_session"):
-                    cs = review["cart_session"]
-                    set_cart_session(uid, cs)
-                # find matching Meesho item by product_id
-                m_items = review.get("items") or []
-                m_match = None
-                for mi in m_items:
-                    if int(mi.get("product_id") or 0) == int(prod_id):
-                        # also match variation if available
-                        if var_id and mi.get("variation_id") and int(mi.get("variation_id")) != int(var_id):
-                            continue
-                        m_match = mi
-                        break
-                if m_match and m_match.get("identifier"):
-                    ident = m_match["identifier"]
-                    if int(qty) <= 0:
-                        rr = real_cart_remove(acc, ident, cs)
-                        if rr.get("cart_session"):
-                            set_cart_session(uid, rr["cart_session"])
-                        print(f"[CART_UPDATE] removed pid={prod_id} ident={ident[:30]}", flush=True)
+            # For remove (qty 0), try direct product_id remove first (most reliable), then identifier fallback
+            if int(qty) <= 0:
+                # Try direct product_id remove without needing review
+                rr = real_cart_remove(acc, {"product_id": int(prod_id)}, cs or "")
+                print(f"[CART_UPDATE] direct remove pid={prod_id} ok={rr.get('ok')} err={rr.get('error')}", flush=True)
+                if rr.get("ok") and rr.get("cart_session"):
+                    set_cart_session(uid, rr["cart_session"])
+                    cs = rr["cart_session"]
+                else:
+                    # Fallback: try via review identifier as before
+                    review = real_cart_review(acc, cs)
+                    if review.get("ok") and review.get("cart_session"):
+                        cs = review["cart_session"]; set_cart_session(uid, cs)
+                        m_items = review.get("items") or []
+                        m_match = next((mi for mi in m_items if int(mi.get("product_id") or 0)==int(prod_id)), None)
+                        if m_match and m_match.get("identifier"):
+                            rr2 = real_cart_remove(acc, m_match["identifier"], cs)
+                            if rr2.get("cart_session"): set_cart_session(uid, rr2["cart_session"])
+                            print(f"[CART_UPDATE] fallback remove pid={prod_id} ident={m_match['identifier'][:30]} ok={rr2.get('ok')}", flush=True)
+                        else:
+                            # No match found but we already tried product_id, try empty session
+                            rr3 = real_cart_remove(acc, {"product_id": int(prod_id)}, "")
+                            print(f"[CART_UPDATE] empty session remove pid={prod_id} ok={rr3.get('ok')}", flush=True)
+                            if rr3.get("cart_session"): set_cart_session(uid, rr3["cart_session"])
                     else:
-                        # qty change: remove and re-add with new qty
+                        # review failed, try empty session direct
+                        rr3 = real_cart_remove(acc, {"product_id": int(prod_id)}, "")
+                        if rr3.get("cart_session"): set_cart_session(uid, rr3["cart_session"])
+            else:
+                # qty change: remove and re-add with new qty
+                review = real_cart_review(acc, cs)
+                if review.get("ok"):
+                    if review.get("cart_session"):
+                        cs = review["cart_session"]; set_cart_session(uid, cs)
+                    m_items = review.get("items") or []
+                    m_match = None
+                    for mi in m_items:
+                        if int(mi.get("product_id") or 0) == int(prod_id):
+                            if var_id and mi.get("variation_id") and int(mi.get("variation_id")) != int(var_id):
+                                continue
+                            m_match = mi; break
+                    if m_match and m_match.get("identifier"):
+                        ident = m_match["identifier"]
                         rr = real_cart_remove(acc, ident, cs)
                         new_cs = rr.get("cart_session") or cs
-                        # re-add with desired qty
                         ar = real_cart_add(acc, prod_id, sup_id, var_id, var_name, int(qty), new_cs)
-                        if ar.get("cart_session"):
-                            set_cart_session(uid, ar["cart_session"])
+                        if ar.get("cart_session"): set_cart_session(uid, ar["cart_session"])
                         print(f"[CART_UPDATE] qty change pid={prod_id} new_qty={qty}", flush=True)
+                    else:
+                        # no identifier match, direct re-add
+                        rr = real_cart_remove(acc, {"product_id": int(prod_id)}, cs)
+                        new_cs = rr.get("cart_session") or cs
+                        ar = real_cart_add(acc, prod_id, sup_id, var_id, var_name, int(qty), new_cs)
+                        if ar.get("cart_session"): set_cart_session(uid, ar["cart_session"])
     except Exception as e:
-        print(f"[CART_UPDATE] Meesho sync failed: {e}", flush=True)
+        import traceback; print(f"[CART_UPDATE] Meesho sync failed: {e} {traceback.format_exc()}", flush=True)
     return jsonify({"ok": True})
 
 
@@ -422,12 +465,21 @@ def api_place_order():
     order_r = real_preorder(acc, cart_session, meesho_addr_id,
                             payment_method=payment_method,
                             customer_amount=meesho_amount)
-
+    print(f"[PLACE_ORDER] preorder result ok={order_r.get('ok')} err={order_r.get('error')} meesho_num={order_r.get('order_num')} raw={str(order_r.get('raw'))[:600]}", flush=True)
     if not order_r.get("ok"):
         if user_mode == "paid":
             add_wallet(uid, fee)
+        # Try to give actionable hint - if order_failed due to amount, try with cod_amount instead
+        hint = ""
+        raw = order_r.get("raw") or {}
+        if "amount" in str(raw).lower() or "customer_amount" in str(raw).lower():
+            hint = "Amount mismatch - try COD or check cart price"
         return jsonify({"error": f"Order failed: {order_r.get('error')}",
-                        "message": order_r.get("message", ""), "details": order_r}), 400
+                        "message": order_r.get("message", "") or hint,
+                        "details": order_r,
+                        "sent_amount": meesho_amount,
+                        "cart_session": cart_session,
+                        "address_id": meesho_addr_id}), 400
 
     meesho_order_num = order_r.get("order_num", "")
     items_str = ", ".join([f"{c.get('name', '?')}x{c.get('qty', 1)}" for c in cart])
@@ -481,9 +533,22 @@ def api_create_pending():
     if not acc:
         return jsonify({"ok": False, "error": "no meesho account linked. Login first."}), 400
 
-    addr = get_default_address(uid)
+    # Allow frontend to select address (like checkout address selection)
+    sel_addr_id = data.get("address_id")
+    addr = None
+    if sel_addr_id:
+        addr = get_address(sel_addr_id)
+        # ensure it belongs to user
+        if addr and addr.get("user_id") != uid:
+            addr = None
+    if not addr:
+        addr = get_default_address(uid)
     if not addr:
         return jsonify({"ok": False, "error": "no address found. Add address first."}), 400
+    # If selected address exists, make it default for next time
+    if sel_addr_id and addr:
+        try: set_default_address(uid, addr.get("id"))
+        except: pass
 
     # Get real Meesho prices via checkout flow
     cart_session = get_cart_session(uid)
@@ -517,8 +582,10 @@ def api_create_pending():
     # Use Meesho's REAL preorder - returns actual payment QR from JusPay
     order_r = real_preorder(acc, cart_session, meesho_addr_id,
                             payment_method="UPI", customer_amount=meesho_amount)
+    print(f"[CREATE_PENDING] preorder ok={order_r.get('ok')} err={order_r.get('error')} raw={str(order_r.get('raw'))[:600]} sent_amount={meesho_amount} addr={meesho_addr_id} cs={cart_session[:20] if cart_session else ''}", flush=True)
     if not order_r.get("ok"):
-        return jsonify({"ok": False, "error": f"Order failed: {order_r.get('error')}"}), 400
+        # If UPI fails, try COD as fallback to see if amount was issue
+        return jsonify({"ok": False, "error": f"Order failed: {order_r.get('error')}", "message": order_r.get("message",""), "details": order_r, "sent_amount": meesho_amount, "address_id": meesho_addr_id}), 400
 
     meesho_order_num = order_r.get("order_num", "")
     items_str = ", ".join([f"{c.get('name','?')}x{c.get('qty',1)}" for c in cart])

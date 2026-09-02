@@ -187,9 +187,10 @@ input,button{font-family:inherit;outline:none;border:none}
   <div id="cartList"></div>
   <div id="checkoutPanel" style="display:none;margin:0 12px 10px">
     <div class="cart-item fade-up" style="flex-direction:column;gap:0">
-      <div style="font-size:14px;font-weight:700;margin-bottom:8px">Delivery Address</div>
-      <div id="checkoutAddr" style="font-size:12px;color:var(--text2);margin-bottom:8px"></div>
-      <div style="font-size:11px;color:var(--accent);cursor:pointer" onclick="openAddAddress()">Change / Add Address</div>
+      <div style="font-size:14px;font-weight:700;margin-bottom:8px">Delivery Address <span style="font-size:10px;color:var(--text3);font-weight:500">— select one</span></div>
+      <div id="checkoutAddrList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+      <div id="checkoutAddr" style="display:none;font-size:12px;color:var(--text2);margin-bottom:8px"></div>
+      <div style="display:flex;gap:10px"><span style="font-size:11px;color:var(--accent);cursor:pointer" onclick="openAddAddress()">+ Add Address</span><span style="font-size:11px;color:var(--accent);cursor:pointer" onclick="loadCheckoutAddresses()">↻ Refresh</span></div>
     </div>
     <div class="cart-item fade-up" style="flex-direction:column;gap:8px">
       <div style="font-size:14px;font-weight:700">Payment Method</div>
@@ -847,6 +848,36 @@ function renderCart(items){
 }
 
 var selectedPayment='COD';
+var selectedAddressId=null;
+async function loadCheckoutAddresses(){
+  try{
+    var r=await fetch(API+'/api/addresses',{headers:headers()});
+    var d=await r.json();
+    var addrs=d.addresses||[];
+    var def=d.default||addrs[0]||null;
+    var listEl=$('checkoutAddrList');
+    if(!listEl) return;
+    if(!addrs.length){
+      listEl.innerHTML='<div style="font-size:12px;color:var(--text3)">No saved address. <span style="color:var(--accent);cursor:pointer" onclick="openAddAddress()">Add now</span></div>';
+      selectedAddressId=null;
+      return;
+    }
+    // If no selected yet, use default
+    if(!selectedAddressId && def) selectedAddressId=def.id;
+    // Also try to sync from checkout summary's address if needed
+    listEl.innerHTML=addrs.map(function(a){
+      var isSel = String(a.id)===String(selectedAddressId);
+      return '<label style="display:flex;gap:8px;align-items:center;padding:8px 10px;border:1px solid '+(isSel?'var(--accent)':'var(--border)')+';border-radius:10px;background:'+(isSel?'#f0eefc':'var(--card)')+';cursor:pointer"><input type="radio" name="checkoutAddrSel" value="'+a.id+'" '+(isSel?'checked':'')+' onchange="selectCheckoutAddress('+a.id+')" style="accent-color:var(--accent)"><div style="flex:1"><div style="font-size:12px;font-weight:600">'+(a.name||'')+' | '+a.mobile+' <span style="font-size:10px;color:var(--text3)">'+a.pin+'</span></div><div style="font-size:11px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(a.address_line_1||'')+', '+(a.city||'')+'</div></div>'+(a.is_default?'<span style="font-size:9px;background:#e8f5e9;color:#27ae60;padding:2px 6px;border-radius:4px">Default</span>':'')+'</label>';
+    }).join('');
+  }catch(e){ console.warn("checkout addr load fail",e); }
+}
+function selectCheckoutAddress(id){
+  selectedAddressId=id;
+  // update UI highlight
+  loadCheckoutAddresses();
+  // re-fetch price as pin may affect delivery
+  loadCheckoutSummary();
+}
 
 function selectPay(method){
   selectedPayment=method;
@@ -874,9 +905,16 @@ function updatePayDetail(){
 
 async function loadCheckoutSummary(){
   try{
+    // ensure selectable addresses are loaded first
+    try{ await loadCheckoutAddresses(); }catch(e){}
     var r=await fetch(API+'/api/checkout/summary',{headers:headers()});
     var d=await r.json();
     window._ckData=d;
+    // keep selectedAddressId in sync with backend's address if not yet chosen
+    if(d.address && d.address.id && !selectedAddressId){
+      selectedAddressId = d.address.id;
+      try{ await loadCheckoutAddresses(); }catch(e){}
+    }
     if(d.address){
       var a=d.address;
       var line1=a.address_line_1||a.line1||a.address||'';
@@ -886,13 +924,15 @@ async function loadCheckoutSummary(){
       var state=a.state||'';
       var pin=a.pin||'';
       if(nm||line1||pin){
-        $('checkoutAddr').innerHTML='<b>'+nm+'</b> '+(mob?'| '+mob:'')+'<br>'+line1+(city?', '+city:'')+(state?', '+state:'')+(pin?' - '+pin:'');
+        $('checkoutAddr').innerHTML='<b>'+nm+'</b> '+(mob?'| '+mob:'')+'<br>'+line1+(city?', '+city:'')+(state?', '+state:'')+(pin?' - '+pin:'')+'<div style="font-size:10px;color:var(--green);margin-top:4px">✓ Selected for delivery</div>';
       }else{
         $('checkoutAddr').innerHTML='<span style="color:var(--accent2)">Address found but incomplete. </span><span style="color:var(--accent);cursor:pointer" onclick="openAddAddress()">Add one now</span>';
       }
     }else{
       $('checkoutAddr').innerHTML='<span style="color:var(--accent2)">No address saved. </span><span style="color:var(--accent);cursor:pointer" onclick="openAddAddress()">Add one now</span>';
     }
+    // refresh selectable list again to highlight selected
+    try{ loadCheckoutAddresses(); }catch(e){}
     // subtotal = local sum (reference), but real payable is cod/upi from Meesho
     var realCod = d.cod_amount||d.subtotal||0;
     var realUpi = d.upi_amount||d.subtotal||0;
@@ -999,13 +1039,23 @@ function setupReturnDetection(){
 async function handleOnlinePayment(){
   const btn=$('placeOrderBtn'); btn.disabled=true; btn.textContent='Placing UPI order...';
   try{
-    const addrR0=await fetch(API+'/api/addresses/default',{headers:headers()});
-    const addrD0=await addrR0.json();
-    if(!addrD0.address){ toast('Add a delivery address first!'); btn.disabled=false; btn.textContent='Place Order'; return; }
+    // Use selected address from checkout (or default)
+    var useAddrId = selectedAddressId;
+    if(!useAddrId){
+      const addrR0=await fetch(API+'/api/addresses/default',{headers:headers()});
+      const addrD0=await addrR0.json();
+      if(!addrD0.address){ toast('Add a delivery address first!'); btn.disabled=false; btn.textContent='Place Order'; return; }
+      useAddrId = addrD0.address.id;
+    }
     // Use Meesho's real preorder - returns actual payment QR from JusPay gateway
-    const r=await fetch(API+'/api/orders/create-pending',{method:'POST',headers:headers(),body:JSON.stringify({})});
+    const r=await fetch(API+'/api/orders/create-pending',{method:'POST',headers:headers(),body:JSON.stringify({address_id: useAddrId})});
     const d=await r.json();
-    if(!d.ok) throw new Error(d.error||'Failed to create order');
+    if(!d.ok){
+      var msg = d.error || 'Failed to create order';
+      if(d.details) msg += ' - ' + (d.details.message || d.details.error || '');
+      if(d.sent_amount) msg += ' (sent ₹'+d.sent_amount+')';
+      throw new Error(msg);
+    }
     pendingOrderId=d.order_id; pendingAmount=d.amount;
     sessionStorage.setItem('pending_upi_order', String(d.order_id));
     sessionStorage.setItem('pending_upi_amount', String(d.amount));
@@ -1174,11 +1224,15 @@ async function placeOrder(){
   var btn=$('placeOrderBtn');
   btn.disabled=true;btn.textContent='Placing order...';
   try{
-    var addrR=await fetch(API+'/api/addresses/default',{headers:headers()});
-    var addrD=await addrR.json();
-    var addr=addrD.address;
-    if(!addr){toast('Add a delivery address first!');btn.disabled=false;btn.textContent='Place Order';return}
-    var r=await fetch(API+'/api/orders/place',{method:'POST',headers:headers(),body:JSON.stringify({payment_method:selectedPayment,address_id:addr.id})});
+    var useAddrId = selectedAddressId;
+    if(!useAddrId){
+      var addrR=await fetch(API+'/api/addresses/default',{headers:headers()});
+      var addrD=await addrR.json();
+      var addr=addrD.address;
+      if(!addr){toast('Add a delivery address first!');btn.disabled=false;btn.textContent='Place Order';return}
+      useAddrId = addr.id;
+    }
+    var r=await fetch(API+'/api/orders/place',{method:'POST',headers:headers(),body:JSON.stringify({payment_method:selectedPayment,address_id:useAddrId})});
     var d=await r.json();
     if(d.ok){
       var msg='Order placed! #'+d.order_id;
@@ -1191,10 +1245,13 @@ async function placeOrder(){
     }else if(d.error==='insufficient wallet'){
       toast('Need Rs.'+d.needed+' more (balance: Rs.'+(d.balance||0)+'). Add money or switch to FREE mode.');
     }else{
-      toast(d.error||d.message||'Failed to place order');
+      var msg = d.error||d.message||'Failed to place order';
+      if(d.details) msg += ' ' + (d.details.message||d.details.error||'');
+      if(d.sent_amount) msg += ' (sent ₹'+d.sent_amount+')';
+      toast(msg);
       console.error('[ORDER ERROR]',d);
     }
-  }catch(e){toast('Failed to place order');console.error(e)}
+  }catch(e){toast('Failed: '+e.message);console.error(e)}
   btn.disabled=false;btn.textContent='Place Order';
 }
 
