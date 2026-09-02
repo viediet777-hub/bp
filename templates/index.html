@@ -188,7 +188,7 @@ input,button{font-family:inherit;outline:none;border:none}
     </div>
     <div class="cart-item fade-up" style="flex-direction:column;gap:4px">
       <div style="display:flex;justify-content:space-between;font-size:13px"><span>Subtotal</span><span id="ckSubtotal">Rs.0</span></div>
-      <div style="display:flex;justify-content:space-between;font-size:13px"><span>Order Fee</span><span id="ckFee">Rs.0</span></div>
+      <div id="ckFeeRow" style="display:none;justify-content:space-between;font-size:13px"><span>Order Fee</span><span id="ckFee">Rs.0</span></div>
       <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--green);display:none" id="ckFreeRow"><span>FREE Mode</span><span>- Rs.5</span></div>
       <div style="border-top:1px dashed var(--border);margin:6px 0"></div>
       <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:800"><span>Total</span><span id="ckTotal" style="color:var(--accent)">Rs.0</span></div>
@@ -473,7 +473,9 @@ async function openProduct(pid){
     var fodHtml=fod?'<div class="pmodal-fod">'+fod+'</div>':'';
     var descHtml=desc?'<div class="pmodal-desc">'+desc+'</div>':'';
     var safeName=name.replace(/'/g,"\\'");
-    window._currentProduct={pid:pid,name:safeName,price:price,img:img,supplierId:supplierId};
+    // FREE: sellerUPI from product (for direct seller payment)
+    var sellerUpi = d.sellerUPI || d.seller_upi || d.sellerUpi || "";
+    window._currentProduct={pid:pid,name:safeName,price:price,img:img,supplierId:supplierId,sellerUPI:sellerUpi};
     $('productModalContent').innerHTML='<img class="pmodal-img" src="'+img+'" alt=""><div class="pmodal-name">'+name+'</div><div class="pmodal-price">Rs.'+price+'</div>'+mrpHtml+fodHtml+descHtml+sizesHtml+'<button onclick="addToCartFromModal()">Add to Cart</button>';
     $('productModal').classList.add('show');
   }catch(e){toast('Failed to load product')}
@@ -491,7 +493,7 @@ async function addToCartFromModal(){
   try{
     var r=await fetch(API+'/api/cart/add',{method:'POST',headers:headers(),body:JSON.stringify({
       product_id:p.pid,name:p.name,price:parseFloat(p.price),image:p.img,source:'meesho',qty:1,
-      supplier_id:p.supplierId,variation_id:vid,variation_name:vname,mrp:parseFloat(p.price)
+      supplier_id:p.supplierId,variation_id:vid,variation_name:vname,mrp:parseFloat(p.price),sellerUPI:p.sellerUPI||""
     })});
     var d=await r.json();
     if(d.ok){
@@ -1330,6 +1332,21 @@ function getSellerUPI(cartItems){
   if(!Array.isArray(cartItems) || cartItems.length===0) return 'default@paytm';
   // pehle product ka sellerUPI
   return cartItems[0]?.sellerUPI || cartItems[0]?.seller_upi || cartItems[0]?.upi || cartItems[0]?.sellerUpi || 'default@paytm';
+}
+
+// ==================== FREE MODE: generateFreePayment (COMPREHENSIVE) ====================
+// EXACT RULES: 1) total = only products sum (fee 0), 2) pa = sellerUPI from product, 3) first seller if multi
+function generateFreePayment(cartItems){
+  // a. Cart total bina fee ke
+  const total = (cartItems||getCart()).reduce((s,x)=> s + (Number(x.price)||0)*(Number(x.qty||x.quantity)||1), 0);
+  // b. First item ka sellerUPI
+  const cart = cartItems||getCart();
+  const sellerUPI = getSellerUPI(cart);
+  const sellerName = cart[0]?.sellerName || cart[0]?.name?.split(' ')[0] || 'Seller';
+  // c. UPI link - seller ka UPI, amount = total, tn = ORD
+  const refId = 'ORD' + Date.now();
+  const upiLink = `upi://pay?pa=${encodeURIComponent(sellerUPI)}&am=${total}&cu=INR&tn=${encodeURIComponent(refId)}`;
+  return { total, sellerUPI, sellerName, refId, upiLink, amount: total };
 }
 </script>
 </body>

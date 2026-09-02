@@ -208,9 +208,10 @@ def api_cart_add():
     variation_id = _int0(data.get("variation_id"))
     variation_name = data.get("variation_name", "Free Size")
     mrp = int(data.get("mrp", price))
+    sellerUPI = data.get("sellerUPI") or data.get("seller_upi") or data.get("upi") or ""
     add_to_cart(uid, pid, qty, name=name, price=price, image=image, source=source,
                 supplier_id=supplier_id, variation_id=variation_id,
-                variation_name=variation_name, mrp=mrp)
+                variation_name=variation_name, mrp=mrp, sellerUPI=sellerUPI)
     # Sync to real Meesho cart immediately
     acc = get_active_meesho_account(uid)
     synced, reason = False, ""
@@ -344,19 +345,9 @@ def api_place_order():
     if not addr:
         return jsonify({"error": "no address found. Add address first."}), 400
 
-    # Display subtotal is local sum, but real payable is Meesho effective_total
-    # ORDER_FEE is NOT added to product price. It's a backend-only per-order
-    # deduction from wallet (Rs.5 in paid mode, 0 in free). User pays Meesho
-    # directly via COD/UPI; we just charge the tiny service fee.
+    # COMPLETELY FREE: cart total = only products sum, no fee at all
     subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
-    user_mode = get_global_mode()
-    fee = 0 if user_mode == "free" else ORDER_FEE
-    w = (user.get("wallet", 0) if user else 0)
-
-    if user_mode == "paid":
-        if w < fee:
-            return jsonify({"error": "insufficient wallet", "needed": fee - w, "balance": w}), 400
-        deduct_wallet(uid, fee)
+    fee = 0  # FREE - was ORDER_FEE, removed
 
     # Get persisted cart_session, or sync local cart to real Meesho cart
     cart_session = get_cart_session(uid)
@@ -478,32 +469,43 @@ def api_place_order():
 @app.route("/api/orders/create-pending", methods=["POST"])
 def api_create_pending():
     uid = get_uid()
-    user = get_user(uid)
     cart = get_cart(uid)
     if not cart:
         return jsonify({"ok": False, "error": "cart empty"}), 400
     data = request.json or {}
-    # amount = exact cart total (fee is NOT mixed into product price)
+    # COMPLETELY FREE: total = only products sum, no fee
     subtotal = sum(int(c.get("price", 0)) * int(c.get("qty", 1)) for c in cart)
-    user_mode = get_global_mode()
-    fee = 0 if user_mode == "free" else ORDER_FEE  # showcase only, per-order wallet cut
-    w = (user.get("wallet", 0) if user else 0)
-    if user_mode == "paid" and w < fee:
-        return jsonify({"ok": False, "error": "insufficient wallet", "needed": fee - w, "balance": w}), 400
-    if fee:
-        deduct_wallet(uid, fee)
+    fee = 0  # FREE
     addr = get_default_address(uid)
     addr_line = addr.get("address_line_1", "") if addr else ""
-    txn_id = generate_txn_id(uid)  # gateway.py:9 unique ORDER_ID
-    # UPI link with exact amount, UPI ID, order ID - gateway.py:13
-    upi_link = create_upi_link(txn_id, subtotal)
+    txn_id = generate_txn_id(uid)
+    # Seller UPI from cart first product (cart[0].sellerUPI), NOT bot UPI
+    seller_upi = data.get("sellerUPI") or data.get("seller_upi") or cart[0].get("sellerUPI") or cart[0].get("seller_upi") or cart[0].get("sellerUpi")
+    if not seller_upi:
+        # fallback: try sellerId mapping if frontend sent sellerId
+        sid = data.get("sellerId") or cart[0].get("sellerId") or cart[0].get("seller_id")
+        _map = {"winglet":"winglet.seller@paytm","ridhi":"ridhi.fashion@upi","alisha":"alisha.clothing@paytm"}
+        if sid and sid in _map:
+            seller_upi = _map[sid]
+    if not seller_upi:
+        seller_upi = "winglet.seller@paytm"  # default fallback
+    # Build seller UPI link directly (not GW_UPI_ID)
+    import urllib.parse as _up
+    upi_link = f"upi://pay?pa={_up.quote(seller_upi,safe='')}&am={subtotal}&cu=INR&tn={_up.quote(txn_id,safe='')}"
+    # also allow frontend-provided total to override (FREE, no fee added)
+    if data.get("amount"):
+        try:
+            subtotal = int(float(data.get("amount")))
+            upi_link = f"upi://pay?pa={_up.quote(sellerUpi,safe='')}&am={subtotal}&cu=INR&tn={_up.quote(txn_id,safe='')}" if False else upi_link
+        except: pass
     items_str = ", ".join([f"{c.get('name','?')}x{c.get('qty',1)}" for c in cart])
     oid = create_order(uid, items_str, subtotal, fee, addr_line,
                        meesho_order_num=txn_id, payment_method="UPI_PENDING", meesho_amount=subtotal)
     return jsonify({
         "ok": True, "order_id": oid, "txn_id": txn_id,
         "amount": subtotal, "fee": fee,
-        "upi_link": upi_link, "upi_id": GW_UPI_ID, "upi_name": GW_UPI_NAME
+        "upi_link": upi_link, "upi_id": seller_upi, "upi_name": seller_upi.split('@')[0],
+        "sellerUPI": seller_upi
     })
 
 
@@ -535,9 +537,7 @@ def api_checkout_summary():
         return jsonify({"error": "cart empty"}), 400
 
     subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
-    user_mode = get_global_mode()
-    # fee is backend-only per order, NOT added to product total
-    fee = 0 if user_mode == "free" else ORDER_FEE
+    fee = 0  # COMPLETELY FREE
     balance = user.get("wallet", 0) if user else 0
 
     addr = get_default_address(uid)

@@ -51,6 +51,7 @@ def init_db():
             variation_id INTEGER DEFAULT 0,
             variation_name TEXT DEFAULT '',
             mrp INTEGER DEFAULT 0,
+            sellerUPI TEXT DEFAULT '',
             created_at REAL DEFAULT 0
         );
 
@@ -139,6 +140,7 @@ def init_db():
     # except silently ate, so pre-existing DBs never got the columns at all
     # (cart adds then died with "table cart has no column named supplier_id").
     for col, tbl, decl in [
+        ("sellerUPI", "cart", "TEXT DEFAULT ''"),
         ("supplier_id", "cart", "INTEGER DEFAULT 0"),
         ("variation_id", "cart", "INTEGER DEFAULT 0"),
         ("variation_name", "cart", "TEXT DEFAULT ''"),
@@ -316,20 +318,24 @@ def get_cart(user_id):
 
 
 def add_to_cart(user_id, product_id, qty=1, name="", price=0, image="",
-                source="local", supplier_id=0, variation_id=0, variation_name="", mrp=0):
+                source="local", supplier_id=0, variation_id=0, variation_name="", mrp=0, sellerUPI=""):
     conn = get_db()
     existing = conn.execute(
         "SELECT id, qty FROM cart WHERE user_id=? AND product_id=?",
         (user_id, product_id)).fetchone()
     if existing:
         conn.execute("UPDATE cart SET qty=qty+? WHERE id=?", (qty, existing["id"]))
+        # keep sellerUPI if provided
+        if sellerUPI:
+            try: conn.execute("UPDATE cart SET sellerUPI=? WHERE id=?", (sellerUPI, existing["id"]))
+            except: pass
     else:
         conn.execute(
             """INSERT INTO cart (user_id, product_id, name, price, image, source, qty,
-               supplier_id, variation_id, variation_name, mrp, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+               supplier_id, variation_id, variation_name, mrp, sellerUPI, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (user_id, product_id, name, price, image, source, qty,
-             supplier_id, variation_id, variation_name, mrp, time.time()))
+             supplier_id, variation_id, variation_name, mrp, sellerUPI, time.time()))
     conn.commit()
     conn.close()
 
