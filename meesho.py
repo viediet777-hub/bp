@@ -319,9 +319,10 @@ def _apply_fod(price, offer=None):
     if flat:
         return round(max(0, price - flat), 2), f"\u20b9{int(flat)} OFF", flat
     if bucket and bucket < price:
-        # Use display_bucket (180) for text, actual bucket for price calculation
-        display_text = f"Upto \u20b9{int(display_bucket)} OFF" if display_bucket else f"Upto \u20b9{int(bucket)} OFF"
-        return round(max(0, price - bucket), 2), display_text, bucket
+        # Video: bucket 180 but display 135 (actual offer), use bucket for calc, actual bucket for text
+        actual = int(bucket)
+        txt = f"Upto \u20b9{actual} OFF"
+        return round(max(0, price - bucket), 2), txt, bucket
     if cb:
         return round(max(0, price - cb), 2), f"\u20b9{int(cb)} CASHBACK", cb
     return price, "", None

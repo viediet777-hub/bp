@@ -255,14 +255,20 @@ input,button{font-family:inherit;outline:none;border:none}
     </div>
     <input type="text" id="addrName" placeholder="Full Name">
     <input type="tel" id="addrMobile" placeholder="Mobile Number" maxlength="10">
-    <input type="text" id="addrPin" placeholder="PIN Code" maxlength="6">
+    <input type="text" id="addrPin" placeholder="PIN Code" maxlength="6" onblur="autoFillCityState()">
     <div style="display:flex;gap:10px">
       <input type="text" id="addrCity" placeholder="City" style="flex:1">
       <input type="text" id="addrState" placeholder="State" style="flex:1">
     </div>
-    <input type="text" id="addrLine1" placeholder="Address Line 1">
-    <input type="text" id="addrLine2" placeholder="Address Line 2 (optional)">
+    <!-- KALI style: split House + Area (was single Line1/2) -->
+    <input type="text" id="addrLine1" placeholder="House / Flat / Building">
+    <input type="text" id="addrLine2" placeholder="Area / Road / Colony">
     <input type="text" id="addrLandmark" placeholder="Landmark (optional)">
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <label style="flex:1;display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="addrType" value="Home" checked> Home</label>
+      <label style="flex:1;display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="addrType" value="Work"> Work</label>
+      <label style="flex:1;display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="addrType" value="Other"> Other</label>
+    </div>
     <div id="coordPill" style="margin-bottom:10px"></div>
     <button onclick="saveAddress()" id="addrSaveBtn">Save Address</button>
     <button class="cancel-btn" onclick="closeAddressModal()">Cancel</button>
@@ -1102,6 +1108,8 @@ async function editAddress(id){
     $('addrPin').value=addr.pin||'';$('addrCity').value=addr.city||'';
     $('addrState').value=addr.state||'';$('addrLine1').value=addr.address_line_1||'';
     $('addrLine2').value=addr.address_line_2||'';$('addrLandmark').value=addr.landmark||'';
+    var typeRadios=document.querySelectorAll('input[name="addrType"]');
+    typeRadios.forEach(r=> r.checked = (r.value===(addr.address_type||'Home')));
     $('coordPill').innerHTML='';$('addrSaveBtn').textContent='Update Address';
     $('addressModal').classList.add('show');
   }catch(e){toast('Failed to load address')}
@@ -1109,13 +1117,36 @@ async function editAddress(id){
 
 function closeAddressModal(){$('addressModal').classList.remove('show');editingAddrId=null;savedCoords=null}
 
+function autoFillCityState(){
+  var pin=$('addrPin').value.trim();
+  if(pin.length!==6) return;
+  // KALI video: 700004 = Kolkata, West Bengal | 452010 = Indore, MP - use PIN prefix map
+  var pinMap={'70':'Kolkata/West Bengal','45':'Indore/Madhya Pradesh','30':'Jaipur/Rajasthan','11':'New Delhi/Delhi','40':'Mumbai/Maharashtra','56':'Bangalore/Karnataka'};
+  var pref=pin.substring(0,2);
+  if(pinMap[pref]){
+    var parts=pinMap[pref].split('/');
+    if(!$('addrCity').value) $('addrCity').value=parts[0];
+    if(!$('addrState').value) $('addrState').value=parts[1];
+    $('coordPill').innerHTML='<span style="font-size:11px;color:var(--green)">✓ '+parts[0]+', '+parts[1]+' auto-filled</span>';
+  }
+  // also try backend geocode
+  fetch(API+'/api/geocode?q='+pin,{headers:headers()}).then(r=>r.json()).then(d=>{
+    if(d.results && d.results[0]){
+      if(!$('addrCity').value) $('addrCity').value=d.results[0].city;
+      if(!$('addrState').value) $('addrState').value=d.results[0].state;
+    }
+  }).catch(()=>{});
+}
+
 async function saveAddress(){
   var name=$('addrName').value.trim();var mobile=$('addrMobile').value.trim();
   var pin=$('addrPin').value.trim();var city=$('addrCity').value.trim();
   var state=$('addrState').value.trim();var line1=$('addrLine1').value.trim();
   var line2=$('addrLine2').value.trim();var landmark=$('addrLandmark').value.trim();
-  if(!name||!mobile||!pin||!line1){toast('Name, mobile, PIN & address required');return}
-  var body={name:name,mobile:mobile,pin:pin,city:city,state:state,address_line_1:line1,address_line_2:line2,landmark:landmark,address_type:'Home',is_default:editingAddrId?0:1};
+  var addrType=(document.querySelector('input[name="addrType"]:checked')||{}).value||'Home';
+  if(!name||!mobile||!pin||!line1){toast('Name, mobile, PIN & House/Flat required');return}
+  // KALI fix: ensure Area is separate - if line2 empty, use line1 for both is wrong, so keep split
+  var body={name:name,mobile:mobile,pin:pin,city:city,state:state,address_line_1:line1,address_line_2:line2,landmark:landmark,address_type:addrType,is_default:editingAddrId?0:1};
   if(savedCoords)body.coordinates=savedCoords;
   try{
     var url=editingAddrId?API+'/api/addresses/update':API+'/api/addresses/create';
