@@ -238,7 +238,52 @@ def api_cart_update():
     data = request.json
     cid = data.get("cart_id")
     qty = data.get("qty", 1)
+    # capture product info before local delete for Meesho sync
+    cart_before = get_cart(uid)
+    target = next((c for c in cart_before if str(c.get("id")) == str(cid)), None)
+    prod_id = target.get("product_id") if target else None
+    sup_id = target.get("supplier_id") if target else 0
+    var_id = target.get("variation_id") if target else 0
+    var_name = target.get("variation_name") if target else "Free Size"
     update_cart_qty(cid, qty)
+    # sync to real Meesho cart
+    try:
+        acc = get_active_meesho_account(uid)
+        if acc and prod_id:
+            cs = get_cart_session(uid)
+            review = real_cart_review(acc, cs)
+            if review.get("ok"):
+                if review.get("cart_session"):
+                    cs = review["cart_session"]
+                    set_cart_session(uid, cs)
+                # find matching Meesho item by product_id
+                m_items = review.get("items") or []
+                m_match = None
+                for mi in m_items:
+                    if int(mi.get("product_id") or 0) == int(prod_id):
+                        # also match variation if available
+                        if var_id and mi.get("variation_id") and int(mi.get("variation_id")) != int(var_id):
+                            continue
+                        m_match = mi
+                        break
+                if m_match and m_match.get("identifier"):
+                    ident = m_match["identifier"]
+                    if int(qty) <= 0:
+                        rr = real_cart_remove(acc, ident, cs)
+                        if rr.get("cart_session"):
+                            set_cart_session(uid, rr["cart_session"])
+                        print(f"[CART_UPDATE] removed pid={prod_id} ident={ident[:30]}", flush=True)
+                    else:
+                        # qty change: remove and re-add with new qty
+                        rr = real_cart_remove(acc, ident, cs)
+                        new_cs = rr.get("cart_session") or cs
+                        # re-add with desired qty
+                        ar = real_cart_add(acc, prod_id, sup_id, var_id, var_name, int(qty), new_cs)
+                        if ar.get("cart_session"):
+                            set_cart_session(uid, ar["cart_session"])
+                        print(f"[CART_UPDATE] qty change pid={prod_id} new_qty={qty}", flush=True)
+    except Exception as e:
+        print(f"[CART_UPDATE] Meesho sync failed: {e}", flush=True)
     return jsonify({"ok": True})
 
 
@@ -246,6 +291,20 @@ def api_cart_update():
 def api_cart_clear():
     uid = get_uid()
     clear_cart(uid)
+    # also clear real Meesho cart
+    try:
+        acc = get_active_meesho_account(uid)
+        if acc:
+            cs = get_cart_session(uid)
+            cr = real_cart_clear(acc, cs)
+            if cr.get("cart_session"):
+                set_cart_session(uid, cr["cart_session"])
+            else:
+                set_cart_session(uid, "")
+            print(f"[CART_CLEAR] Meesho clear ok={cr.get('ok')}", flush=True)
+    except Exception as e:
+        print(f"[CART_CLEAR] Meesho sync failed: {e}", flush=True)
+        set_cart_session(uid, "")
     return jsonify({"ok": True})
 
 
