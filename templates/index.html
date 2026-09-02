@@ -1,622 +1,1284 @@
 <!DOCTYPE html>
-<html lang="hi">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>Meesho Clone - Full Prototype (Single File)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ShopEasy</title>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-*{margin:0;padding:0;box-sizing:border-box;font-family:Inter,system-ui,sans-serif}
-:root{--orange:#ff6f00;--pink:#f43397;--bg:#f5f5f5;--card:#fff;--text:#222;--muted:#777;--border:#eee;--green:#0a7a42}
-body{background:var(--bg);color:var(--text);padding-bottom:72px}
-.topbar{position:sticky;top:0;z-index:40;background:#fff;border-bottom:1px solid var(--border);padding:10px 12px;display:flex;align-items:center;gap:10px}
-.topbar h1{color:var(--pink);font-weight:800;font-size:20px}
-.search{flex:1;display:flex;align-items:center;gap:8px;background:#f2f2f2;border-radius:10px;padding:8px 12px}
-.search input{flex:1;border:none;background:transparent;outline:none;font-size:13px}
-.page{display:none;animation:fade .2s ease}
-.page.active{display:block}
-@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-.badge{font-size:10px;background:var(--pink);color:#fff;padding:2px 6px;border-radius:20px;font-weight:700}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px}
-.pcard{background:var(--card);border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06);display:flex;flex-direction:column}
-.pcard .img{height:130px;background:#ffe8f0;display:flex;align-items:center;justify-content:center;font-size:44px}
-.pcard .info{padding:8px 10px}
-.pcard h3{font-size:12px;line-height:1.3;height:32px;overflow:hidden}
-.pcard .seller{font-size:10px;color:var(--pink);font-weight:700}
-.pcard .price{font-weight:800;margin-top:4px}
-.pcard .price s{font-size:11px;color:var(--muted);font-weight:500;margin-left:4px}
-.pcard .off{font-size:11px;color:var(--green);font-weight:700}
-.pcard button{margin:6px 8px 10px;padding:9px;border:none;border-radius:10px;background:var(--pink);color:#fff;font-weight:700;cursor:pointer}
-.cat-row{display:flex;gap:8px;padding:8px 10px;overflow:auto}
-.cat-chip{white-space:nowrap;padding:7px 12px;border-radius:20px;background:#fff;border:1px solid var(--border);font-size:12px;cursor:pointer}
-.cat-chip.active{background:var(--pink);color:#fff;border-color:var(--pink)}
-.cart-item{display:flex;gap:10px;background:var(--card);margin:8px 10px;padding:10px;border-radius:12px;box-shadow:0 1px 6px rgba(0,0,0,.06)}
-.cart-item .im{width:66px;height:66px;border-radius:10px;background:#ffe8f0;display:flex;align-items:center;justify-content:center;font-size:28px}
-.qty{display:flex;align-items:center;gap:8px;margin-top:6px}
-.qty button{width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700}
-.box{background:var(--card);margin:8px 10px;padding:12px;border-radius:12px;box-shadow:0 1px 6px rgba(0,0,0,.06)}
-.row{display:flex;justify-content:space-between;font-size:13px;margin:5px 0}
-.row.total{font-weight:800;border-top:1px dashed var(--border);padding-top:8px;font-size:15px}
-.btn{width:100%;padding:13px;border:none;border-radius:12px;font-weight:800;cursor:pointer}
-.btn-pink{background:var(--pink);color:#fff}
-.btn-white{background:#fff;color:var(--pink);border:1.5px solid var(--pink)}
-.pay-opt{border:2px solid var(--border);border-radius:12px;padding:12px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;background:#fff;margin-bottom:8px}
-.pay-opt.active{border-color:var(--pink);background:#fff0f7}
-.input{width:100%;padding:11px;border:1px solid var(--border);border-radius:10px;font-size:13px;outline:none}
-.addr{border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;background:#fff;cursor:pointer}
-.addr.active{border-color:var(--pink);background:#fff0f7}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-end;justify-content:center;z-index:80}
-.modal.show{display:flex}
-.modal .sheet{background:#fff;width:100%;max-width:480px;border-radius:18px 18px 0 0;padding:16px;max-height:85vh;overflow:auto}
-.bnav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--border);display:flex;justify-content:space-around;padding:6px 0;z-index:70}
-.bnav div{flex:1;text-align:center;font-size:10px;color:var(--muted);cursor:pointer;padding:4px}
-.bnav div.active{color:var(--pink);font-weight:700}
-.bnav span{font-size:18px;display:block}
-.toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:8px 14px;border-radius:20px;font-size:12px;opacity:0;transition:.3s;pointer-events:none;z-index:90}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{--bg:#f5f6fa;--card:#fff;--accent:#7c5cfc;--accent2:#ff6b9d;--text:#1a1a2e;--text2:#666;--text3:#999;--border:#eee;--green:#2ecc71;--radius:14px;--shadow:0 2px 12px rgba(0,0,0,.06)}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;padding-bottom:70px}
+a{text-decoration:none;color:inherit}img{display:block}
+input,button{font-family:inherit;outline:none;border:none}
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:var(--text);color:#fff;padding:12px 24px;border-radius:12px;font-size:13px;font-weight:600;z-index:9999;opacity:0;transition:.3s;pointer-events:none;white-space:nowrap}
 .toast.show{opacity:1}
-#qrcode{display:flex;justify-content:center;margin:10px 0}
-#qrcode img{border:8px solid #fff;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.08)}
-.small{font-size:11px;color:var(--muted)}
+.spinner{display:inline-block;width:20px;height:20px;border:2.5px solid rgba(124,92,252,.3);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pop{0%{transform:scale(1)}50%{transform:scale(1.08)}100%{transform:scale(1)}}
+.fade-up{animation:fadeUp .4s ease forwards}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--card);position:sticky;top:0;z-index:100;box-shadow:0 1px 8px rgba(0,0,0,.04)}
+.topbar h1{font-size:20px;font-weight:800;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.topbar-icons{display:flex;gap:14px;align-items:center}
+.topbar-icons svg{width:22px;height:22px;cursor:pointer;color:var(--text)}
+.search-bar{margin:12px 16px;position:relative}
+.search-bar input{width:100%;padding:12px 16px 12px 44px;border-radius:12px;background:var(--card);border:1px solid var(--border);font-size:14px;box-shadow:var(--shadow)}
+.search-bar input:focus{border-color:var(--accent)}
+.search-bar svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--text3)}
+.banner{margin:0 16px 12px;border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
+.banner-inner{background:linear-gradient(135deg,var(--accent),var(--accent2));padding:20px 16px;min-height:120px;display:flex;flex-direction:column;justify-content:center}
+.banner-inner h2{color:#fff;font-size:18px;font-weight:800;margin-bottom:4px}
+.banner-inner p{color:rgba(255,255,255,.85);font-size:12px;margin-bottom:14px}
+.banner-offer{background:rgba(255,255,255,.18);border-radius:10px;padding:10px 14px;margin-bottom:12px;color:#fff;font-size:13px;font-weight:600;backdrop-filter:blur(6px)}
+.banner-btn{align-self:flex-start;background:#fff;color:var(--accent);padding:10px 22px;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;transition:.2s}
+.banner-btn:active{transform:scale(.95)}.banner-btn:disabled{opacity:.6;cursor:not-allowed}
+.section-title{padding:16px 16px 10px;font-size:15px;font-weight:700}
+.cat-row{display:flex;gap:14px;padding:0 16px 16px;overflow-x:auto;scrollbar-width:none}
+.cat-row::-webkit-scrollbar{display:none}
+.cat-item{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:68px;cursor:pointer}
+.cat-item .ci{width:56px;height:56px;border-radius:50%;background:var(--card);box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;font-size:26px;transition:.2s}
+.cat-item .ci:active{transform:scale(.92)}
+.cat-item span{font-size:11px;font-weight:600;color:var(--text2);white-space:nowrap}
+.prod-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:0 12px 20px}
+.prod-card{background:var(--card);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);cursor:pointer;transition:.2s}
+.prod-card:active{transform:scale(.97)}
+.prod-card img{width:100%;aspect-ratio:1;object-fit:cover;background:#f0f0f0}
+.prod-card .info{padding:10px 12px}
+.prod-card .info h3{font-size:12px;font-weight:600;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:34px}
+.prod-card .info .price{margin-top:6px;font-size:15px;font-weight:800;color:var(--accent)}
+.prod-card .info .price span{font-size:11px;font-weight:500;color:var(--text3);text-decoration:line-through;margin-left:6px}
+.prod-card .info .src{font-size:10px;color:var(--text3);margin-top:4px;text-transform:capitalize}
+.prod-card .info .fod{font-size:10px;color:var(--accent2);font-weight:700;margin-top:2px}
+.cart-item{display:flex;gap:12px;background:var(--card);margin:0 12px 10px;padding:12px;border-radius:var(--radius);box-shadow:var(--shadow);animation:fadeUp .3s ease}
+.cart-item img{width:72px;height:72px;border-radius:10px;object-fit:cover;background:#f0f0f0}
+.cart-item .cd{flex:1;display:flex;flex-direction:column;justify-content:space-between}
+.cart-item .cd h4{font-size:13px;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cart-item .cd .cp{font-size:14px;font-weight:700;color:var(--accent)}
+.qty-ctrl{display:flex;align-items:center;background:var(--bg);border-radius:10px;overflow:hidden;width:fit-content}
+.qty-ctrl button{width:30px;height:30px;display:flex;align-items:center;justify-content:center;background:transparent;font-size:16px;font-weight:700;color:var(--accent);cursor:pointer}
+.qty-ctrl span{width:32px;text-align:center;font-size:13px;font-weight:700}
+.order-card{background:var(--card);margin:0 12px 10px;padding:14px;border-radius:var(--radius);box-shadow:var(--shadow)}
+.order-card .oh{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.order-card .oh h4{font-size:13px;font-weight:700}
+.badge{padding:4px 10px;border-radius:8px;font-size:10px;font-weight:700;text-transform:uppercase}
+.badge.pending{background:#fff3e0;color:#e67e22}
+.badge.placed{background:#f3e5f5;color:#8e24aa}
+.badge.confirmed{background:#e8f5e9;color:#27ae60}
+.badge.shipped{background:#e3f2fd;color:#2980b9}
+.badge.delivered{background:#e8f5e9;color:#1b8a4a}
+.badge.cancelled{background:#fdecea;color:#c0392b}
+.order-card .oi{font-size:12px;color:var(--text2);margin-bottom:4px}
+.order-card .ot{font-size:14px;font-weight:700;color:var(--accent)}
+.timeline{display:flex;align-items:center;justify-content:space-between;margin:12px 0 4px;padding:0 8px}
+.timeline .step{display:flex;flex-direction:column;align-items:center;gap:4px;flex:1}
+.timeline .step .dot{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;background:var(--bg);border:2px solid var(--border);transition:.3s}
+.timeline .step.done .dot{background:var(--green);border-color:var(--green);color:#fff}
+.timeline .step.active .dot{background:var(--accent);border-color:var(--accent);color:#fff;animation:pop .5s ease}
+.timeline .step .lbl{font-size:9px;font-weight:600;color:var(--text3);text-align:center}
+.timeline .step.done .lbl,.timeline .step.active .lbl{color:var(--text)}
+.timeline .line{flex:1;height:2px;background:var(--border);margin:0 -4px;margin-bottom:18px}
+.timeline .line.done{background:var(--green)}
+.profile-card{margin:12px 16px;background:linear-gradient(135deg,var(--accent),var(--accent2));padding:20px;border-radius:var(--radius);color:#fff}
+.profile-card h3{font-size:18px;font-weight:800}
+.profile-card p{font-size:12px;opacity:.8;margin-top:4px}
+.wallet-card{margin:0 16px 12px;background:var(--card);padding:16px;border-radius:var(--radius);box-shadow:var(--shadow)}
+.wallet-card .wl{display:flex;justify-content:space-between;align-items:center}
+.wallet-card .wl h4{font-size:13px;font-weight:600;color:var(--text2)}
+.wallet-card .wl .wbal{font-size:22px;font-weight:800;color:var(--accent)}
+.menu-item{display:flex;align-items:center;gap:14px;padding:14px 16px;margin:0 12px;background:var(--card);border-radius:12px;box-shadow:var(--shadow);cursor:pointer;margin-bottom:8px;transition:.15s}
+.menu-item:active{transform:scale(.98);background:#f0eefc}
+.menu-item svg{width:20px;height:20px;color:var(--accent)}
+.menu-item span{flex:1;font-size:14px;font-weight:600}
+.menu-item .arrow{color:var(--text3);font-size:16px}
+.tab-bar{position:fixed;bottom:0;left:0;right:0;background:var(--card);display:flex;justify-content:space-around;padding:8px 0 env(safe-area-inset-bottom,8px);box-shadow:0 -2px 16px rgba(0,0,0,.06);z-index:100}
+.tab{display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;padding:4px 12px;position:relative;transition:.15s}
+.tab svg{width:22px;height:22px;color:var(--text3);transition:.15s}
+.tab span{font-size:10px;font-weight:600;color:var(--text3);transition:.15s}
+.tab.active svg{color:var(--accent)}.tab.active span{color:var(--accent)}
+.tab .badge-num{position:absolute;top:-2px;right:2px;background:var(--accent2);color:#fff;font-size:9px;font-weight:700;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.page{display:none;animation:fadeUp .35s ease}.page.active{display:block}
+.bottom-bar{position:fixed;bottom:60px;left:0;right:0;background:var(--card);padding:12px 16px;box-shadow:0 -2px 16px rgba(0,0,0,.06);display:flex;justify-content:space-between;align-items:center;z-index:99}
+.bottom-bar .total-label{font-size:14px;font-weight:600;color:var(--text2)}
+.bottom-bar .total-val{font-size:20px;font-weight:800;color:var(--accent)}
+.bottom-bar button{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;padding:12px 28px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;transition:.2s}
+.bottom-bar button:active{transform:scale(.95)}
+.empty{text-align:center;padding:60px 20px;color:var(--text3)}
+.empty svg{width:64px;height:64px;margin:0 auto 16px;opacity:.3}
+.empty p{font-size:14px;font-weight:600}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:none;align-items:flex-end;justify-content:center;backdrop-filter:blur(2px)}
+.modal-overlay.show{display:flex}
+.modal{background:var(--card);border-radius:20px 20px 0 0;padding:24px 20px 32px;width:100%;max-width:500px;animation:fadeUp .3s ease;max-height:85vh;overflow-y:auto;position:relative}
+.modal h2{font-size:18px;font-weight:800;margin-bottom:6px}
+.modal p{font-size:13px;color:var(--text2);margin-bottom:18px}
+.modal input{width:100%;padding:14px 16px;border-radius:12px;background:var(--bg);border:1px solid var(--border);font-size:15px;margin-bottom:12px}
+.modal input:focus{border-color:var(--accent)}
+.modal button{width:100%;padding:14px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-size:15px;font-weight:700;cursor:pointer;transition:.2s;margin-bottom:8px}
+.modal button:active{transform:scale(.97)}.modal button:disabled{opacity:.5;cursor:not-allowed}
+.modal .cancel-btn{background:transparent;color:var(--text3);font-size:13px;font-weight:600;margin-top:4px}
+.accounts-list{margin:0 12px}
+.acc-card{background:var(--card);padding:14px;border-radius:12px;box-shadow:var(--shadow);margin-bottom:10px}
+.acc-card h4{font-size:14px;font-weight:700;margin-bottom:4px}
+.acc-card p{font-size:12px;color:var(--text2)}
+.acc-card .status{display:inline-block;padding:3px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-top:6px}
+.acc-card .status.active{background:#e8f5e9;color:#27ae60}
+.acc-card .status.inactive{background:#fdecea;color:#c0392b}
+.pmodal-img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:14px;background:#f0f0f0;margin-bottom:16px}
+.pmodal-name{font-size:18px;font-weight:800;margin-bottom:6px}
+.pmodal-price{font-size:22px;font-weight:800;color:var(--accent);margin-bottom:2px}
+.pmodal-mrp{font-size:14px;color:var(--text3);text-decoration:line-through;margin-bottom:4px}
+.pmodal-fod{font-size:13px;color:var(--accent2);font-weight:700;margin-bottom:12px}
+.pmodal-desc{font-size:13px;color:var(--text2);line-height:1.5;margin-bottom:16px}
+.pmodal-sizes{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.size-chip{padding:8px 16px;border-radius:10px;background:var(--bg);border:2px solid var(--border);font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
+.size-chip.selected{border-color:var(--accent);background:#f0eefc;color:var(--accent)}
+.size-chip.oos{opacity:.4;cursor:not-allowed;text-decoration:line-through}
+.close-modal{position:absolute;top:16px;right:16px;width:32px;height:32px;border-radius:50%;background:rgba(0,0,0,.06);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;color:var(--text2);z-index:5}
 </style>
 </head>
 <body>
-<div class="topbar">
-  <h1>meesho</h1>
-  <div class="search"><span>🔍</span><input id="searchInput" placeholder="Try Saree, Kurti or Search by Product Code" oninput="onSearch(this.value)"></div>
-  <div style="position:relative" onclick="showPage('cart')">🛒<span id="cartBadge" class="badge" style="position:absolute;top:-6px;right:-6px;display:none">0</span></div>
-</div>
-<div id="toast" class="toast"></div>
+<div class="toast" id="toast"></div>
 
-<!-- HOME -->
-<div id="page-home" class="page active">
+<div class="page active" id="page-home">
+  <div class="topbar"><h1>ShopEasy</h1>
+    <div class="topbar-icons" onclick="openLogin()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+    </div>
+  </div>
+  <div class="search-bar">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+    <input type="text" placeholder="Search products..." id="homeSearch" onkeyup="debounceHomeSearch()">
+  </div>
+  <div id="bannerArea"></div>
+  <div class="section-title">Categories</div>
   <div class="cat-row" id="catRow"></div>
-  <div class="grid" id="productGrid"></div>
+  <div class="section-title">For You</div>
+  <div class="prod-grid" id="homeProdGrid"></div>
 </div>
 
-<!-- CATEGORIES -->
-<div id="page-categories" class="page">
-  <div style="padding:12px"><h3>Categories</h3><p class="small">Tap to filter Home</p></div>
-  <div class="cat-row" id="catRow2"></div>
-  <div class="grid" id="catGrid"></div>
+<div class="page" id="page-explore">
+  <div class="topbar"><h1>Explore</h1></div>
+  <div class="search-bar">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+    <input type="text" placeholder="Search products..." id="exploreSearch" onkeyup="debounceExploreSearch()">
+  </div>
+  <div id="exploreCatRow" class="cat-row" style="padding-top:4px"></div>
+  <div class="prod-grid" id="exploreProdGrid"></div>
+  <div id="exploreLoader" style="text-align:center;padding:20px;display:none"><div class="spinner"></div></div>
 </div>
 
-<!-- CART -->
-<div id="page-cart" class="page">
-  <div style="padding:12px"><h3>Cart (<span id="cartCount">0</span>)</h3></div>
+<div class="page" id="page-cart">
+  <div class="topbar"><h1>Cart</h1></div>
   <div id="cartList"></div>
-  <div id="cartPriceBox" style="display:none">
-    <div class="box">
-      <div class="row"><span>Product Price (MRP total)</span><span id="cpMrp">₹0</span></div>
-      <div class="row" style="color:var(--green)"><span>Total Discounts</span><span id="cpDisc">-₹0</span></div>
-      <div class="row total"><span>Order Total</span><span id="cpTotal">₹0</span></div>
-      <p class="small" style="margin-top:6px">*First-order & referral extra off checkout pe lagega</p>
+  <div id="checkoutPanel" style="display:none;margin:0 12px 10px">
+    <div class="cart-item fade-up" style="flex-direction:column;gap:0">
+      <div style="font-size:14px;font-weight:700;margin-bottom:8px">Delivery Address</div>
+      <div id="checkoutAddr" style="font-size:12px;color:var(--text2);margin-bottom:8px"></div>
+      <div style="font-size:11px;color:var(--accent);cursor:pointer" onclick="openAddAddress()">Change / Add Address</div>
     </div>
-    <div style="padding:0 10px 12px"><button class="btn btn-pink" onclick="goCheckout()">Continue →</button></div>
-  </div>
-  <div id="cartEmpty" style="text-align:center;padding:30px;color:var(--muted)">Cart empty<br><span class="small">Add products from Home</span></div>
-</div>
-
-<!-- CHECKOUT -->
-<div id="page-checkout" class="page">
-  <div style="padding:12px"><h3>Checkout</h3></div>
-  <!-- Address -->
-  <div class="box">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <b style="font-size:13px">Delivery Address</b>
-      <span style="font-size:12px;color:var(--pink);cursor:pointer" onclick="openAddrModal()">Change / Add</span>
+    <div class="cart-item fade-up" style="flex-direction:column;gap:8px">
+      <div style="font-size:14px;font-weight:700">Payment Method</div>
+      <div style="display:flex;gap:8px">
+        <div class="size-chip selected" id="payCOD" onclick="selectPay('COD')" style="flex:1;text-align:center">💰 Cash on Delivery</div>
+        <div class="size-chip" id="payUPI" onclick="selectPay('UPI')" style="flex:1;text-align:center">📱 Pay Online (UPI)</div>
+      </div>
+      <div id="payDetail" style="font-size:12px;color:var(--text2);margin-top:4px"></div>
     </div>
-    <div id="checkoutAddr" style="margin-top:6px;font-size:12px;color:var(--muted)">No address — Indore 452010 default use hoga</div>
-  </div>
-  <!-- Account -->
-  <div class="box">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <b style="font-size:13px">Account</b>
-      <span style="font-size:12px;color:var(--pink);cursor:pointer" onclick="showPage('account')">Manage</span>
+    <div class="cart-item fade-up" style="flex-direction:column;gap:4px">
+      <div style="display:flex;justify-content:space-between;font-size:13px"><span>Subtotal</span><span id="ckSubtotal">Rs.0</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px"><span>Order Fee</span><span id="ckFee">Rs.0</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--green);display:none" id="ckFreeRow"><span>FREE Mode</span><span>- Rs.5</span></div>
+      <div style="border-top:1px dashed var(--border);margin:6px 0"></div>
+      <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:800"><span>Total</span><span id="ckTotal" style="color:var(--accent)">Rs.0</span></div>
+      <div id="ckMeeshoPrice" style="font-size:11px;color:var(--text3);margin-top:2px"></div>
+      <div id="ckBalance" style="font-size:11px;color:var(--text3)"></div>
     </div>
-    <div id="checkoutAccount" style="margin-top:6px"></div>
   </div>
-  <!-- Referral -->
-  <div class="box">
-    <b style="font-size:13px">Referral Link or Code</b>
-    <p class="small">Paste karo → extra 10% off (demo)</p>
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <input id="referralInput" class="input" placeholder="https://meesho.com/ref/XYZ or CODE123">
-      <button class="btn btn-white" style="width:90px;padding:11px" onclick="applyReferral()">Apply</button>
-    </div>
-    <div id="referralMsg" class="small" style="margin-top:6px;color:var(--green)"></div>
-  </div>
-  <!-- Payment -->
-  <div class="box">
-    <b style="font-size:13px">Payment</b>
-    <div id="payOnline" class="pay-opt active" onclick="selectPay('online')" style="margin-top:8px">
-      <div><b>Pay Online</b><div class="small" id="payOnlineSave">SAVE —</div></div>
-      <b id="payOnlineAmt">₹0</b>
-    </div>
-    <div id="payCOD" class="pay-opt" onclick="selectPay('cod')">
-      <div><b>Cash on Delivery</b><div class="small">Pay at doorstep</div></div>
-      <b id="payCODAmt">₹0</b>
-    </div>
-    <div class="small" id="firstOrderHint" style="margin-top:6px;color:var(--pink)"></div>
-  </div>
-  <div class="box">
-    <div class="row"><span>MRP Total</span><span id="coMrp">₹0</span></div>
-    <div class="row" style="color:var(--green)"><span>Discounts (MRP - Selling)</span><span id="coDisc">-₹0</span></div>
-    <div class="row" style="color:var(--green);display:none" id="coFirstRow"><span>First-Order ₹180 OFF</span><span id="coFirst">-₹180</span></div>
-    <div class="row" style="color:var(--green);display:none" id="coRefRow"><span>Referral 10% OFF</span><span id="coRef">-₹0</span></div>
-    <div class="row total"><span>Payable (Online)</span><span id="coPayable">₹0</span></div>
-    <div class="row"><span>COD Total</span><span id="coCODTotal">₹0</span></div>
-  </div>
-  <div style="padding:0 10px 12px;display:flex;gap:8px">
-    <button class="btn btn-white" style="flex:1" onclick="showPage('cart')">Back</button>
-    <button class="btn btn-pink" style="flex:2" onclick="payAction()">Continue</button>
+  <div class="bottom-bar" id="cartBottom" style="display:none">
+    <div><div class="total-label">Total</div><div class="total-val" id="cartTotal">Rs.0</div></div>
+    <button onclick="placeOrder()" id="placeOrderBtn">Place Order</button>
   </div>
 </div>
 
-<!-- UPI QR -->
-<div id="page-upi" class="page">
-  <div style="padding:12px"><h3>Pay Online — UPI QR</h3></div>
-  <div class="box" style="text-align:center">
-    <p class="small">Any UPI app se scan karo — amount auto-filled</p>
-    <div id="qrcode"></div>
-    <p id="upiSeller" style="font-weight:800;font-size:13px"></p>
-    <p id="upiRef" class="small"></p>
-    <p id="upiLinkText" style="font-size:10px;word-break:break-all;background:#f9f9f9;padding:8px;border-radius:8px;margin-top:8px"></p>
-    <div style="display:flex;gap:8px;margin-top:10px">
-      <button class="btn btn-white" style="flex:1" onclick="copyUpi()">Copy UPI Link</button>
-      <button class="btn btn-pink" style="flex:1" onclick="openUpiApp()">Open UPI App</button>
-    </div>
-    <button class="btn btn-pink" style="margin-top:10px;background:var(--green)" onclick="confirmPayment()">✅ Maine Payment Kar Di</button>
-    <p class="small" style="margin-top:6px">No gateway — manual confirm, order history me save.</p>
+<div class="page" id="page-orders">
+  <div class="topbar"><h1>Orders</h1></div>
+  <div id="orderList"></div>
+</div>
+
+<div class="page" id="page-account">
+  <div class="topbar"><h1>Account</h1></div>
+  <div class="profile-card"><h3 id="userName">Guest User</h3><p id="userPhone">Tap to login</p><button onclick="openLogin()" style="margin-top:10px;padding:8px 20px;border-radius:8px;background:var(--accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer">📱 Login / Add Account</button></div>
+  <div class="wallet-card"><div class="wl"><h4>Wallet Balance</h4><div class="wbal" id="walletBal">Rs.0</div></div></div>
+  <div style="margin:0 16px 8px" id="orderCount"></div>
+  <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>Delivery Addresses</span>
+    <span style="font-size:12px;color:var(--accent);cursor:pointer" onclick="openAddAddress()">+ Add New</span>
   </div>
-</div>
-
-<!-- ORDERS -->
-<div id="page-orders" class="page">
-  <div style="padding:12px"><h3>My Orders</h3></div>
-  <div id="ordersList"></div>
-</div>
-
-<!-- ACCOUNT -->
-<div id="page-account" class="page">
-  <div style="padding:12px"><h3>Account</h3><p class="small">Guest bhi browse kar sakta hai, checkout pe account select karna padega</p></div>
-  <div class="box">
+  <div id="addressList" style="margin:0 12px"></div>
+  <div style="height:8px"></div>
+  <div class="section-title">Number Checker</div>
+  <div style="margin:0 12px 12px;background:var(--card);padding:14px;border-radius:12px;box-shadow:var(--shadow)">
+    <p style="font-size:12px;color:var(--text2);margin-bottom:10px">Check if a number is eligible for 1st-order FREE discount</p>
     <div style="display:flex;gap:8px">
-      <input id="accName" class="input" placeholder="Name">
-      <input id="accPhone" class="input" placeholder="Phone (10 digit)">
+      <input type="tel" id="ncPhone" placeholder="10-digit number" maxlength="10" style="flex:1;padding:10px 14px;border-radius:10px;background:var(--bg);border:1px solid var(--border);font-size:14px">
+      <button onclick="runNumberCheck()" style="padding:10px 18px;border-radius:10px;background:var(--accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">Check</button>
     </div>
-    <button class="btn btn-pink" style="margin-top:8px" onclick="addAccount()">+ Add Account</button>
-    <p class="small" style="margin-top:6px;color:var(--green)">Har naya account → ₹180 first-order discount locked (sirf pehle order pe).</p>
+    <div id="ncResult" style="margin-top:10px"></div>
   </div>
-  <div id="accountList"></div>
-  <div class="box" style="text-align:center">
-    <p style="font-size:12px"><b>Seller UPIs:</b> Winglet winglet.seller@paytm | Ridhi ridhi.fashion@upi | Alisha alisha.clothing@paytm</p>
-    <button class="btn btn-white" style="margin-top:8px" onclick="clearAll()">Clear All Data</button>
+  <div class="section-title">Meesho Accounts</div>
+  <div class="accounts-list" id="accountsList"></div>
+  <div style="height:8px"></div>
+  <div class="menu-item" onclick="switchTab(3)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
+    <span>My Orders</span><span class="arrow">&#8250;</span>
+  </div>
+  <div class="menu-item" onclick="exportData()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    <span>Export Data</span><span class="arrow">&#8250;</span>
+  </div>
+  <div class="menu-item" onclick="refreshSession()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+    <span>Refresh Session</span><span class="arrow">&#8250;</span>
+  </div>
+  <div style="height:20px"></div>
+</div>
+
+<div class="modal-overlay" id="addressModal">
+  <div class="modal">
+    <div class="close-modal" onclick="closeAddressModal()">&#10005;</div>
+    <h2 id="addrModalTitle">Add Address</h2>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button onclick="detectMyLocation()" style="flex:1;padding:10px;border-radius:10px;background:var(--bg);border:1px solid var(--border);font-size:12px;font-weight:600;cursor:pointer;color:var(--accent)">📍 Auto-detect Location</button>
+      <button onclick="useMySavedAddress()" style="flex:1;padding:10px;border-radius:10px;background:var(--bg);border:1px solid var(--border);font-size:12px;font-weight:600;cursor:pointer;color:var(--accent)">🏠 Use Saved Address</button>
+    </div>
+    <input type="text" id="addrName" placeholder="Full Name">
+    <input type="tel" id="addrMobile" placeholder="Mobile Number" maxlength="10">
+    <input type="text" id="addrPin" placeholder="PIN Code" maxlength="6">
+    <div style="display:flex;gap:10px">
+      <input type="text" id="addrCity" placeholder="City" style="flex:1">
+      <input type="text" id="addrState" placeholder="State" style="flex:1">
+    </div>
+    <input type="text" id="addrLine1" placeholder="Address Line 1">
+    <input type="text" id="addrLine2" placeholder="Address Line 2 (optional)">
+    <input type="text" id="addrLandmark" placeholder="Landmark (optional)">
+    <div id="coordPill" style="margin-bottom:10px"></div>
+    <button onclick="saveAddress()" id="addrSaveBtn">Save Address</button>
+    <button class="cancel-btn" onclick="closeAddressModal()">Cancel</button>
   </div>
 </div>
 
-<!-- ADDRESS MODAL -->
-<div id="addrModal" class="modal" onclick="if(event.target===this)closeAddrModal()">
-  <div class="sheet">
-    <h3 id="addrTitle">Add Address</h3>
-    <input id="aName" class="input" placeholder="Full Name" style="margin-top:8px">
-    <input id="aPhone" class="input" placeholder="Phone" style="margin-top:8px">
-    <input id="aPin" class="input" placeholder="PIN (e.g. 452010)" style="margin-top:8px">
-    <div style="display:flex;gap:8px;margin-top:8px"><input id="aCity" class="input" placeholder="City" value="Indore"><input id="aState" class="input" placeholder="State" value="Madhya Pradesh"></div>
-    <input id="aLine1" class="input" placeholder="House, Street, Area" style="margin-top:8px">
-    <input id="aLine2" class="input" placeholder="Landmark (optional)" style="margin-top:8px">
-    <label style="font-size:12px;display:flex;gap:6px;margin-top:8px"><input type="checkbox" id="aDefault" checked> Default address</label>
-    <button class="btn btn-pink" style="margin-top:10px" onclick="saveAddress()">Save Address</button>
-    <button class="btn btn-white" style="margin-top:6px" onclick="closeAddrModal()">Cancel</button>
+<div class="modal-overlay" id="loginModal">
+  <div class="modal">
+    <h2 id="loginTitle">Login</h2>
+    <p id="loginSub">Choose login method</p>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button onclick="switchLoginMethod('otp')" id="loginTabOtp" style="flex:1;padding:10px;border-radius:10px;background:var(--accent);color:#fff;font-weight:700;font-size:13px;cursor:pointer">OTP Login</button>
+      <button onclick="switchLoginMethod('json')" id="loginTabJson" style="flex:1;padding:10px;border-radius:10px;background:var(--bg);color:var(--text2);font-weight:700;font-size:13px;cursor:pointer;border:1px solid var(--border)">JSON Login</button>
+    </div>
+    <div id="loginOtpWrap">
+      <input type="tel" id="loginPhone" placeholder="Phone number" maxlength="10">
+      <div id="refWrap" style="margin-top:0;margin-bottom:12px">
+        <input type="text" id="loginRef" placeholder="Referral link (optional)" style="width:100%;padding:14px 16px;border-radius:12px;background:var(--bg);border:1px solid var(--border);font-size:13px">
+        <p style="font-size:11px;color:var(--text3);margin-top:4px">Leave blank to use default referral</p>
+      </div>
+      <div id="otpWrap" style="display:none"><input type="tel" id="loginOtp" placeholder="Enter OTP" maxlength="6"></div>
+    </div>
+    <div id="loginJsonWrap" style="display:none">
+      <textarea id="loginJson" placeholder='Paste your Meesho session JSON here...' style="width:100%;min-height:120px;padding:12px;border-radius:12px;background:var(--bg);border:1px solid var(--border);font-size:12px;font-family:monospace;resize:vertical"></textarea>
+      <p style="font-size:11px;color:var(--text3);margin-top:4px">Paste JSON with user_id, xo, instance_id fields</p>
+    </div>
+    <button id="loginBtn" onclick="handleLogin()">Send OTP</button>
+    <button class="cancel-btn" onclick="closeLogin()">Cancel</button>
   </div>
 </div>
 
-<div class="bnav">
-  <div id="nav-home" class="active" onclick="showPage('home')"><span>🏠</span>Home</div>
-  <div id="nav-categories" onclick="showPage('categories')"><span>🔍</span>Categories</div>
-  <div id="nav-orders" onclick="showPage('orders')"><span>📦</span>My Orders</div>
-  <div id="nav-account" onclick="showPage('account')"><span>👤</span>Account</div>
+<div class="modal-overlay" id="productModal">
+  <div class="modal">
+    <div class="close-modal" onclick="closeProductModal()">&#10005;</div>
+    <div id="productModalContent"></div>
+  </div>
 </div>
+
+<!-- Online UPI Direct - manual confirm (no gateway) -->
+<div class="modal-overlay" id="payConfirmModal">
+  <div class="modal" style="border-radius:20px;max-width:380px;text-align:center">
+    <div class="close-modal" onclick="closePayModal()">&#10005;</div>
+    <h2>Payment kiya?</h2>
+    <p style="font-size:13px;color:var(--text2)">UPI app se payment complete karke wapas aaye ho to niche button dabao. Hum manually verify karke order confirm kar denge.</p>
+    <div id="payConfirmInfo" style="background:var(--bg);padding:12px;border-radius:12px;margin-bottom:12px;font-size:13px;display:none"></div>
+    <div id="qrcode" style="display:flex;justify-content:center;margin:10px 0"></div>
+    <p id="upiSeller" style="font-weight:700;font-size:12px;display:none"></p>
+    <p id="upiLinkText" style="font-size:10px;word-break:break-all;background:#f9f9f9;padding:6px;border-radius:8px;margin-top:6px;display:none"></p>
+    <button onclick="confirmPayment()" style="background:#2ecc71">✅ Maine payment kar di hai</button>
+    <button class="cancel-btn" onclick="closePayModal()">Cancel</button>
+    <p style="font-size:11px;color:var(--text3);margin-top:8px">QR nahi - direct UPI app open hoga. Desktop par UPI ID copy ho jayega.</p>
+  </div>
+</div>
+
+<nav class="tab-bar">
+  <div class="tab active" onclick="switchTab(0)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg><span>Home</span>
+  </div>
+  <div class="tab" onclick="switchTab(1)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg><span>Explore</span>
+  </div>
+  <div class="tab" onclick="switchTab(2)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg><span>Cart</span>
+    <div class="badge-num" id="cartBadge" style="display:none">0</div>
+  </div>
+  <div class="tab" onclick="switchTab(3)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span>Orders</span>
+  </div>
+  <div class="tab" onclick="switchTab(4)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>Account</span>
+  </div>
+</nav>
 
 <script>
-// ==================== CONFIG: SELLER UPI MAP (YAHAN CHANGE KARO) ====================
-// Har seller ka unique UPI ID yahan se aata hai. Product ke sellerId se auto-select hota hai.
-const SELLERS = {
-  winglet: { name: "Winglet", upi: "winglet.seller@paytm" },          // Seller 1
-  ridhi:   { name: "Ridhi Fashionz", upi: "ridhi.fashion@upi" },      // Seller 2
-  alisha:  { name: "Alisha", upi: "alisha.clothing@paytm" }           // Seller 3
-};
-// =================================================================================
+var API='';
 
-// 5 dummy products - har ek me sellerName + sellerUpi (SELLERS se link)
-const PRODUCTS = [
-  {id:"p1", name:"WINGLET Shelf - Wall Organizer", price:168, mrp:998, sellerId:"winglet", cat:"Home", emoji:"🗄️"},
-  {id:"p2", name:"Trendy Cotton Kurta - Women", price:298, mrp:300, sellerId:"ridhi", cat:"Fashion", emoji:"👗"},
-  {id:"p3", name:"Alisha Designer Gown - Party Wear", price:499, mrp:999, sellerId:"alisha", cat:"Fashion", emoji:"👚"},
-  {id:"p4", name:"Winglet Storage Box - Foldable", price:249, mrp:699, sellerId:"winglet", cat:"Home", emoji:"📦"},
-  {id:"p5", name:"Ridhi Saree - Daily Wear", price:399, mrp:799, sellerId:"ridhi", cat:"Fashion", emoji:"🥻"},
-];
-const CATS = ["All","Fashion","Home"];
-let activeCat="All";
-let selectedPay="online";
-let currentUpiLink="", currentRef="", appliedReferral=false, referralCode="";
+// Telegram WebApp se REAL user ID lo
+var userId=(function(){
+  try{
+    var tg=window.Telegram&&window.Telegram.WebApp;
+    if(tg){
+      tg.ready();tg.expand();
+      if(tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.id){
+        return String(tg.initDataUnsafe.user.id);
+      }
+      // Try parsing initData string
+      if(tg.initData){
+        var p=new URLSearchParams(tg.initData);
+        var u=p.get('user');
+        if(u){var obj=JSON.parse(u);if(obj.id)return String(obj.id)}
+      }
+    }
+  }catch(e){}
+  // Fallback: numeric only (same as bot format)
+  var saved=localStorage.getItem('userId');
+  if(saved&&!isNaN(saved)&&saved.length>5) return saved;
+  var rid=String(Math.floor(100000000+Math.random()*900000000));
+  localStorage.setItem('userId',rid);
+  return rid;
+})();
+localStorage.setItem('userId',userId);
+console.log('[INIT] userId =',userId);
 
-// LocalStorage keys
-const LS_CART="m_cart", LS_ORDERS="m_orders", LS_ADDR="m_addr", LS_ACCS="m_accs", LS_ACTIVE_ACC="m_active_acc";
+var cartCount=0,currentTab=0,exploreOffset=0,exploreQuery='',exploreLoading=false,exploreDone=false;
+var loginStep=1,loginPhone='',loginMethod='otp';
+const DEFAULT_REF='https://app.meesho.com/2yoV/r99th0qd?via=8ghwzu&from=account_section';
 
-// Helpers
-const $=id=>document.getElementById(id);
-const toast=m=>{ const t=$("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2000); };
-const getCart=()=>JSON.parse(localStorage.getItem(LS_CART)||"[]");
-const setCart=c=>{ localStorage.setItem(LS_CART, JSON.stringify(c)); updateBadge(); };
-const getOrders=()=>JSON.parse(localStorage.getItem(LS_ORDERS)||"[]");
-const getAddrs=()=>JSON.parse(localStorage.getItem(LS_ADDR)||"[]");
-const setAddrs=a=>localStorage.setItem(LS_ADDR, JSON.stringify(a));
-const getAccs=()=>JSON.parse(localStorage.getItem(LS_ACCS)||"[]");
-const setAccs=a=>localStorage.setItem(LS_ACCS, JSON.stringify(a));
-const getActiveAccId=()=>localStorage.getItem(LS_ACTIVE_ACC);
-const setActiveAccId=id=>{ if(id) localStorage.setItem(LS_ACTIVE_ACC, id); else localStorage.removeItem(LS_ACTIVE_ACC); renderAccount(); renderCheckoutAccount(); };
-const getActiveAcc=()=>{ const id=getActiveAccId(); return getAccs().find(x=>x.id===id)||null; };
+function headers(){return{'Content-Type':'application/json','X-User-Id':userId}}
+function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2200)}
+function showEl(id,v){document.getElementById(id).style.display=v?'block':'none'}
+function $(id){return document.getElementById(id)}
 
-function updateBadge(){
-  const n=getCart().reduce((s,x)=>s+x.qty,0);
-  const b=$("cartBadge"); b.textContent=n; b.style.display=n?"block":"none";
-  $("cartCount").textContent=n;
-}
-
-// Navigation
-function showPage(p){
-  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
-  document.querySelectorAll('.bnav div').forEach(x=>x.classList.remove('active'));
-  $("page-"+p).classList.add("active");
-  $("nav-"+p).classList.add("active");
-  if(p==="cart") renderCart();
-  if(p==="categories") renderCategories();
-  if(p==="orders") renderOrders();
-  if(p==="account") renderAccount();
-  if(p==="checkout") renderCheckout();
+function switchTab(i){
+  if(i===currentTab)return;
+  currentTab=i;
+  document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active')});
+  var pages=['home','explore','cart','orders','account'];
+  $('page-'+pages[i]).classList.add('active');
+  document.querySelectorAll('.tab')[i].classList.add('active');
+  if(i===1){exploreQuery='fashion trending';exploreOffset=0;exploreDone=false;searchProducts()}
+  if(i===2)loadCart();
+  if(i===3)loadOrders();
+  if(i===4)loadAccount();
   window.scrollTo(0,0);
 }
 
-// Search
-function onSearch(v){
-  const q=v.toLowerCase();
-  const filtered = q ? PRODUCTS.filter(p=>p.name.toLowerCase().includes(q)) : PRODUCTS;
-  renderGrid(filtered, "productGrid");
+var catEmojis=['\uD83D\uDC57','\uD83D\uDC5F','\uD83D\uDCF1','\uD83D\uDCBB','\uD83C\uDFE0','\u231A','\uD83C\uDFAE','\uD83D\uDC84'];
+var catNames=['Fashion','Shoes','Mobile','Laptop','Home','Watch','Gaming','Beauty'];
+
+function loadCategories(containerId){
+  var c=$(containerId);
+  c.innerHTML=catNames.map(function(name,i){return '<div class="cat-item" onclick="searchCat(\''+name+'\')"><div class="ci">'+catEmojis[i]+'</div><span>'+name+'</span></div>'}).join('');
 }
 
-// Categories
-function renderCatChips(){
-  const html=CATS.map(c=>`<div class="cat-chip ${activeCat===c?'active':''}" onclick="setCat('${c}')">${c}</div>`).join('');
-  $("catRow").innerHTML=html;
-  $("catRow2").innerHTML=html;
+function searchCat(name){
+  if(currentTab!==1)switchTab(1);
+  $('exploreSearch').value=name;
+  exploreQuery=name;exploreOffset=0;exploreDone=false;
+  searchProducts();
 }
-function setCat(c){ activeCat=c; renderCatChips(); const list=c==="All"?PRODUCTS:PRODUCTS.filter(p=>p.cat===c); renderGrid(list,"productGrid"); renderGrid(list,"catGrid"); }
-function renderGrid(list, gridId){
-  const g=$(gridId); if(!g) return;
-  g.innerHTML=list.map(p=>{
-    const disc=Math.round((1-p.price/p.mrp)*100);
-    const seller=SELLERS[p.sellerId];
-    return `<div class="pcard">
-      <div class="img">${p.emoji}</div>
-      <div class="info">
-        <h3>${p.name}</h3>
-        <div class="seller">${seller.name}</div>
-        <div class="price">₹${p.price} <s>₹${p.mrp}</s></div>
-        <div class="off">${disc}% off</div>
-      </div>
-      <button onclick="addToCart('${p.id}')">Add to Cart</button>
-    </div>`;
+
+function renderProductCard(p){
+  var pid=p.product_id||p.id||'';
+  var img=p.image_url||p.image||p.thumbnail||'';
+  var name=p.name||p.title||'Product';
+  var price=p.price||0;
+  var orig=p.original_price||p.mrp||'';
+  var fod=p.fod_price||p.fod_savings||'';
+  var discount=p.discount_text||'';
+  var src=p.source||'meesho';
+  var rating=p.rating;
+  var ratingVal=typeof rating==='object'?(rating.average||''):rating;
+  var origHtml=orig&&orig>price?'<span>Rs.'+Math.round(orig)+'</span>':'';
+  var fodHtml=fod?'<div class="fod">'+fod+'</div>':'';
+  var discountHtml=discount&&!fod?'<div class="fod">'+discount+'</div>':'';
+  var ratingHtml=ratingVal?'<div class="src">'+ratingVal+'</div>':'';
+  var safePid=String(pid).replace(/'/g,"\\'");
+  return '<div class="prod-card fade-up" onclick="openProduct(\''+safePid+'\')"><img src="'+img+'" alt="" loading="lazy" onerror="this.src=\'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22><rect fill=%22%23eee%22 width=%22200%22 height=%22200%22/></svg>\'"><div class="info"><h3>'+name+'</h3><div class="price">Rs.'+Math.round(price)+origHtml+'</div>'+fodHtml+discountHtml+ratingHtml+'</div></div>';
+}
+
+function renderProducts(prods,gridId){
+  $(gridId).innerHTML=prods.map(function(p){return renderProductCard(p)}).join('');
+}
+
+function renderProductsAppend(prods){
+  var g=$('exploreProdGrid');
+  prods.forEach(function(p){g.insertAdjacentHTML('beforeend',renderProductCard(p))});
+}
+
+async function openProduct(pid){
+  if(!pid)return;
+  try{
+    var r=await fetch(API+'/api/product?product_id='+encodeURIComponent(pid),{headers:headers()});
+    var d=await r.json();
+    var name=d.name||'Product';
+    var price=d.price||0;
+    var mrp=d.mrp||d.original_price||'';
+    var img=(d.images&&d.images[0])||d.image||'';
+    var desc=d.description||d.about||'';
+    var sizes=d.sizes||d.size_options||[];
+    var fod=d.fod_price||d.discount_text||'';
+    var supplierId=d.supplier_id||0;
+    var sizesHtml='';
+    if(sizes.length){
+      var firstOk=-1;
+      var chips=sizes.map(function(s,i){
+        var vid=0,vname='',oos=false;
+        if(typeof s==='string'){vname=s}
+        else if(s&&typeof s==='object'){
+          vid=s.id||s.variation_id||0;
+          vname=(typeof s.name==='string'?s.name:'')||(typeof s.size==='string'?s.size:'')||(typeof s.variation_name==='string'?s.variation_name:'')||(typeof s.variation==='string'?s.variation:'')||s.label||'';
+          oos=(s.in_stock===false);
+        }
+        if(!vname)vname='Free Size';
+        // Meesho rejects an out-of-stock variation, so it must never be the
+        // default pick; remember the first in-stock chip instead.
+        if(!oos&&firstOk<0)firstOk=i;
+        return {vid:vid,vname:vname,oos:oos};
+      });
+      if(firstOk<0)firstOk=0;
+      sizesHtml='<div class="pmodal-sizes">'+chips.map(function(c,i){
+        if(c.oos)return '<div class="size-chip oos" title="Out of stock" data-vid="'+c.vid+'" data-vname="'+c.vname+'">'+c.vname+'</div>';
+        return '<div class="size-chip'+(i===firstOk?' selected':'')+'" onclick="selectSize(this)" data-vid="'+c.vid+'" data-vname="'+c.vname+'">'+c.vname+'</div>';
+      }).join('')+'</div>';
+    }
+    var mrpHtml=mrp?'<div class="pmodal-mrp">Rs.'+mrp+'</div>':'';
+    var fodHtml=fod?'<div class="pmodal-fod">'+fod+'</div>':'';
+    var descHtml=desc?'<div class="pmodal-desc">'+desc+'</div>':'';
+    var safeName=name.replace(/'/g,"\\'");
+    window._currentProduct={pid:pid,name:safeName,price:price,img:img,supplierId:supplierId};
+    $('productModalContent').innerHTML='<img class="pmodal-img" src="'+img+'" alt=""><div class="pmodal-name">'+name+'</div><div class="pmodal-price">Rs.'+price+'</div>'+mrpHtml+fodHtml+descHtml+sizesHtml+'<button onclick="addToCartFromModal()">Add to Cart</button>';
+    $('productModal').classList.add('show');
+  }catch(e){toast('Failed to load product')}
+}
+
+function closeProductModal(){$('productModal').classList.remove('show')}
+function selectSize(el){el.parentElement.querySelectorAll('.size-chip').forEach(function(c){c.classList.remove('selected')});el.classList.add('selected')}
+
+async function addToCartFromModal(){
+  var p=window._currentProduct;
+  if(!p){toast('No product selected');return}
+  var vid=0,vname='Free Size';
+  var sel=document.querySelector('.pmodal-sizes .size-chip.selected');
+  if(sel){vid=parseInt(sel.dataset.vid)||0;vname=sel.dataset.vname||sel.textContent||'Free Size'}
+  try{
+    var r=await fetch(API+'/api/cart/add',{method:'POST',headers:headers(),body:JSON.stringify({
+      product_id:p.pid,name:p.name,price:parseFloat(p.price),image:p.img,source:'meesho',qty:1,
+      supplier_id:p.supplierId,variation_id:vid,variation_name:vname,mrp:parseFloat(p.price)
+    })});
+    var d=await r.json();
+    if(d.ok){
+      // The local row always saves; only the real Meesho push can fail, and a
+      // silent "Added to cart!" there is what made lost items hard to spot.
+      if(d.real_cart_synced===false&&d.real_cart_error&&d.real_cart_error!=='no_account'){
+        toast('Added locally, Meesho cart failed');
+        console.warn('[CART] real cart not synced:',d.real_cart_error);
+      }else toast('Added to cart!');
+      closeProductModal();loadCart()
+    }
+    else toast('Failed to add');
+  }catch(e){toast('Failed to add to cart')}
+}
+
+async function loadHome(){loadBanner();loadProducts('homeProdGrid')}
+
+async function loadBanner(){
+  try{
+    var r=await fetch(API+'/api/offers',{headers:headers()});
+    var d=await r.json();
+    var o=d.offer;
+    if(o){
+      var offerText=o.display_text||o.text||'Upto ₹180 OFF';
+      $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner"><h2>'+o.title+'</h2><p>'+o.subtitle+'</p><div class="banner-offer">'+offerText+'</div></div></div>';
+    }else{
+      // Old account -> no FOD. Show regular price banner, not 180 OFF
+      if(d.reason==='not_first_order'){
+        $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner" style="background:linear-gradient(135deg,#555,#777)"><h2>Regular Prices</h2><p>New number se login karo aur Upto ₹180 OFF pao</p><div class="banner-offer" style="background:rgba(255,255,255,.15)">No offer on this account</div></div></div>';
+      }else{
+        $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner"><h2>180 OFF Auto-Applied</h2><p>Special discount on all products!</p><div class="banner-offer">Upto ₹180 OFF</div></div></div>';
+      }
+    }
+  }catch(e){
+    $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner"><h2>180 OFF Auto-Applied</h2><p>Special discount on all products!</p><div class="banner-offer">Upto ₹180 OFF</div></div></div>';
+  }
+}
+
+async function loadProducts(gridId){
+  try{
+    var r=await fetch(API+'/api/products',{headers:headers()});
+    var prods=await r.json();
+    var arr=Array.isArray(prods)?prods:[];
+    if(arr.length>0){renderProducts(arr,gridId);return}
+    var r2=await fetch(API+'/api/search',{method:'POST',headers:headers(),body:JSON.stringify({query:'fashion trending',limit:20,offset:0})});
+    var d2=await r2.json();
+    var items=d2.catalogs||[];
+    if(items.length>0){renderProducts(items,gridId)}
+    else{$(gridId).innerHTML='<div style="text-align:center;padding:40px;color:#999"><p>No products found</p><p style="font-size:12px;margin-top:8px">Try: <a href="'+API+'/api/debug" target="_blank" style="color:var(--accent)">Debug Check</a></p></div>'}
+  }catch(e){$(gridId).innerHTML='<div style="text-align:center;padding:40px;color:#999"><p>Failed to load products</p><p style="font-size:12px;margin-top:8px">'+e.message+'</p><p style="font-size:12px">Check: <a href="'+API+'/api/debug" target="_blank" style="color:var(--accent)">Debug</a></p></div>'}
+}
+
+var homeTimer,exploreTimer;
+function debounceHomeSearch(){clearTimeout(homeTimer);homeTimer=setTimeout(function(){var q=$('homeSearch').value.trim();if(q.length>=2)searchHome(q);else loadProducts('homeProdGrid')},400)}
+function debounceExploreSearch(){clearTimeout(exploreTimer);exploreTimer=setTimeout(function(){exploreQuery=$('exploreSearch').value.trim();exploreOffset=0;exploreDone=false;if(exploreQuery.length>=2)searchProducts();else{exploreQuery='fashion trending';searchProducts()}},400)}
+
+async function searchHome(q){
+  try{
+    var r=await fetch(API+'/api/search',{method:'POST',headers:headers(),body:JSON.stringify({query:q,limit:20,offset:0})});
+    var d=await r.json();
+    renderProducts(d.catalogs||[],'homeProdGrid');
+  }catch(e){}
+}
+
+async function searchProducts(){
+  if(exploreLoading||exploreDone)return;
+  exploreLoading=true;showEl('exploreLoader',true);
+  try{
+    var r=await fetch(API+'/api/search',{method:'POST',headers:headers(),body:JSON.stringify({query:exploreQuery,limit:20,offset:exploreOffset})});
+    var d=await r.json();
+    var prods=d.catalogs||[];
+    if(prods.length<20)exploreDone=true;
+    if(exploreOffset===0){$('exploreProdGrid').innerHTML=''}
+    renderProductsAppend(prods);
+    exploreOffset+=prods.length;
+  }catch(e){}
+  exploreLoading=false;showEl('exploreLoader',false);
+}
+
+window.addEventListener('scroll',function(){
+  if(currentTab!==1)return;
+  if((window.innerHeight+window.scrollY)>=document.body.offsetHeight-300){searchProducts()}
+});
+
+async function loadCart(){
+  try{
+    var r=await fetch(API+'/api/cart',{headers:headers()});
+    var items=await r.json();
+    renderCart(Array.isArray(items)?items:[]);
+  }catch(e){$('cartList').innerHTML='<div class="empty"><p>Failed to load cart</p></div>'}
+}
+
+function renderCart(items){
+  if(!items.length){
+    $('cartList').innerHTML='<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg><p>Your cart is empty</p></div>';
+    showEl('cartBottom',false);showEl('checkoutPanel',false);updateCartBadge(0);return;
+  }
+  var total=0;
+  $('cartList').innerHTML=items.map(function(c){
+    var sub=(c.price||0)*(c.qty||1);total+=sub;
+    var cid=c.id||c.cart_id||c._id||'';
+    return '<div class="cart-item fade-up"><img src="'+c.image+'" alt=""><div class="cd"><h4>'+c.name+'</h4><div class="cp">Rs.'+sub+'</div><div class="qty-ctrl"><button onclick="updateQty(\''+cid+'\','+((c.qty||1)-1)+')">-</button><span>'+(c.qty||1)+'</span><button onclick="updateQty(\''+cid+'\','+((c.qty||1)+1)+')">+</button></div></div></div>';
   }).join('');
+  $('cartTotal').textContent='Rs.'+total;
+  showEl('cartBottom',true);showEl('checkoutPanel',true);
+  cartCount=items.length;updateCartBadge(items.length);
+  loadCheckoutSummary();
 }
 
-// Cart
-function addToCart(pid){
-  let cart=getCart();
-  let it=cart.find(x=>x.id===pid);
-  if(it) it.qty++;
-  else { let pr=PRODUCTS.find(x=>x.id===pid); cart.push({id:pr.id,name:pr.name,price:pr.price,mrp:pr.mrp,sellerId:pr.sellerId,emoji:pr.emoji,qty:1}); }
-  setCart(cart); toast('Added to cart');
-}
-function changeQty(pid,d){
-  let cart=getCart();
-  let it=cart.find(x=>x.id===pid);
-  if(!it) return;
-  it.qty+=d;
-  if(it.qty<=0) cart=cart.filter(x=>x.id!==pid);
-  setCart(cart); renderCart();
-}
-function removeItem(pid){ setCart(getCart().filter(x=>x.id!==pid)); renderCart(); }
+var selectedPayment='COD';
 
-function renderCart(){
-  const cart=getCart();
-  const list=$("cartList");
-  if(cart.length===0){
-    list.innerHTML=''; $("cartPriceBox").style.display='none'; $("cartEmpty").style.display='block'; return;
+function selectPay(method){
+  selectedPayment=method;
+  $('payCOD').className=method==='COD'?'size-chip selected':'size-chip';
+  $('payUPI').className=method==='UPI'?'size-chip selected':'size-chip';
+  updatePayDetail();
+}
+
+function updatePayDetail(){
+  var codA=window._ckData?window._ckData.cod_amount:0;
+  var upiA=window._ckData?window._ckData.upi_amount:0;
+  var amt = selectedPayment==='COD'?codA:upiA;
+  if(selectedPayment==='COD'){
+    $('payDetail').innerHTML='Pay Rs.'+codA+' when delivered';
+  }else{
+    var save = codA>upiA?(' (save Rs.'+(codA-upiA)+')'):'';
+    $('payDetail').innerHTML='Pay Rs.'+upiA+' via UPI'+save;
   }
-  $("cartEmpty").style.display='none'; $("cartPriceBox").style.display='block';
-  list.innerHTML=cart.map(c=>`
-    <div class="cart-item">
-      <div class="im">${c.emoji}</div>
-      <div style="flex:1">
-        <div style="font-size:13px;font-weight:600">${c.name}</div>
-        <div style="font-size:10px;color:var(--pink)">${SELLERS[c.sellerId].name} • ${SELLERS[c.sellerId].upi}</div>
-        <div style="font-size:13px;font-weight:700">₹${c.price} <s style="font-size:11px;color:#999">₹${c.mrp}</s></div>
-        <div class="qty">
-          <button onclick="changeQty('${c.id}',-1)">−</button><span>${c.qty}</span><button onclick="changeQty('${c.id}',1)">+</button>
-          <span style="margin-left:auto;font-weight:700">₹${c.price*c.qty}</span>
-          <span style="color:#c00;cursor:pointer;font-size:12px;margin-left:6px" onclick="removeItem('${c.id}')">✕</span>
-        </div>
-      </div>
-    </div>
-  `).join('');
-  const mrpSum=cart.reduce((s,x)=>s+x.mrp*x.qty,0);
-  const paySum=cart.reduce((s,x)=>s+x.price*x.qty,0);
-  $("cpMrp").textContent='₹'+mrpSum;
-  $("cpDisc").textContent='-₹'+(mrpSum-paySum);
-  $("cpTotal").textContent='₹'+paySum;
-  updateBadge();
-}
-function renderCategories(){ const list=activeCat==="All"?PRODUCTS:PRODUCTS.filter(p=>p.cat===activeCat); renderGrid(list,"catGrid"); }
-
-// Address
-let editAddrId=null;
-function openAddrModal(id){
-  editAddrId=id||null;
-  $("addrModal").classList.add("show");
-  if(id){
-    const a=getAddrs().find(x=>x.id===id);
-    $("addrTitle").textContent="Edit Address";
-    $("aName").value=a.name; $("aPhone").value=a.phone; $("aPin").value=a.pin; $("aCity").value=a.city; $("aState").value=a.state; $("aLine1").value=a.line1; $("aLine2").value=a.line2; $("aDefault").checked=!!a.isDefault;
-  } else {
-    $("addrTitle").textContent="Add Address";
-    $("aName").value=""; $("aPhone").value=""; $("aPin").value="452010"; $("aCity").value="Indore"; $("aState").value="Madhya Pradesh"; $("aLine1").value=""; $("aLine2").value=""; $("aDefault").checked=true;
-  }
-}
-function closeAddrModal(){ $("addrModal").classList.remove("show"); editAddrId=null; }
-function saveAddress(){
-  const name=$("aName").value.trim(), phone=$("aPhone").value.trim(), pin=$("aPin").value.trim(), city=$("aCity").value.trim(), state=$("aState").value.trim(), line1=$("aLine1").value.trim(), line2=$("aLine2").value.trim(), isDefault=$("aDefault").checked;
-  if(!name||!phone||!pin||!line1) return toast('Name, phone, PIN, address required');
-  let addrs=getAddrs();
-  if(isDefault) addrs.forEach(a=>a.isDefault=false);
-  if(editAddrId){
-    const idx=addrs.findIndex(x=>x.id===editAddrId);
-    addrs[idx]={...addrs[idx], name,phone,pin,city,state,line1,line2,isDefault};
-  } else {
-    const def = addrs.length===0 ? true : isDefault;
-    addrs.push({id:'a'+Date.now(), name,phone,pin,city,state,line1,line2,isDefault:def});
-  }
-  setAddrs(addrs); closeAddrModal(); renderCheckoutAddress(); toast('Address saved');
-  if(!addrs.some(a=>a.isDefault) && addrs.length) { addrs[0].isDefault=true; setAddrs(addrs); }
-}
-function getDefaultAddr(){
-  const addrs=getAddrs();
-  return addrs.find(a=>a.isDefault) || addrs[0] || null;
-}
-function renderCheckoutAddress(){
-  const a=getDefaultAddr();
-  const el=$("checkoutAddr");
-  if(!a){ el.innerHTML='<span style="color:#c00">No address</span> — Default Indore 452010 use hoga'; return; }
-  el.innerHTML=`<b>${a.name}</b> | ${a.phone}<br>${a.line1} ${a.line2?','+a.line2:''}, ${a.city}, ${a.state} - ${a.pin} ${a.isDefault?'⭐':''}`;
-}
-// init default address if none
-if(getAddrs().length===0){
-  setAddrs([{id:'a1', name:'Vijay Kumar', phone:'9753231299', pin:'452010', city:'Indore', state:'Madhya Pradesh', line1:'123 MG Road', line2:'Near Tower', isDefault:true}]);
-}
-
-// Account
-function addAccount(){
-  const name=$("accName").value.trim(), phone=$("accPhone").value.trim();
-  if(!name||!phone) return toast('Name & phone required');
-  const accs=getAccs();
-  const acc={id:'u'+Date.now(), name, phone, isFirstOrder:true, usedFirst:false, createdAt:Date.now()};
-  accs.push(acc); setAccs(accs);
-  setActiveAccId(acc.id);
-  $("accName").value=""; $("accPhone").value="";
-  toast('Account added — ₹180 locked for first order!');
-}
-function renderAccount(){
-  const accs=getAccs(); const active=getActiveAccId();
-  const el=$("accountList");
-  if(accs.length===0){ el.innerHTML='<p class="small" style="text-align:center;padding:10px;color:#999">No accounts — Add one for first-order discount</p>'; return; }
-  el.innerHTML=accs.map(a=>`
-    <div class="addr ${a.id===active?'active':''}" onclick="setActiveAccId('${a.id}')">
-      <div style="display:flex;justify-content:space-between"><b>${a.name}</b><span style="font-size:10px;background:#e8f5e9;padding:2px 6px;border-radius:20px">${a.isFirstOrder && !a.usedFirst ? '₹180 FIRST' : a.usedFirst ? 'Used' : 'Regular'}</span></div>
-      <div class="small">📱 ${a.phone} ${a.id===active?'⭐ Active':''}</div>
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <span style="font-size:11px;color:var(--pink);cursor:pointer" onclick="event.stopPropagation(); setActiveAccId('${a.id}')">Select</span>
-        <span style="font-size:11px;color:#c00;cursor:pointer" onclick="event.stopPropagation(); deleteAcc('${a.id}')">Delete</span>
-      </div>
-    </div>
-  `).join('');
-  renderCheckoutAccount();
-}
-function deleteAcc(id){
-  let accs=getAccs().filter(x=>x.id!==id);
-  setAccs(accs);
-  if(getActiveAccId()===id) setActiveAccId(accs[0]?.id||null);
-  else renderAccount();
-  toast('Account deleted');
-}
-function renderCheckoutAccount(){
-  const acc=getActiveAcc();
-  const el=$("checkoutAccount");
-  if(!acc){
-    el.innerHTML='<span style="color:#c00;font-size:12px">⚠️ No account selected — <b onclick="showPage(\'account\')" style="color:var(--pink);cursor:pointer">Select in Account</b></span> (Guest can browse, checkout needs account)';
-    return;
-  }
-  const tag = acc.isFirstOrder && !acc.usedFirst ? '<span style="color:var(--green);font-weight:700">₹180 OFF locked</span>' : acc.usedFirst ? '<span style="color:#999">First-order used</span>' : '<span style="color:#999">Regular</span>';
-  el.innerHTML=`<b>${acc.name}</b> | ${acc.phone}<br><span class="small">${tag} ${acc.id===getActiveAccId()?'⭐':''}</span>`;
-}
-
-// Checkout
-function goCheckout(){
-  if(getCart().length===0) return toast('Cart empty');
-  // reset referral each checkout entry
-  renderCheckout();
-  showPage('checkout');
-}
-function renderCheckout(){
-  const cart=getCart();
-  const mrpSum=cart.reduce((s,x)=>s+x.mrp*x.qty,0);
-  const total=cart.reduce((s,x)=>s+x.price*x.qty,0);
-  $("coMrp").textContent='₹'+mrpSum;
-  $("coDisc").textContent='-₹'+(mrpSum-total);
-  // referral + first-order
-  const acc=getActiveAcc();
-  let firstOff=0;
-  if(acc && acc.isFirstOrder && !acc.usedFirst) firstOff=180;
-  if(firstOff>total) firstOff=total;
-  // referral 10% of (total - firstOff) if applied
-  let refOff=0;
-  if(appliedReferral){
-    refOff = Math.round((total - firstOff)*0.10);
-  }
-  const payOnline = Math.max(0, total - firstOff - refOff);
-  const payCOD = total; // COD = no first-order? keep same as total (Meesho shows COD higher, but for prototype COD = total, Online = less)
-  // show rows
-  $("coFirstRow").style.display = firstOff ? 'flex':'none';
-  $("coRefRow").style.display = refOff ? 'flex':'none';
-  $("coFirst").textContent='-₹'+firstOff;
-  $("coRef").textContent='-₹'+refOff;
-  $("coPayable").textContent='₹'+payOnline;
-  $("coCODTotal").textContent='₹'+payCOD;
-  $("payOnlineAmt").textContent='₹'+payOnline;
-  $("payCODAmt").textContent='₹'+payCOD;
-  $("payOnlineSave").textContent = (payCOD - payOnline)>0 ? 'SAVE ₹'+(payCOD - payOnline) : '';
-  $("firstOrderHint").textContent = firstOff ? '✅ First-order ₹180 applied (account: '+acc.name+')' : (acc && acc.usedFirst ? 'First-order already used' : !acc ? 'Select account for ₹180 off' : 'Regular account — no first-order');
-  renderCheckoutAddress();
-  renderCheckoutAccount();
-}
-
-function applyReferral(){
-  const v=$("referralInput").value.trim();
-  if(!v) return toast('Enter referral link/code');
-  // demo: any non-empty is valid 10%
-  appliedReferral=true; referralCode=v;
-  $("referralMsg").textContent='✅ Referral applied — extra 10% off!';
-  renderCheckout();
-  toast('Referral 10% applied');
-}
-function selectPay(m){
-  selectedPay=m;
-  $("payOnline").classList.toggle('active', m==='online');
-  $("payCOD").classList.toggle('active', m==='cod');
-}
-function payAction(){
-  // guest check
-  if(!getActiveAcc()) return toast('Checkout ke liye account select karo (Account page)');
-  if(!getDefaultAddr()) return toast('Address add karo');
-  if(selectedPay==='cod'){
-    placeOrder('COD', null, false);
-  } else {
-    // Pay Online -> QR page
-    generateUpiQR();
+  // Update totals to reflect actual selected payment price (fee NOT added)
+  if(amt){
+    $('ckTotal').textContent='Rs.'+amt;
+    $('cartTotal').textContent='Rs.'+amt;
   }
 }
 
-// ===== CRUX: DYNAMIC UPI + QR =====
-function generateUpiQR(){
-  const cart=getCart();
-  const totalDisplay = parseInt($("payOnlineAmt").textContent.replace('₹','')) || cart.reduce((s,x)=>s+x.price*x.qty,0);
+async function loadCheckoutSummary(){
+  try{
+    var r=await fetch(API+'/api/checkout/summary',{headers:headers()});
+    var d=await r.json();
+    window._ckData=d;
+    if(d.address){
+      var a=d.address;
+      $('checkoutAddr').innerHTML='<b>'+a.name+'</b> | '+a.mobile+'<br>'+a.address_line_1+(a.city?', '+a.city:'')+(a.state?', '+a.state:'')+' - '+a.pin;
+    }else{
+      $('checkoutAddr').innerHTML='<span style="color:var(--accent2)">No address saved. </span><span style="color:var(--accent);cursor:pointer" onclick="openAddAddress()">Add one now</span>';
+    }
+    // subtotal = local sum (reference), but real payable is cod/upi from Meesho
+    // fee is backend-only (Rs.5 wallet deduction per order in paid mode) - NOT added to total
+    var realCod = d.cod_amount||0;
+    var realUpi = d.upi_amount||0;
+    var isRealPrice = !!(d.payinfo_ok || realCod !== d.subtotal);
+    $('ckSubtotal').textContent='Rs.'+ (isRealPrice ? realCod : (d.subtotal||0));
+    // Fee row: show hint, never added to ckTotal
+    if(d.fee>0){
+      $('ckFee').textContent='Rs.'+d.fee+' (wallet)';
+      $('ckFee').parentElement.querySelector('span').textContent='Service fee';
+      showEl('ckFreeRow',false);
+    }else{
+      if(d.mode==='free'){
+        $('ckFee').textContent='Rs.0';
+        showEl('ckFreeRow',true);
+        $('ckFreeRow').style.display='flex';
+      }else{
+        $('ckFee').textContent='Rs.0';
+        showEl('ckFreeRow',false);
+      }
+    }
+    // Total = selected payment's Meesho amount (updated by selectPay)
+    var initTotal = (selectedPayment==='UPI'?realUpi:realCod) || d.total || realCod || d.subtotal||0;
+    $('ckTotal').textContent='Rs.'+initTotal;
+    $('cartTotal').textContent='Rs.'+initTotal;
+    if(realCod!==realUpi){
+      $('ckMeeshoPrice').textContent='COD: Rs.'+realCod+' | UPI: Rs.'+realUpi+' (extra Rs.'+(realCod-realUpi)+' off!)';
+    }else if(isRealPrice){
+      $('ckMeeshoPrice').textContent='Meesho payable: Rs.'+realCod;
+    }else{
+      $('ckMeeshoPrice').textContent='Meesho price: Rs.'+realCod;
+    }
+    if(d.mode==='paid'){
+      var feeHint = d.fee>0 ? ' | Fee Rs.'+d.fee+'/order from wallet' : '';
+      $('ckBalance').textContent='Wallet: Rs.'+(d.balance||0)+feeHint;
+    }else{
+      $('ckBalance').textContent='FREE mode \u2014 no wallet needed';
+    }
+    // keep payDetail in sync
+    updatePayDetail();
+  }catch(e){}
+}
 
-  // Cart ke andar dekho kaunse seller ka product hai
-  const firstSellerId = cart[0].sellerId; // pehle product wale seller ka UPI
-  const seller = SELLERS[firstSellerId];
-  const selectedUpi = seller.upi; // <-- YAHAN seller ke hisaab se UPI select hota hai
-  const sellerName = seller.name;
+async function updateQty(cid,qty){
+  if(qty<1)qty=0;
+  try{await fetch(API+'/api/cart/update',{method:'POST',headers:headers(),body:JSON.stringify({cart_id:cid,qty:qty})});loadCart()}
+  catch(e){toast('Failed to update')}
+}
 
-  const refId = 'ORD' + Date.now();
-  currentRef = refId;
-  // UPI Link: pa=UPI, am=FINAL_AMOUNT, tn=REF_ID
-  const upiLink = `upi://pay?pa=${encodeURIComponent(selectedUpi)}&pn=${encodeURIComponent(sellerName)}&am=${totalDisplay}&cu=INR&tn=${encodeURIComponent(refId)}`;
+function updateCartBadge(n){$('cartBadge').textContent=n;$('cartBadge').style.display=n>0?'flex':'none'}
+
+// ── Online Payment: direct UPI intent (no QR, no gateway) ────────────────
+let pendingOrderId=null,pendingUpiLink=null,pendingAmount=null;
+function showPayModal(){ $('payConfirmModal').classList.add('show'); }
+function closePayModal(){ $('payConfirmModal').classList.remove('show'); }
+function setupReturnDetection(){
+  const onReturn=()=>{ if(sessionStorage.getItem('pending_upi_order')) showPayModal(); };
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') setTimeout(onReturn,700); }, {once:true});
+  window.addEventListener('focus', onReturn, {once:true});
+}
+async function handleOnlinePayment(){
+  const btn=$('placeOrderBtn'); btn.disabled=true; btn.textContent='Opening UPI...';
+  try{
+    // address check - COD jaise hi
+    const addrR0=await fetch(API+'/api/addresses/default',{headers:headers()});
+    const addrD0=await addrR0.json();
+    if(!addrD0.address){ toast('Add a delivery address first!'); btn.disabled=false; btn.textContent='Place Order'; return; }
+    // a. pending order banao - exact cart amount, UPI ID, unique order ID auto-set
+    const r=await fetch(API+'/api/orders/create-pending',{method:'POST',headers:headers(),body:JSON.stringify({})});
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.error||'Failed');
+    if(d.error==='insufficient wallet'){
+      toast('Need Rs.'+d.needed+' more (balance Rs.'+(d.balance||0)+')');
+      btn.disabled=false; btn.textContent='Place Order'; return;
+    }
+    pendingOrderId=d.order_id; pendingUpiLink=d.upi_link; pendingAmount=d.amount;
+    sessionStorage.setItem('pending_upi_order', String(d.order_id));
+    sessionStorage.setItem('pending_upi_link', d.upi_link);
+    sessionStorage.setItem('pending_upi_amount', String(d.amount));
+    // b. UPI app open - GPay/PhonePe/Paytm (exact amount, UPI ID, order ID already in link)
+    // Syntax: upi://pay?pa=paytm.s1dw5n0@pty&pn=Payment Gateway&am=355.00&tr=ORD...&tn=Payment&cu=INR
+    // FIX: desktop pe window.location.href = upi:// se "Failed to load" aata hai, isliye mobile check
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const info=$('payConfirmInfo');
+    if(info){ info.style.display='block'; info.innerHTML='Order #'+d.order_id+' | Amount Rs.'+d.amount+'<br><span style="font-size:11px;word-break:break-all">'+d.upi_link+'</span><br><span style="font-size:11px;color:var(--accent)">UPI ID: '+d.upi_id+'</span>'; }
+    if(isMobile){
+      // mobile: hidden iframe se open karo taaki page unload na ho aur error na aaye
+      try{
+        const ifr=document.createElement('iframe');
+        ifr.style.display='none'; ifr.src=d.upi_link; document.body.appendChild(ifr);
+        setTimeout(()=>{ try{ ifr.remove(); }catch(e){} }, 3000);
+      }catch(e){ window.location.href=d.upi_link; }
+      setupReturnDetection();
+      setTimeout(showPayModal, 1400);
+      toast('UPI app open ho raha hai...');
+    } else {
+      // desktop: UPI app nahi khulega, direct modal + copy
+      showPayModal();
+      if(navigator.clipboard && d.upi_id){
+        navigator.clipboard.writeText(d.upi_id).catch(()=>{});
+        toast('Desktop pe UPI ID copy ho gaya: '+d.upi_id+' - Rs.'+d.amount);
+      } else {
+        toast('UPI Link ready - Rs.'+d.amount+' - ID: '+d.upi_id);
+      }
+    }
+  }catch(e){ toast(e.message||'UPI failed'); console.error(e); }
+  finally{ btn.disabled=false; btn.textContent='Place Order'; }
+}
+async function confirmPayment(){
+  const oid = pendingOrderId || sessionStorage.getItem('pending_upi_order');
+  if(!oid) return toast('No pending order');
+  const r=await fetch(API+'/api/orders/confirm',{method:'POST',headers:headers(),body:JSON.stringify({order_id: parseInt(oid)})});
+  const d=await r.json();
+  if(d.ok){
+    sessionStorage.removeItem('pending_upi_order'); sessionStorage.removeItem('pending_upi_link'); sessionStorage.removeItem('pending_upi_amount');
+    pendingOrderId=null; closePayModal();
+    toast('Order confirmed! #'+oid+' - hum verify kar lenge');
+    loadCart(); switchTab(3); loadOrders();
+  } else toast(d.error||'Confirm failed');
+}
+// auto-show modal if page reloaded with pending order
+window.addEventListener('load', ()=>{ if(sessionStorage.getItem('pending_upi_order')) showPayModal(); });
+
+// ==================== ADD-ON: 3 standalone helpers (paste-ready) ====================
+// Ye 3 functions tumhari existing addToCart/showCart/placeOrder ko nahi hatayenge.
+// Sirf inko alag se call karo jahan chaho.
+
+// 1. generateUPIForCart(cartItems) -> {upiLink, refId, sellerUpi, amount}
+//    Backend real products me har object me id,name,price,mrp,sellerUPI ho sakta hai.
+//    Agar sellerUPI field nahi hai to SELLERS map se first item ke sellerId se lega.
+function generateUPIForCart(cartItems){
+  // cartItems: array like [{price:168, qty:1, sellerUPI:"winglet.seller@paytm", sellerId:"winglet"}, ...]
+  if(!Array.isArray(cartItems) || cartItems.length===0) throw new Error('Cart empty');
+  const total = cartItems.reduce((s,x)=> s + (parseFloat(x.price)||0)*(parseInt(x.qty)||1), 0);
+  // seller select: pehle product wala seller (multi-seller me pehla hi)
+  const first = cartItems[0];
+  // yahan UPI change hota hai - product ke seller ke hisaab se
+  let sellerUpi = first.sellerUPI || first.seller_upi || first.upi || null;
+  let sellerName = first.sellerName || first.seller_name || "Seller";
+  if(!sellerUpi){
+    // fallback: agar tumne SELLERS map use kiya hai (jaise demo me)
+    const map = (typeof SELLERS !== 'undefined') ? SELLERS : null;
+    if(map && first.sellerId && map[first.sellerId]){ sellerUpi = map[first.sellerId].upi; sellerName = map[first.sellerId].name; }
+  }
+  // agar abhi bhi nahi mila to default Winglet
+  if(!sellerUpi) sellerUpi = "winglet.seller@paytm";
+  const refId = 'ORD' + Date.now(); // unique Ref ID
+  // UPI deep link - sirf static upi://pay
+  const upiLink = `upi://pay?pa=${encodeURIComponent(sellerUpi)}&pn=${encodeURIComponent(sellerName)}&am=${total}&cu=INR&tn=${encodeURIComponent(refId)}`;
+  return { upiLink, refId, sellerUpi, sellerName, amount: total };
+}
+
+// 2. showQRCode(upiLink) -> QR render + copy/open helpers
+//    Needs: <div id="qrcode"></div> + <p id="upiLinkText"></p> on page, and qrcode.js CDN
+function showQRCode(upiLink){
+  if(!upiLink || !upiLink.startsWith('upi://')) return toast('Invalid UPI link');
   currentUpiLink = upiLink;
-
-  $("qrcode").innerHTML='';
-  new QRCode($("qrcode"), { text: upiLink, width: 180, height: 180, correctLevel: QRCode.CorrectLevel.H });
-
-  $("upiSeller").textContent = `Paying to ${sellerName} - ${selectedUpi}`;
-  $("upiRef").textContent = `Ref: ${refId} | Amount: ₹${totalDisplay}`;
-  $("upiLinkText").textContent = upiLink;
-
-  showPage('upi');
+  const box = document.getElementById('qrcode');
+  if(!box) return toast('qrcode div not found');
+  box.innerHTML = '';
+  // qrcode.js CDN: https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js
+  new QRCode(box, { text: upiLink, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.H });
+  const linkText = document.getElementById('upiLinkText');
+  if(linkText) linkText.textContent = upiLink;
+  // optional: show seller info if available
+  try{
+    const pa = new URLSearchParams(upiLink.split('?')[1]).get('pa');
+    const sellerEl = document.getElementById('upiSeller');
+    if(sellerEl && pa) sellerEl.textContent = 'Paying to ' + pa;
+  }catch(e){}
 }
-function copyUpi(){ navigator.clipboard.writeText(currentUpiLink).then(()=>toast('UPI Link copied')).catch(()=>toast(currentUpiLink)); }
-function openUpiApp(){
-  if(!currentUpiLink) return;
-  const isMobile=/Android|iPhone|iPad/i.test(navigator.userAgent);
-  if(isMobile){
-    const ifr=document.createElement('iframe'); ifr.style.display='none'; ifr.src=currentUpiLink; document.body.appendChild(ifr); setTimeout(()=>ifr.remove(),2000);
-    window.open(currentUpiLink,'_blank');
-  } else {
-    toast('Desktop: Copy karke UPI app me paste karo');
+
+// 3. saveOrderAfterManualPayment(orderData) -> localStorage save + alert
+//    orderData: { cartItems, amount, refId, sellerUpi, upiLink }
+function saveOrderAfterManualPayment(orderData){
+  const cart = orderData.cartItems || getCart();
+  const orders = JSON.parse(localStorage.getItem('m_orders') || localStorage.getItem(LS_ORDERS) || "[]");
+  const order = {
+    id: orderData.refId || ('ORD'+Date.now()),
+    date: new Date().toLocaleString(),
+    items: (orderData.cartItems||cart).map(c=> `${c.name||c.title||'Item'} x${c.qty||1}`).join(', '),
+    total: orderData.amount || 0,
+    seller: orderData.sellerUpi || '',
+    upi: orderData.sellerUpi || '',
+    payLink: orderData.upiLink || '',
+    status: 'Placed (Manual Confirm)'
+  };
+  orders.unshift(order);
+  try{
+    localStorage.setItem('m_orders', JSON.stringify(orders));
+    localStorage.setItem(LS_ORDERS, JSON.stringify(orders));
+  }catch(e){}
+  // clear cart (existing localStorage)
+  try{ localStorage.setItem(LS_CART, JSON.stringify([])); localStorage.setItem('m_cart', JSON.stringify([])); }catch(e){}
+  alert('Order Placed Successfully! \nRef: ' + order.id + '\nAmount: ₹' + order.total);
+  try{ showPage('orders'); renderOrders(); }catch(e){}
+  return order;
+}
+
+async function placeOrder(){
+  // Online Payment -> direct UPI intent (no QR, manual confirm)
+  if(selectedPayment === 'UPI'){
+    return handleOnlinePayment();
+  }
+  var btn=$('placeOrderBtn');
+  btn.disabled=true;btn.textContent='Placing order...';
+  try{
+    var addrR=await fetch(API+'/api/addresses/default',{headers:headers()});
+    var addrD=await addrR.json();
+    var addr=addrD.address;
+    if(!addr){toast('Add a delivery address first!');btn.disabled=false;btn.textContent='Place Order';return}
+    var r=await fetch(API+'/api/orders/place',{method:'POST',headers:headers(),body:JSON.stringify({payment_method:selectedPayment,address_id:addr.id})});
+    var d=await r.json();
+    if(d.ok){
+      var msg='Order placed! #'+d.order_id;
+      if(d.meesho_order_num)msg+=' (Meesho #'+d.meesho_order_num+')';
+      if(d.qr_base64||d.qr_url||d.upi_intent_url){
+        msg+=' — Scan QR to pay Rs.'+d.meesho_amount;
+        showQRModal(d.qr_base64,d.upi_intent_url,d.qr_url);
+      }
+      toast(msg);loadCart();switchTab(3);
+    }else if(d.error==='insufficient wallet'){
+      toast('Need Rs.'+d.needed+' more (balance: Rs.'+(d.balance||0)+'). Add money or switch to FREE mode.');
+    }else{
+      toast(d.error||d.message||'Failed to place order');
+      console.error('[ORDER ERROR]',d);
+    }
+  }catch(e){toast('Failed to place order');console.error(e)}
+  btn.disabled=false;btn.textContent='Place Order';
+}
+
+function showQRModal(qrBase64,upiUrl,qrUrl){
+  var existing=document.getElementById('qrModalOverlay');
+  if(existing)existing.remove();
+  // Meesho's own QR (JusPay, base64) is preferred; qrUrl is the gateway fallback
+  // image the backend builds from the UPI intent link when Meesho returns none.
+  var imgSrc=qrBase64?('data:image/png;base64,'+qrBase64):(qrUrl||'');
+  var html='<div class="modal-overlay show" id="qrModalOverlay"><div class="modal" style="text-align:center">';
+  html+='<h2>Scan QR to Pay</h2>';
+  html+='<p>Pay via any UPI app</p>';
+  if(imgSrc)html+='<img src="'+imgSrc+'" alt="UPI payment QR code" style="width:250px;height:250px;margin:16px auto;border-radius:14px;border:2px solid var(--border)">';
+  if(upiUrl)html+='<a href="'+upiUrl+'" style="display:inline-block;margin:12px 0;padding:12px 24px;border-radius:12px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;text-decoration:none">Open UPI App</a>';
+  if(!imgSrc&&!upiUrl)html+='<p style="color:var(--text3);font-size:12px;margin:12px 0">Payment link unavailable — open the Meesho app to pay for this order.</p>';
+  html+='<button class="cancel-btn" onclick="document.getElementById(\'qrModalOverlay\').remove()">Close</button>';
+  html+='</div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+
+async function loadOrders(){
+  try{
+    var r=await fetch(API+'/api/orders',{headers:headers()});
+    var orders=await r.json();
+    var list=Array.isArray(orders)?orders:[];
+    if(!list.length){$('orderList').innerHTML='<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><p>No orders yet</p></div>';return}
+    $('orderList').innerHTML=list.map(function(o){
+      var oid=o.id||o.order_id||'';
+      var status=(o.status||'pending').toLowerCase();
+      var items=o.items||[];
+      var date=o.created_at||'';
+      var total=o.total||0;
+      var meeshoNum=o.meesho_order_num||'';
+      var payMethod=o.payment_method||'COD';
+      var meeshoAmt=o.meesho_amount||0;
+      var steps=['pending','confirmed','shipped','delivered'];
+      var stepLabels=['Pending','Confirmed','Shipped','Delivered'];
+      var stepIcons=['&#9203;','&#128230;','&#128666;','&#9989;'];
+      var currentIdx=steps.indexOf(status);if(currentIdx===-1)currentIdx=0;
+      var timelineHtml=steps.map(function(s,i){
+        var cls=i<currentIdx?'done':i===currentIdx?'active':'';
+        var lineCls=i<currentIdx?'done':'';
+        var isLast=i===steps.length-1;
+        return '<div class="step '+cls+'"><div class="dot">'+stepIcons[i]+'</div><div class="lbl">'+stepLabels[i]+'</div></div>'+(isLast?'':'<div class="line '+lineCls+'"></div>');
+      }).join('');
+      var extra=meeshoNum?'<div class="oi">Meesho #'+meeshoNum+' | '+payMethod+(meeshoAmt?' | Rs.'+meeshoAmt:'')+'</div>':'';
+      return '<div class="order-card fade-up"><div class="oh"><h4>Order #'+String(oid).slice(-8)+'</h4><span class="badge '+status+'">'+status+'</span></div><div class="oi">'+items.length+' item(s) | '+date+'</div>'+extra+'<div class="ot">Rs.'+total+'</div><div class="timeline">'+timelineHtml+'</div></div>';
+    }).join('');
+  }catch(e){$('orderList').innerHTML='<div class="empty"><p>Failed to load orders</p></div>'}
+}
+
+async function loadAccount(){
+  try{
+    var r=await fetch(API+'/api/user',{headers:headers()});
+    var d=await r.json();
+    if(d.error||!d.phone){
+      $('userName').textContent='Guest User';
+      $('userPhone').innerHTML='Tap <b>Login</b> to connect your Meesho account<br><span style="font-size:11px;color:rgba(255,255,255,.5)">User ID: '+userId+'</span>';
+    }else{
+      $('userName').textContent=d.name||d.phone||'User';
+      $('userPhone').innerHTML='Phone: '+d.phone+'<br><span style="font-size:11px;color:rgba(255,255,255,.5)">User ID: '+userId+'</span>';
+    }
+  }catch(e){$('userName').textContent='Guest User'}
+  try{
+    var r=await fetch(API+'/api/wallet',{headers:headers()});
+    var d=await r.json();
+    $('walletBal').textContent='Rs.'+(d.balance||0);
+  }catch(e){}
+  try{
+    var r=await fetch(API+'/api/orders/count',{headers:headers()});
+    var d=await r.json();
+    $('orderCount').innerHTML='<div style="padding:10px 14px;background:var(--bg);border-radius:10px;text-align:center"><b style="font-size:20px;color:var(--accent)">'+(d.count||0)+'</b><br><span style="font-size:12px;color:var(--text2)">Total Orders Placed</span></div>';
+  }catch(e){}
+  try{
+    var r=await fetch(API+'/api/accounts',{headers:headers()});
+    var accs=await r.json();
+    var list=Array.isArray(accs)?accs:(accs&&Array.isArray(accs.accounts)?accs.accounts:[]);
+    if(!list.length){
+      $('accountsList').innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">No accounts linked. Login above to link your Meesho account.</div>';
+    }else{
+      $('accountsList').innerHTML=list.map(function(a){
+        var statusCls=a.meesho_user_id?'active':'inactive';
+        var statusText=a.meesho_user_id?'Active':'Inactive';
+        var phone=a.phone_display||a.phone||'Unknown';
+        var mUserId=a.meesho_user_id||a.id||'';
+        var isFod=a.is_first_order?'First Order':'Regular';
+        var sessInfo=a.instance_id?'Session: Active':'';
+        return '<div class="acc-card fade-up"><h4>'+phone+'</h4><p>User ID: '+mUserId+'</p><p style="font-size:11px;color:var(--text3)">'+isFod+(sessInfo?' | '+sessInfo:'')+'</p><div class="status '+statusCls+'">'+statusText+'</div></div>';
+      }).join('');
+    }
+  }catch(e){
+    $('accountsList').innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">Could not load linked accounts. Pull to refresh.</div>';
+    console.error('[ACCOUNTS]',e);
+  }
+  loadAddresses();
+}
+
+async function exportData(){
+  toast('Exporting data...');
+  try{
+    var r=await fetch(API+'/api/user/export',{headers:headers()});
+    var d=await r.json();
+    var blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
+    var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='shop_easy_export.json';a.click();
+    toast('Exported!');
+  }catch(e){toast('Export failed')}
+}
+
+async function refreshSession(){
+  toast('Refreshing session...');
+  try{
+    var r=await fetch(API+'/api/accounts/refresh',{method:'POST',headers:headers()});
+    var d=await r.json();
+    if(d.ok)toast('Session refreshed!');
+    loadAccount();
+  }catch(e){toast('Refresh failed')}
+}
+
+function switchLoginMethod(method){
+  loginMethod=method;
+  if(method==='json'){
+    $('loginTabJson').style.background='var(--accent)';$('loginTabJson').style.color='#fff';
+    $('loginTabOtp').style.background='var(--bg)';$('loginTabOtp').style.color='var(--text2)';$('loginTabOtp').style.border='1px solid var(--border)';
+    $('loginJsonWrap').style.display='block';$('loginOtpWrap').style.display='none';
+    $('loginBtn').textContent='Login with JSON';$('loginBtn').onclick=handleJsonLogin;
+    $('loginTitle').textContent='JSON Login';$('loginSub').textContent='Paste your Meesho session JSON';
+  }else{
+    $('loginTabOtp').style.background='var(--accent)';$('loginTabOtp').style.color='#fff';$('loginTabOtp').style.border='none';
+    $('loginTabJson').style.background='var(--bg)';$('loginTabJson').style.color='var(--text2)';$('loginTabJson').style.border='1px solid var(--border)';
+    $('loginJsonWrap').style.display='none';$('loginOtpWrap').style.display='block';
+    $('loginBtn').textContent='Send OTP';$('loginBtn').onclick=handleLogin;
+    $('loginTitle').textContent='Login';$('loginSub').textContent='Enter your phone number to continue';
   }
 }
-function confirmPayment(){
-  const cart=getCart();
-  const total = parseInt($("payOnlineAmt").textContent.replace('₹','')) || 0;
-  // save order
-  const orders=getOrders();
-  const active=getActiveAcc();
-  // mark first-order used
-  if(active && active.isFirstOrder && !active.usedFirst){
-    const accs=getAccs(); const idx=accs.findIndex(x=>x.id===active.id);
-    if(idx>=0){ accs[idx].usedFirst=true; setAccs(accs); }
-  }
-  // apply referral already counted
-  orders.unshift({
-    id: currentRef, date: new Date().toLocaleString(),
-    items: cart.map(c=>`${c.name} x${c.qty}`).join(', '),
-    total: total, seller: SELLERS[cart[0].sellerId].name, upi: SELLERS[cart[0].sellerId].upi,
-    ref: currentRef, status:'Placed (Manual Confirm)', payLink: currentUpiLink
-  });
-  localStorage.setItem(LS_ORDERS, JSON.stringify(orders));
-  setCart([]);
-  alert('Order Placed Successfully! 🎉\nRef: '+currentRef+'\nSeller UPI: '+SELLERS[cart[0].sellerId].upi);
-  showPage('orders');
-}
-function placeOrder(method, link, isOnline){
-  // COD flow - direct place without QR
-  const cart=getCart();
-  const total = method==='COD' ? parseInt($("payCODAmt").textContent.replace('₹','')) : parseInt($("payOnlineAmt").textContent.replace('₹',''));
-  const orders=getOrders();
-  const active=getActiveAcc();
-  if(active && active.isFirstOrder && !active.usedFirst){
-    const accs=getAccs(); const idx=accs.findIndex(x=>x.id===active.id);
-    if(idx>=0){ accs[idx].usedFirst=true; setAccs(accs); }
-  }
-  const ref='ORD'+Date.now();
-  orders.unshift({id:ref, date:new Date().toLocaleString(), items:cart.map(c=>`${c.name} x${c.qty}`).join(', '), total:total, seller: SELLERS[cart[0].sellerId].name, upi: SELLERS[cart[0].sellerId].upi, ref:ref, status: method==='COD'?'Placed (COD)':'Placed'});
-  localStorage.setItem(LS_ORDERS, JSON.stringify(orders));
-  setCart([]);
-  alert('Order Placed Successfully! ('+method+')\nTotal: ₹'+total);
-  showPage('orders');
+
+async function handleJsonLogin(){
+  var raw=$('loginJson').value.trim();
+  if(!raw){toast('Paste JSON first');return}
+  var data;
+  try{data=JSON.parse(raw)}catch(e){toast('Invalid JSON format');return}
+  if(!data.user_id||!data.xo){toast('JSON must have user_id and xo');return}
+  $('loginBtn').disabled=true;$('loginBtn').textContent='Logging in...';
+  try{
+    var r=await fetch(API+'/api/auth/json_login',{method:'POST',headers:headers(),body:JSON.stringify(data)});
+    var d=await r.json();
+    if(d.ok){toast('Logged in!');closeLogin();loadAccount();switchTab(2)}
+    else toast(d.error||'JSON login failed');
+  }catch(e){toast('Login failed')}
+  $('loginBtn').disabled=false;$('loginBtn').textContent='Login with JSON';
 }
 
-// Orders
-function renderOrders(){
-  const list=getOrders();
-  const el=$("ordersList");
-  if(list.length===0){ el.innerHTML='<p style="text-align:center;padding:30px;color:#999">No orders yet</p>'; return; }
-  el.innerHTML=list.map(o=>`
-    <div class="box">
-      <div style="display:flex;justify-content:space-between"><b>#${String(o.id).slice(-8)}</b><span style="font-size:10px;background:#e8f5e9;padding:3px 8px;border-radius:20px">${o.status}</span></div>
-      <div style="font-size:12px;margin:6px 0">${o.items}</div>
-      <div style="font-size:11px;color:#777">Seller: ${o.seller} | ${o.upi}</div>
-      <div style="font-weight:800">₹${o.total}</div>
-      <div style="font-size:11px;color:#999">${o.date} | Ref: ${o.id}</div>
-    </div>
-  `).join('');
-}
-function clearAll(){ if(confirm('Clear cart & orders & accounts?')){ localStorage.clear(); location.reload(); } }
+function openLogin(){$('loginModal').classList.add('show');switchLoginMethod('otp')}
+function closeLogin(){$('loginModal').classList.remove('show');loginStep=1;$('otpWrap').style.display='none';$('refWrap').style.display='block';$('loginBtn').textContent='Send OTP';$('loginTitle').textContent='Login';$('loginSub').textContent='Choose login method';$('loginRef').value='';$('loginPhone').value='';$('loginOtp').value='';$('loginJson').value='';}
 
-// Init
-renderCatChips();
-renderGrid(PRODUCTS,"productGrid");
-renderGrid(PRODUCTS,"catGrid");
-updateBadge();
-renderAccount();
-if(getAddrs().length===0){
-  setAddrs([{id:'a1', name:'Vijay Kumar', phone:'9753231299', pin:'452010', city:'Indore', state:'Madhya Pradesh', line1:'123 MG Road', line2:'Near Tower', isDefault:true}]);
+async function handleLogin(){
+  if(loginStep===1){
+    loginPhone=$('loginPhone').value.trim();
+    if(!loginPhone||loginPhone.length<10){toast('Enter valid phone number');return}
+    $('loginBtn').disabled=true;$('loginBtn').textContent='Sending...';
+    try{
+      var r=await fetch(API+'/api/auth/otp_send',{method:'POST',headers:headers(),body:JSON.stringify({phone_number:loginPhone})});
+      var d=await r.json();
+      if(d.ok){
+        loginStep=2;$('otpWrap').style.display='block';$('refWrap').style.display='none';$('loginBtn').textContent='Verify OTP';$('loginTitle').textContent='Verify OTP';$('loginSub').textContent='Enter the OTP sent to '+loginPhone;
+        toast('OTP sent!');
+      }else toast(d.error||'Failed to send OTP');
+    }catch(e){toast('Failed to send OTP')}
+    $('loginBtn').disabled=false;
+  }else{
+    var otp=$('loginOtp').value.trim();
+    if(!otp||otp.length<4){toast('Enter valid OTP');return}
+    $('loginBtn').disabled=true;$('loginBtn').textContent='Verifying...';
+    try{
+      var r=await fetch(API+'/api/auth/otp_verify',{method:'POST',headers:headers(),body:JSON.stringify({phone_number:loginPhone,otp:otp})});
+      var d=await r.json();
+      if(d.ok){
+        // Save phone + referral to user profile
+        var refLink=$('loginRef').value.trim()||DEFAULT_REF;
+        await fetch(API+'/api/user',{method:'POST',headers:headers(),body:JSON.stringify({phone:loginPhone,referral_link:refLink})});
+        // NOTE: the account row is already persisted server-side by
+        // /api/auth/otp_verify (with instance/session ids). Posting to
+        // /api/accounts/add here created a second, half-populated row.
+        toast('Logged in!');closeLogin();loadAccount();
+      } else toast(d.error||'Invalid OTP');
+    }catch(e){toast('Invalid OTP')}
+    $('loginBtn').disabled=false;$('loginBtn').textContent='Verify OTP';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ADDRESS MANAGEMENT
+// ═══════════════════════════════════════════════════════════════
+
+var editingAddrId=null;
+var savedCoords=null;
+
+async function loadAddresses(){
+  try{
+    var r=await fetch(API+'/api/addresses',{headers:headers()});
+    var d=await r.json();
+    var addrs=d.addresses||[];
+    if(!addrs.length){$('addressList').innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">No addresses saved. Add one for quick checkout!</div>';return}
+    $('addressList').innerHTML=addrs.map(function(a){
+      var star=a.is_default?'&#11088;':'&#128205;';
+      var defBadge=a.is_default?'<span style="font-size:10px;background:#e8f5e9;color:#27ae60;padding:2px 6px;border-radius:4px;margin-left:6px">Default</span>':'';
+      return '<div class="acc-card fade-up" style="cursor:pointer" onclick="editAddress('+a.id+')"><div style="display:flex;justify-content:space-between;align-items:start"><div><h4>'+star+' '+a.name+'</h4><p style="font-size:12px;color:var(--text2)">📱 '+a.mobile+' | 📌 '+a.pin+'</p><p style="font-size:12px;color:var(--text2)">'+a.address_line_1+(a.city?', '+a.city:'')+(a.state?', '+a.state:'')+'</p></div><div style="text-align:right">'+defBadge+'<div style="font-size:10px;color:var(--text3);margin-top:4px">'+a.address_type+'</div></div></div></div>';
+    }).join('');
+  }catch(e){}
+}
+
+function openAddAddress(){
+  editingAddrId=null;savedCoords=null;
+  $('addrModalTitle').textContent='Add Address';
+  $('addrName').value='';$('addrMobile').value='';$('addrPin').value='';
+  $('addrCity').value='';$('addrState').value='';$('addrLine1').value='';
+  $('addrLine2').value='';$('addrLandmark').value='';$('coordPill').innerHTML='';
+  $('addrSaveBtn').textContent='Save Address';
+  $('addressModal').classList.add('show');
+}
+
+async function editAddress(id){
+  try{
+    var r=await fetch(API+'/api/addresses',{headers:headers()});
+    var d=await r.json();
+    var addrs=d.addresses||[];
+    var addr=null;
+    for(var i=0;i<addrs.length;i++){if(addrs[i].id===id){addr=addrs[i];break}}
+    if(!addr){toast('Address not found');return}
+    editingAddrId=id;savedCoords=null;
+    $('addrModalTitle').textContent='Edit Address';
+    $('addrName').value=addr.name||'';$('addrMobile').value=addr.mobile||'';
+    $('addrPin').value=addr.pin||'';$('addrCity').value=addr.city||'';
+    $('addrState').value=addr.state||'';$('addrLine1').value=addr.address_line_1||'';
+    $('addrLine2').value=addr.address_line_2||'';$('addrLandmark').value=addr.landmark||'';
+    $('coordPill').innerHTML='';$('addrSaveBtn').textContent='Update Address';
+    $('addressModal').classList.add('show');
+  }catch(e){toast('Failed to load address')}
+}
+
+function closeAddressModal(){$('addressModal').classList.remove('show');editingAddrId=null;savedCoords=null}
+
+async function saveAddress(){
+  var name=$('addrName').value.trim();var mobile=$('addrMobile').value.trim();
+  var pin=$('addrPin').value.trim();var city=$('addrCity').value.trim();
+  var state=$('addrState').value.trim();var line1=$('addrLine1').value.trim();
+  var line2=$('addrLine2').value.trim();var landmark=$('addrLandmark').value.trim();
+  if(!name||!mobile||!pin||!line1){toast('Name, mobile, PIN & address required');return}
+  var body={name:name,mobile:mobile,pin:pin,city:city,state:state,address_line_1:line1,address_line_2:line2,landmark:landmark,address_type:'Home',is_default:editingAddrId?0:1};
+  if(savedCoords)body.coordinates=savedCoords;
+  try{
+    var url=editingAddrId?API+'/api/addresses/update':API+'/api/addresses/create';
+    if(editingAddrId)body.id=editingAddrId;
+    var r=await fetch(url,{method:'POST',headers:headers(),body:JSON.stringify(body)});
+    var d=await r.json();
+    if(d.ok){toast(editingAddrId?'Address updated!':'Address saved!');closeAddressModal();loadAddresses()}
+    else toast(d.error||'Failed to save');
+  }catch(e){toast('Failed to save address')}
+}
+
+async function deleteAddressConfirm(id){
+  if(!confirm('Delete this address?'))return;
+  try{
+    var r=await fetch(API+'/api/addresses/delete',{method:'POST',headers:headers(),body:JSON.stringify({id:id})});
+    var d=await r.json();
+    if(d.ok){toast('Address deleted');loadAddresses()}
+  }catch(e){toast('Failed to delete')}
+}
+
+function detectMyLocation(){
+  toast('Detecting location...');
+  // Try native geolocation first (works in browser, may fail in Telegram WebView)
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(async function(pos){
+      try{
+        var lat=pos.coords.latitude;var lng=pos.coords.longitude;
+        savedCoords={latitude:String(lat),longitude:String(lng),accuracy:String(Math.round(pos.coords.accuracy||20))};
+        $('coordPill').innerHTML='<span style="font-size:11px;color:var(--green);font-weight:600">✓ Location pinned</span>';
+        var r=await fetch(API+'/api/geocode?lat='+lat+'&lng='+lng);
+        var d=await r.json();
+        var res=(d.results&&d.results[0])||null;
+        if(res){
+          if(res.pin)$('addrPin').value=res.pin;
+          if(res.city)$('addrCity').value=res.city;
+          if(res.state)$('addrState').value=res.state;
+          toast('Location detected! Fill remaining fields.');
+        }else{toast('Location pinned — fill address manually')}
+      }catch(e){toast('Could not resolve location')}
+    },function(){
+      // Geolocation denied - try IP-based fallback
+      ipLocationFallback();
+    },{enableHighAccuracy:true,timeout:10000});
+  }else{
+    ipLocationFallback();
+  }
+}
+
+async function ipLocationFallback(){
+  try{
+    var r=await fetch('https://ipapi.co/json/');
+    var d=await r.json();
+    if(d.city){
+      $('addrCity').value=d.city||'';
+      $('addrState').value=d.region||'';
+      $('addrPin').value=d.postal||'';
+      toast('City detected from IP: '+d.city+'. Fill remaining fields.');
+    }else{toast('Could not detect location. Enter manually.')}
+  }catch(e){toast('Location detection failed. Enter address manually.')}
+}
+
+async function useMySavedAddress(){
+  try{
+    var r=await fetch(API+'/api/addresses/default',{headers:headers()});
+    var d=await r.json();
+    var a=d.address;
+    if(!a){toast('No saved address');return}
+    if(a.name)$('addrName').value=a.name;
+    if(a.mobile)$('addrMobile').value=a.mobile;
+    if(a.pin)$('addrPin').value=a.pin;
+    if(a.city)$('addrCity').value=a.city;
+    if(a.state)$('addrState').value=a.state;
+    if(a.address_line_1)$('addrLine1').value=a.address_line_1;
+    if(a.address_line_2)$('addrLine2').value=a.address_line_2;
+    if(a.landmark)$('addrLandmark').value=a.landmark;
+    toast('Filled from saved address');
+  }catch(e){toast('Could not load saved address')}
+}
+
+// ═══════════════════════════════════════════════════════════════
+// NUMBER CHECKER
+// ═══════════════════════════════════════════════════════════════
+
+async function runNumberCheck(){
+  var phone=$('ncPhone').value.trim().replace(/\D/g,'');
+  if(phone.length<10){toast('Enter valid 10-digit number');return}
+  $('ncResult').innerHTML='<div style="text-align:center;padding:10px;color:var(--text3)"><div class="spinner"></div> Checking...</div>';
+  try{
+    var r=await fetch(API+'/api/check_number',{method:'POST',headers:headers(),body:JSON.stringify({phone_number:phone})});
+    var d=await r.json();
+    if(d.error){$('ncResult').innerHTML='<div style="padding:10px;background:#fdecea;border-radius:8px;color:#c0392b;font-size:13px">'+d.error+'</div>';return}
+    var registered=d.registered;
+    var cls,icon,title;
+    if(registered){
+      cls='background:#fff3cd;color:#856404';icon='&#9888;';title='Already Registered on Meesho';
+    }else{
+      cls='background:#e8f5e9;color:#27ae60';icon='&#10004;';title='NEW Number — First-order Discount Guaranteed!';
+    }
+    var sub=d.subtitle||'';
+    $('ncResult').innerHTML='<div style="padding:10px;border-radius:8px;font-size:13px;'+cls+'"><b>'+icon+' +91 '+phone+'</b><br>'+title+'<br><span style="font-size:11px;opacity:.8">'+sub+'</span></div>';
+  }catch(e){$('ncResult').innerHTML='<div style="padding:10px;background:#fdecea;border-radius:8px;color:#c0392b;font-size:13px">Network error</div>'}
+}
+
+loadHome();loadCategories('catRow');loadCategories('exploreCatRow');
+
+// ==================== ADD-ON: 3 standalone helpers (paste-ready) ====================
+// Ye 3 functions tumhari existing addToCart/showCart/placeOrder ko nahi hatayenge.
+// Sirf inko alag se call karo jahan chaho.
+
+// 1. generateUPIForCart(cartItems) -> {upiLink, refId, sellerUpi, amount}
+//    Backend real products me har object me id,name,price,mrp,sellerUPI ho sakta hai.
+//    Agar sellerUPI field nahi hai to SELLERS map se first item ke sellerId se lega.
+function generateUPIForCart(cartItems){
+  if(!Array.isArray(cartItems) || cartItems.length===0) throw new Error('Cart empty');
+  const total = cartItems.reduce((s,x)=> s + (parseFloat(x.price)||0)*(parseInt(x.qty)||1), 0);
+  const first = cartItems[0];
+  let sellerUpi = first.sellerUPI || first.seller_upi || first.upi || null;
+  let sellerName = first.sellerName || first.seller_name || "Seller";
+  if(!sellerUpi){
+    const map = (typeof SELLERS !== 'undefined') ? SELLERS : null;
+    if(map && first.sellerId && map[first.sellerId]){ sellerUpi = map[first.sellerId].upi; sellerName = map[first.sellerId].name; }
+  }
+  if(!sellerUpi) sellerUpi = "winglet.seller@paytm";
+  const refId = 'ORD' + Date.now();
+  const upiLink = `upi://pay?pa=${encodeURIComponent(sellerUpi)}&pn=${encodeURIComponent(sellerName)}&am=${total}&cu=INR&tn=${encodeURIComponent(refId)}`;
+  return { upiLink, refId, sellerUpi, sellerName, amount: total };
+}
+
+// 2. showQRCode(upiLink) -> QR render + copy/open helpers
+//    Needs: <div id="qrcode"></div> + <p id="upiLinkText"></p>, qrcode.js CDN already added
+function showQRCode(upiLink){
+  if(!upiLink || !upiLink.startsWith('upi://')) return toast('Invalid UPI link');
+  currentUpiLink = upiLink;
+  const box = document.getElementById('qrcode');
+  if(!box) return toast('qrcode div not found');
+  box.innerHTML = ''; box.style.display='flex';
+  new QRCode(box, { text: upiLink, width: 180, height: 180, correctLevel: QRCode.CorrectLevel.H });
+  const linkText = document.getElementById('upiLinkText');
+  if(linkText){ linkText.textContent = upiLink; linkText.style.display='block'; }
+  const sellerEl = document.getElementById('upiSeller');
+  if(sellerEl){ try{ const pa=new URLSearchParams(upiLink.split('?')[1]).get('pa'); if(pa) sellerEl.textContent='Paying to '+pa; sellerEl.style.display='block'; }catch(e){} }
+  document.getElementById('payConfirmModal')?.classList.add('show');
+}
+
+// 3. saveOrderAfterManualPayment(orderData) -> localStorage save + alert
+//    orderData: { cartItems, amount, refId, sellerUpi, upiLink }
+function saveOrderAfterManualPayment(orderData){
+  const cart = orderData.cartItems || getCart();
+  const orders = JSON.parse(localStorage.getItem('m_orders') || localStorage.getItem(LS_ORDERS) || "[]");
+  const order = {
+    id: orderData.refId || ('ORD'+Date.now()),
+    date: new Date().toLocaleString(),
+    items: (orderData.cartItems||cart).map(c=> `${c.name||c.title||'Item'} x${c.qty||1}`).join(', '),
+    total: orderData.amount || 0,
+    seller: orderData.sellerUpi || '',
+    upi: orderData.sellerUpi || '',
+    payLink: orderData.upiLink || '',
+    status: 'Placed (Manual Confirm)'
+  };
+  orders.unshift(order);
+  try{ localStorage.setItem('m_orders', JSON.stringify(orders)); localStorage.setItem(LS_ORDERS, JSON.stringify(orders)); }catch(e){}
+  try{ localStorage.setItem(LS_CART, JSON.stringify([])); localStorage.setItem('m_cart', JSON.stringify([])); }catch(e){}
+  alert('Order Placed Successfully! \nRef: ' + order.id + '\nAmount: ₹' + order.total);
+  try{ showPage('orders'); renderOrders(); }catch(e){}
+  return order;
 }
 </script>
 </body>
