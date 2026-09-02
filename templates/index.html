@@ -453,7 +453,7 @@ async function getCart(){
   const total_quantity = data?.total_quantity ?? data?.result?.total_quantity ?? 0;
   const effective_total = data?.effective_total ?? data?.result?.effective_total ?? 0;
   const items = data?.items ?? data?.result?.items ?? data?.splits ?? data?.result?.splits ?? [];
-  const cart_session = data?.cart_session ?? localStorage.getItem("meesho_cart_session") || null;
+  const cart_session = data?.cart_session ?? (localStorage.getItem("meesho_cart_session") || null);
   if(data?.cart_session) localStorage.setItem("meesho_cart_session", data.cart_session);
   return { total_quantity, effective_total, items, cart_session, raw: data };
 }
