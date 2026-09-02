@@ -702,21 +702,46 @@ def real_cart_review(acc, cart_session=None):
 
 
 def real_cart_remove(acc, item_identifier, cart_session):
-    """Remove item from real Meesho cart via /api/1.0/cart/remove"""
-    body = {
-        "context": "atc_cart_v2", "identifier": "buy_now",
-        "cart_session": cart_session,
-        "items": [item_identifier] if isinstance(item_identifier, str) else item_identifier,
-        "user_id": _acc_uid(acc),
-    }
-    try:
-        with httpx.Client(timeout=20.0) as client:
-            resp = client.post(f"{MEESHO_API}/1.0/cart/remove",
-                               headers=logged_in_headers(acc), json=body)
-            data = resp.json() or {}
-            return {"ok": data.get("success", False), "cart_session": data.get("cart_session")}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    """Remove item from real Meesho cart via /api/1.0/cart/remove
+    Tries both formats: prompt's {product_id} with context cart/default, and legacy identifier."""
+    # Normalize - item_identifier may be pid (int) or identifier string
+    pid = None
+    ident = None
+    if isinstance(item_identifier, dict) and "product_id" in item_identifier:
+        pid = item_identifier.get("product_id")
+        ident = item_identifier.get("identifier")
+    elif isinstance(item_identifier, int) or (isinstance(item_identifier, str) and item_identifier.isdigit()):
+        try: pid = int(item_identifier)
+        except: ident = str(item_identifier)
+    else:
+        ident = str(item_identifier) if item_identifier else None
+        try:
+            if ident and ident.isdigit(): pid = int(ident)
+        except: pass
+
+    bodies = []
+    if pid:
+        bodies.append({"context": "cart", "identifier": "default", "cart_session": cart_session or "", "items": [{"product_id": int(pid)}], "user_id": _acc_uid(acc)})
+        bodies.append({"context": "pdp", "identifier": "buy_now", "cart_session": cart_session or "", "items": [{"product_id": int(pid)}], "user_id": _acc_uid(acc)})
+    if ident:
+        bodies.append({"context": "atc_cart_v2", "identifier": "buy_now", "cart_session": cart_session or "", "items": [ident], "user_id": _acc_uid(acc)})
+        bodies.append({"context": "cart", "identifier": "default", "cart_session": cart_session or "", "items": [ident], "user_id": _acc_uid(acc)})
+    if not bodies:
+        bodies.append({"context": "cart", "identifier": "default", "cart_session": cart_session or "", "items": [str(item_identifier)], "user_id": _acc_uid(acc)})
+
+    last = {"ok": False, "error": "no body"}
+    for body in bodies:
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                resp = client.post(f"{MEESHO_API}/1.0/cart/remove", headers=logged_in_headers(acc), json=body)
+                data = resp.json() or {}
+                if data.get("success"):
+                    return {"ok": True, "cart_session": data.get("cart_session", cart_session), "raw": data}
+                last = {"ok": False, "error": data.get("error_type") or data.get("message") or str(data)[:200], "raw": data}
+                # if error is not about context/identifier, don't retry other bodys? try next anyway
+        except Exception as e:
+            last = {"ok": False, "error": str(e)}
+    return last
 
 
 def real_cart_clear(acc, cart_session):
@@ -917,34 +942,44 @@ def real_cart_add_many(acc, items, cart_session=""):
 
 
 def real_fetch_addresses(acc):
-    """Fetch real address list from Meesho GET /api/3.0/addresses"""
+    """Fetch real address list from Meesho GET /api/3.0/addresses - tries buy_now and default, merges"""
+    def _parse_addrs(data):
+        out=[]
+        for a in (data.get("addresses") or []):
+            if not isinstance(a, dict) or not a.get("id"):
+                continue
+            coords = a.get("coordinates") or {}
+            out.append({
+                "id": a.get("id"), "name": a.get("name"),
+                "mobile": str(a.get("mobile") or ""),
+                "pin": a.get("pin"), "city": a.get("city"), "state": a.get("state"),
+                "address_line_1": a.get("address_line_1"),
+                "address_line_2": a.get("address_line_2"),
+                "landmark": a.get("landmark"),
+                "address_type": a.get("address_type"),
+                "latitude": coords.get("latitude") if isinstance(coords, dict) else a.get("latitude"),
+                "longitude": coords.get("longitude") if isinstance(coords, dict) else a.get("longitude"),
+                "pin_serviceable": a.get("pin_serviceable", True),
+            })
+        return out
     try:
         uid = _acc_uid(acc)
+        merged={}
         with httpx.Client(timeout=15.0) as client:
-            resp = client.get(
-                f"{MEESHO_API}/3.0/addresses?offset=0&limit=50&check_pin=true"
-                f"&context=cart&cart_identifier=buy_now&user_id={uid}",
-                headers=logged_in_headers(acc))
-            data = resp.json() or {}
-            addrs = data.get("addresses") or []
-            out = []
-            for a in addrs:
-                if not isinstance(a, dict) or not a.get("id"):
-                    continue
-                coords = a.get("coordinates") or {}
-                out.append({
-                    "id": a.get("id"), "name": a.get("name"),
-                    "mobile": str(a.get("mobile") or ""),
-                    "pin": a.get("pin"), "city": a.get("city"), "state": a.get("state"),
-                    "address_line_1": a.get("address_line_1"),
-                    "address_line_2": a.get("address_line_2"),
-                    "landmark": a.get("landmark"),
-                    "address_type": a.get("address_type"),
-                    "latitude": coords.get("latitude") if isinstance(coords, dict) else a.get("latitude"),
-                    "longitude": coords.get("longitude") if isinstance(coords, dict) else a.get("longitude"),
-                    "pin_serviceable": a.get("pin_serviceable", True),
-                })
-            return out
+            for ident in ("buy_now", "default"):
+                try:
+                    resp = client.get(
+                        f"{MEESHO_API}/3.0/addresses?offset=0&limit=50&check_pin=true"
+                        f"&context=cart&cart_identifier={ident}&user_id={uid}",
+                        headers=logged_in_headers(acc))
+                    data = resp.json() or {}
+                    for a in _parse_addrs(data):
+                        merged[a["id"]] = a
+                except: continue
+            if merged:
+                return list(merged.values())
+            # final fallback: raw buy_now once more if merged empty due to exception
+            return []
     except Exception as e:
         print(f"[FETCH_ADDR] EXCEPTION: {e}", flush=True)
         return []

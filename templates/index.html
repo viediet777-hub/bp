@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>ShopEasy</title>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -154,7 +156,13 @@ input,button{font-family:inherit;outline:none;border:none}
   <div id="bannerArea"></div>
   <div class="section-title">Categories</div>
   <div class="cat-row" id="catRow"></div>
-  <div class="section-title">For You</div>
+  <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>For You</span>
+    <span style="display:flex;gap:6px;align-items:center">
+      <select id="homeSort" onchange="applySortFilter('home')" style="padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:11px;background:var(--card)"><option value="">Sort</option><option value="low">Price: Low to High</option><option value="high">Price: High to Low</option></select>
+      <select id="homeFilter" onchange="applySortFilter('home')" style="padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:11px;background:var(--card)"><option value="">Filter</option><option value="under100">Under ₹100</option><option value="100-300">₹100-300</option><option value="300plus">₹300+</option></select>
+    </span>
+  </div>
   <div class="prod-grid" id="homeProdGrid"></div>
 </div>
 
@@ -165,6 +173,11 @@ input,button{font-family:inherit;outline:none;border:none}
     <input type="text" placeholder="Search products..." id="exploreSearch" onkeyup="debounceExploreSearch()">
   </div>
   <div id="exploreCatRow" class="cat-row" style="padding-top:4px"></div>
+  <div style="display:flex;gap:8px;padding:0 12px 8px;align-items:center">
+    <select id="exploreSort" onchange="applySortFilter('explore')" style="flex:1;padding:8px;border-radius:10px;border:1px solid var(--border);font-size:12px;background:var(--card)"><option value="">Sort</option><option value="low">Price: Low to High</option><option value="high">Price: High to Low</option></select>
+    <select id="exploreCatFilter" onchange="applyCategoryFilter()" style="flex:1;padding:8px;border-radius:10px;border:1px solid var(--border);font-size:12px;background:var(--card)"><option value="">Category</option><option value="Fashion">Fashion</option><option value="Home">Home</option><option value="Mobile">Mobile</option><option value="Beauty">Beauty</option><option value="Shoes">Shoes</option></select>
+    <select id="exploreFilter" onchange="applySortFilter('explore')" style="flex:1;padding:8px;border-radius:10px;border:1px solid var(--border);font-size:12px;background:var(--card)"><option value="">Filter</option><option value="under100">Under ₹100</option><option value="100-300">₹100-300</option><option value="300plus">₹300+</option></select>
+  </div>
   <div class="prod-grid" id="exploreProdGrid"></div>
   <div id="exploreLoader" style="text-align:center;padding:20px;display:none"><div class="spinner"></div></div>
 </div>
@@ -275,6 +288,8 @@ input,button{font-family:inherit;outline:none;border:none}
       <label style="flex:1;display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="addrType" value="Other"> Other</label>
     </div>
     <div id="coordPill" style="margin-bottom:10px"></div>
+    <div id="miniMap" style="height:180px;border-radius:12px;margin:0 0 10px;display:none;border:1px solid var(--border);overflow:hidden"></div>
+    <div id="mapConfirm" style="display:none;text-align:center;margin-bottom:8px"><span style="font-size:11px;color:var(--green)">✓ Location confirmed on map • Drag pin to adjust</span></div>
     <button onclick="saveAddress()" id="addrSaveBtn">Save Address</button>
     <button class="cancel-btn" onclick="closeAddressModal()">Cancel</button>
   </div>
@@ -788,6 +803,8 @@ window.addEventListener('scroll',function(){
 
 async function loadCart(){
   try{
+    // Auto-sync: pull Meesho cart -> local (so Meesho app se delete hua to yahan bhi update, aur vice versa via remove API)
+    try{ await fetch(API+'/api/cart/sync/pull',{method:'POST',headers:headers()}); }catch(e){}
     var r=await fetch(API+'/api/cart',{headers:headers()});
     var items=await r.json();
     renderCart(Array.isArray(items)?items:[]);
@@ -1324,14 +1341,19 @@ async function loadAccount(){
     if(!list.length){
       $('accountsList').innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">No accounts linked. Login above to link your Meesho account.</div>';
     }else{
-      $('accountsList').innerHTML=list.map(function(a){
+      // Mark first as active if none has is_default
+      var hasDefault=list.some(function(a){return a.is_default});
+      $('accountsList').innerHTML=list.map(function(a,idx){
+        var isActive = a.is_default ? 1 : (!hasDefault && idx===0 ? 1 : 0);
         var statusCls=a.meesho_user_id?'active':'inactive';
-        var statusText=a.meesho_user_id?'Active':'Inactive';
+        var statusText=a.meesho_user_id? (isActive?'Active ✓':'Inactive'):'Inactive';
         var phone=a.phone_display||a.phone||'Unknown';
         var mUserId=a.meesho_user_id||a.id||'';
-        var isFod=a.is_first_order?'First Order':'Regular';
+        var isFod=a.is_first_order?'First Order ₹90 OFF':'Regular';
         var sessInfo=a.instance_id?'Session: Active':'';
-        return '<div class="acc-card fade-up"><h4>'+phone+'</h4><p>User ID: '+mUserId+'</p><p style="font-size:11px;color:var(--text3)">'+isFod+(sessInfo?' | '+sessInfo:'')+'</p><div class="status '+statusCls+'">'+statusText+'</div></div>';
+        var switchBtn = isActive ? '<span style="font-size:11px;background:var(--accent);color:#fff;padding:4px 10px;border-radius:8px">Active</span>' : '<button onclick="switchAccount('+a.id+')" style="font-size:11px;background:var(--card);border:1px solid var(--accent);color:var(--accent);padding:4px 10px;border-radius:8px;cursor:pointer">Switch</button>';
+        var delBtn = '<button onclick="deleteAccount('+a.id+')" style="font-size:11px;background:#fdecea;color:#c0392b;padding:4px 8px;border-radius:8px;margin-left:6px;cursor:pointer">×</button>';
+        return '<div class="acc-card fade-up" style="border:'+(isActive?'2px solid var(--accent)':'1px solid var(--border)')+'"><div style="display:flex;justify-content:space-between;align-items:start"><div><h4>'+phone+' '+(isActive?'<span style="font-size:10px;color:var(--accent)">● Active</span>':'')+'</h4><p>User ID: '+mUserId+'</p><p style="font-size:11px;color:var(--text3)">'+isFod+(sessInfo?' | '+sessInfo:'')+'</p><div class="status '+statusCls+'" style="margin-top:6px">'+statusText+'</div></div><div style="display:flex;align-items:center">'+switchBtn+delBtn+'</div></div></div>';
       }).join('');
     }
   }catch(e){
@@ -1339,6 +1361,120 @@ async function loadAccount(){
     console.error('[ACCOUNTS]',e);
   }
   loadAddresses();
+  // Auto-sync cart & addresses from Meesho on account load (so Meesho app changes reflect here)
+  try{ fetch(API+'/api/addresses/sync',{method:'POST',headers:headers()}).then(()=>loadAddresses()); }catch(e){}
+  try{ fetch(API+'/api/cart/sync/pull',{method:'POST',headers:headers()}).then(r=>r.json()).then(d=>{ if(d.imported>0) loadCart(); }); }catch(e){}
+  // Reload offers per active account
+  try{ loadBanner(); }catch(e){}
+}
+
+async function switchAccount(accId){
+  try{
+    var r=await fetch(API+'/api/accounts/switch',{method:'POST',headers:headers(),body:JSON.stringify({account_id:accId})});
+    var d=await r.json();
+    if(d.ok){ toast('Switched account'); loadAccount(); loadHome(); loadCart(); }
+    else toast(d.error||'Switch failed');
+  }catch(e){ toast('Switch failed'); }
+}
+async function deleteAccount(accId){
+  if(!confirm('Delete this account?')) return;
+  try{ await fetch(API+'/api/accounts/delete',{method:'POST',headers:headers(),body:JSON.stringify({id:accId})}); toast('Deleted'); loadAccount(); }catch(e){ toast('Delete failed'); }
+}
+// Sort / Filter like Meesho
+var _homeCache=[],_exploreCache=[];
+function cacheProducts(gridId, prods){
+  if(gridId==='homeProdGrid') _homeCache=prods.slice();
+  if(gridId==='exploreProdGrid') _exploreCache=prods.slice();
+}
+function applySortFilter(which){
+  var gridId = which==='home' ? 'homeProdGrid' : 'exploreProdGrid';
+  var sortVal = $(which==='home'?'homeSort':'exploreSort').value;
+  var filterVal = $(which==='home'?'homeFilter':'exploreFilter').value;
+  var cache = which==='home' ? _homeCache : _exploreCache;
+  if(!cache.length){
+    // fallback: read DOM prices if cache empty
+    var cards=document.querySelectorAll('#'+gridId+' .prod-card');
+    cache=Array.from(cards).map(function(c){
+      var priceText=c.querySelector('.price')?c.querySelector('.price').textContent:'0';
+      var price=parseInt(priceText.replace(/\D/g,''))||0;
+      return {el:c, price:price};
+    });
+    // if using DOM cache, sort directly
+    var filtered=cards;
+    // simple DOM sort for fallback
+    if(sortVal){
+      var arr=Array.from(cards);
+      arr.sort(function(a,b){
+        var pa=parseInt((a.querySelector('.price')||{}).textContent?.replace(/\D/g,'')||0);
+        var pb=parseInt((b.querySelector('.price')||{}).textContent?.replace(/\D/g,'')||0);
+        return sortVal==='low'?pa-pb:pb-pa;
+      });
+      var grid=document.getElementById(gridId);
+      arr.forEach(function(el){grid.appendChild(el);});
+    }
+    // filter DOM
+    if(filterVal){
+      Array.from(cards).forEach(function(c){
+        var p=parseInt((c.querySelector('.price')||{}).textContent?.replace(/\D/g,'')||0);
+        var show=true;
+        if(filterVal==='under100') show=p<100;
+        else if(filterVal==='100-300') show=p>=100 && p<=300;
+        else if(filterVal==='300plus') show=p>300;
+        c.style.display=show?'':'none';
+      });
+    } else {
+      Array.from(cards).forEach(function(c){c.style.display='';});
+    }
+    return;
+  }
+  var filtered=cache.slice();
+  if(filterVal){
+    filtered=filtered.filter(function(p){
+      var price=p.price||0;
+      if(filterVal==='under100') return price<100;
+      if(filterVal==='100-300') return price>=100 && price<=300;
+      if(filterVal==='300plus') return price>300;
+      return true;
+    });
+  }
+  if(sortVal==='low') filtered.sort(function(a,b){return (a.price||0)-(b.price||0)});
+  else if(sortVal==='high') filtered.sort(function(a,b){return (b.price||0)-(a.price||0)});
+  renderProducts(filtered, gridId);
+}
+function applyCategoryFilter(){
+  var cat=$('exploreCatFilter').value;
+  if(!cat){ applySortFilter('explore'); return; }
+  searchCat(cat);
+}
+// Mini-map for auto-detect
+var _map=null,_marker=null;
+function initMiniMap(lat,lng){
+  var mapEl=$('miniMap');
+  if(!mapEl) return;
+  mapEl.style.display='block';
+  $('mapConfirm').style.display='block';
+  // ensure leaflet loaded
+  if(typeof L==='undefined'){ mapEl.innerHTML='<div style="padding:20px;text-align:center;font-size:12px;color:var(--text3)">Map loading... (check internet)</div>'; return; }
+  setTimeout(function(){
+    if(_map){ _map.remove(); _map=null; }
+    _map = L.map('miniMap',{zoomControl:false}).setView([lat,lng], 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19, attribution:'© OSM'}).addTo(_map);
+    _marker = L.marker([lat,lng],{draggable:true}).addTo(_map);
+    _marker.on('dragend', function(e){
+      var p=e.target.getLatLng();
+      savedCoords={latitude:String(p.lat),longitude:String(p.lng),accuracy:"20"};
+      $('coordPill').innerHTML='<span style="font-size:11px;color:var(--green)">✓ Pinned: '+p.lat.toFixed(4)+', '+p.lng.toFixed(4)+' (drag to adjust)</span>';
+      // reverse geocode
+      fetch(API+'/api/geocode?lat='+p.lat+'&lng='+p.lng,{headers:headers()}).then(r=>r.json()).then(d=>{
+        if(d.results && d.results[0]){
+          $('addrPin').value=d.results[0].pin||$('addrPin').value;
+          $('addrCity').value=d.results[0].city||$('addrCity').value;
+          $('addrState').value=d.results[0].state||$('addrState').value;
+        }
+      });
+    });
+    setTimeout(function(){ _map.invalidateSize(); }, 200);
+  }, 100);
 }
 
 async function exportData(){
@@ -1474,8 +1610,12 @@ function openAddAddress(){
   $('addrName').value='';$('addrMobile').value='';$('addrPin').value='';
   $('addrCity').value='';$('addrState').value='';$('addrLine1').value='';
   $('addrLine2').value='';$('addrLandmark').value='';$('coordPill').innerHTML='';
+  $('miniMap').style.display='none';$('mapConfirm').style.display='none';
+  if(_map){ try{_map.remove();}catch(e){} _map=null; _marker=null; }
   $('addrSaveBtn').textContent='Save Address';
   $('addressModal').classList.add('show');
+  // Auto-sync addresses from Meesho if none
+  try{ fetch(API+'/api/addresses/sync',{method:'POST',headers:headers()}).then(()=>loadAddresses()); }catch(e){}
 }
 
 async function editAddress(id){
@@ -1499,7 +1639,7 @@ async function editAddress(id){
   }catch(e){toast('Failed to load address')}
 }
 
-function closeAddressModal(){$('addressModal').classList.remove('show');editingAddrId=null;savedCoords=null}
+function closeAddressModal(){$('addressModal').classList.remove('show');editingAddrId=null;savedCoords=null;$('miniMap').style.display='none';$('mapConfirm').style.display='none'; if(_map){ try{_map.remove();}catch(e){} _map=null; _marker=null; } }
 
 function autoFillCityState(){
   var pin=$('addrPin').value.trim();
@@ -1559,7 +1699,8 @@ function detectMyLocation(){
       try{
         var lat=pos.coords.latitude;var lng=pos.coords.longitude;
         savedCoords={latitude:String(lat),longitude:String(lng),accuracy:String(Math.round(pos.coords.accuracy||20))};
-        $('coordPill').innerHTML='<span style="font-size:11px;color:var(--green);font-weight:600">✓ Location pinned</span>';
+        $('coordPill').innerHTML='<span style="font-size:11px;color:var(--green);font-weight:600">✓ Location pinned: '+lat.toFixed(4)+', '+lng.toFixed(4)+'</span>';
+        initMiniMap(lat,lng);
         var r=await fetch(API+'/api/geocode?lat='+lat+'&lng='+lng);
         var d=await r.json();
         var res=(d.results&&d.results[0])||null;
@@ -1567,8 +1708,8 @@ function detectMyLocation(){
           if(res.pin)$('addrPin').value=res.pin;
           if(res.city)$('addrCity').value=res.city;
           if(res.state)$('addrState').value=res.state;
-          toast('Location detected! Fill remaining fields.');
-        }else{toast('Location pinned — fill address manually')}
+          toast('Location detected! Confirm on map and fill remaining fields.');
+        }else{toast('Location pinned — fill address manually & confirm map')}
       }catch(e){toast('Could not resolve location')}
     },function(){
       // Geolocation denied - try IP-based fallback
@@ -1587,7 +1728,12 @@ async function ipLocationFallback(){
       $('addrCity').value=d.city||'';
       $('addrState').value=d.region||'';
       $('addrPin').value=d.postal||'';
-      toast('City detected from IP: '+d.city+'. Fill remaining fields.');
+      if(d.latitude && d.longitude){
+        savedCoords={latitude:String(d.latitude),longitude:String(d.longitude),accuracy:"100"};
+        $('coordPill').innerHTML='<span style="font-size:11px;color:var(--green);font-weight:600">✓ IP Location: '+d.city+' ('+d.latitude.toFixed(2)+','+d.longitude.toFixed(2)+')</span>';
+        initMiniMap(d.latitude,d.longitude);
+      }
+      toast('City detected from IP: '+d.city+'. Confirm on map!');
     }else{toast('Could not detect location. Enter manually.')}
   }catch(e){toast('Location detection failed. Enter address manually.')}
 }

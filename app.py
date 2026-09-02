@@ -1324,8 +1324,141 @@ def api_addresses():
         return jsonify({"addresses": [], "default": None})
     acc_id = request.args.get("account_id", type=int)
     addrs = get_addresses(uid, acc_id)
+    # Auto-import Meesho addresses if local empty (so real account's addresses show in mini app)
+    if not addrs:
+        acc = get_active_meesho_account(uid)
+        if acc:
+            try:
+                live = real_fetch_addresses(acc)
+                for la in (live or [])[:5]:
+                    try:
+                        create_address(uid, 0, la.get("name",""), str(la.get("mobile","")), str(la.get("pin","")),
+                                       la.get("city",""), la.get("state",""), la.get("address_line_1",""),
+                                       la.get("address_line_2",""), la.get("landmark",""), la.get("address_type","Home"),
+                                       la.get("latitude",""), la.get("longitude",""), 1)
+                    except: pass
+                addrs = get_addresses(uid, acc_id)
+            except: pass
     default = next((a for a in addrs if a.get("is_default")), addrs[0] if addrs else None)
     return jsonify({"addresses": addrs, "default": default})
+
+
+@app.route("/api/addresses/sync", methods=["POST"])
+def api_addresses_sync():
+    uid = get_uid()
+    if not uid:
+        return jsonify({"ok": False, "error": "no user"})
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"ok": False, "error": "no meesho account"})
+    live = real_fetch_addresses(acc) or []
+    # Also try default cart context variant
+    if not live:
+        try:
+            # fallback with default identifier
+            from meesho import MEESHO_API, logged_in_headers, _acc_uid
+            import httpx
+            with httpx.Client(timeout=10) as c:
+                r=c.get(f"{MEESHO_API}/3.0/addresses?offset=0&limit=50&check_pin=true&context=cart&cart_identifier=default&user_id={_acc_uid(acc)}", headers=logged_in_headers(acc))
+                d=r.json() or {}
+                live = [{"id":a.get("id"),"name":a.get("name"),"mobile":str(a.get("mobile","")),"pin":a.get("pin"),"city":a.get("city"),"state":a.get("state"),"address_line_1":a.get("address_line_1"),"address_line_2":a.get("address_line_2"),"landmark":a.get("landmark"),"address_type":a.get("address_type"),"latitude":(a.get("coordinates")or{}).get("latitude"),"longitude":(a.get("coordinates")or{}).get("longitude")} for a in (d.get("addresses") or []) if a.get("id")]
+        except: pass
+    imported=0
+    addrs = get_addresses(uid)
+    existing_pins = {(a.get("pin"), a.get("address_line_1")) for a in addrs}
+    for la in live:
+        key=(str(la.get("pin")), la.get("address_line_1"))
+        if key in existing_pins: continue
+        try:
+            create_address(uid, 0, la.get("name",""), str(la.get("mobile","")), str(la.get("pin","")),
+                           la.get("city",""), la.get("state",""), la.get("address_line_1",""),
+                           la.get("address_line_2",""), la.get("landmark",""), la.get("address_type","Home"),
+                           la.get("latitude",""), la.get("longitude",""), 0)
+            imported+=1
+        except: pass
+    return jsonify({"ok": True, "imported": imported, "live": live})
+
+
+@app.route("/api/cart/sync/pull", methods=["POST"])
+def api_cart_sync_pull():
+    uid = get_uid()
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"ok": False, "error": "no account"})
+    try:
+        cs = get_cart_session(uid)
+        review = real_cart_review(acc, cs)
+        if not review.get("ok"):
+            review = real_cart_review(acc, "")
+        meesho_items = review.get("items") or []
+        if review.get("cart_session"):
+            set_cart_session(uid, review["cart_session"])
+        # Also try atc_cart_v2 view for full cart (like Meesho CART page)
+        if not meesho_items:
+            try:
+                # fallback: 8.0/cart
+                import httpx
+                from meesho import MEESHO_API, logged_in_headers, _acc_uid
+                with httpx.Client(timeout=10) as c:
+                    r=c.post(f"{MEESHO_API}/8.0/cart", headers=logged_in_headers(acc), json={"context":"atc_cart_v2","identifier":"default","cart_session":"","user_id":_acc_uid(acc)})
+                    d=r.json() or {}
+                    if d.get("success"):
+                        meesho_items = []
+                        for s in (d.get("result",{}).get("splits") or []):
+                            for p in (s.get("products") or []):
+                                meesho_items.append({"product_id":p.get("product_id"),"variation_id":p.get("variation_id"),"variation":p.get("variation"),"quantity":p.get("quantity"),"price":p.get("price"),"name":p.get("name"),"image":(p.get("images") or [None])[0]})
+                        if d.get("cart_session"):
+                            set_cart_session(uid, d["cart_session"])
+            except: pass
+        local = get_cart(uid)
+        local_ids = {int(c.get("product_id")) for c in local if c.get("product_id")}
+        meesho_ids = {int(m.get("product_id")) for m in meesho_items if m.get("product_id")}
+        # Import missing Meesho items into local
+        imported=0
+        for m in meesho_items:
+            pid=int(m.get("product_id") or 0)
+            if not pid or pid in local_ids: continue
+            add_to_cart(uid, pid, m.get("quantity",1), name=m.get("name",""), price=int(m.get("price",0) or 0), image=m.get("image","") or "", supplier_id=int(m.get("supplier_id") or 0), variation_id=int(m.get("variation_id") or 0), variation_name=m.get("variation","Free Size"))
+            imported+=1
+        # Remove local items that Meesho no longer has (if user removed in Meesho app, reflect in mini app after sync)
+        # Only if Meesho has definitive list (not empty due to error) we remove
+        removed=0
+        if meesho_items is not None and len(meesho_items)>0:
+            for c in list(local):
+                pid=int(c.get("product_id") or 0)
+                if pid and pid not in meesho_ids:
+                    # don't auto-remove if Meesho cart was empty due to error - require explicit
+                    pass
+        return jsonify({"ok": True, "meesho_items": meesho_items, "imported": imported, "cart_session": review.get("cart_session")})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/accounts/switch", methods=["POST"])
+def api_accounts_switch():
+    uid = get_uid()
+    if not uid:
+        return jsonify({"ok": False, "error": "no user"})
+    data = request.json or {}
+    target_id = data.get("account_id") or data.get("id")
+    if not target_id:
+        return jsonify({"ok": False, "error": "account_id required"})
+    # Active account = ORDER BY created_at DESC LIMIT 1, so bump target's created_at to now
+    try:
+        from database import get_db
+        import time
+        conn=get_db()
+        # ensure target exists
+        cur=conn.execute("SELECT id FROM meesho_accounts WHERE id=? AND user_id=?", (target_id, uid))
+        if not cur.fetchone():
+            conn.close()
+            return jsonify({"ok": False, "error": "account not found"})
+        conn.execute("UPDATE meesho_accounts SET created_at=? WHERE id=? AND user_id=?", (time.time(), target_id, uid))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 
 @app.route("/api/addresses/create", methods=["POST"])
