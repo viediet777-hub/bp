@@ -1219,6 +1219,66 @@ async function runNumberCheck(){
   }catch(e){$('ncResult').innerHTML='<div style="padding:10px;background:#fdecea;border-radius:8px;color:#c0392b;font-size:13px">Network error</div>'}
 }
 
+// ==================== FIRST ORDER DISCOUNT (Meesho style - FREE) ====================
+// isFirstOrder flag localStorage me, login ke baad bhi true jab tak order na ho
+function isFirstOrderUser(){ return localStorage.getItem('isFirstOrder') === 'true'; }
+function dummyLoginWrapper(name, phone){
+  if(name) localStorage.setItem('user_name', name);
+  if(phone) localStorage.setItem('user_phone', phone);
+  if(localStorage.getItem('isFirstOrder')===null) localStorage.setItem('isFirstOrder','true');
+}
+function applyFirstOrderDiscount(cartTotal, isFirstOrder){
+  const total = Number(cartTotal)||0;
+  const isFirst = typeof isFirstOrder==='boolean' ? isFirstOrder : isFirstOrderUser();
+  if(!isFirst) return { productPrice: total, discount: 0, orderTotal: total, isFirst:false };
+  let discount = 180;
+  if(total <= discount) discount = Math.max(0, total - 1); // min ₹1
+  const orderTotal = Math.max(1, total - discount);
+  return { productPrice: total, discount, orderTotal, isFirst:true };
+}
+function renderFirstOrderBreakup(cartTotal){
+  const r = applyFirstOrderDiscount(cartTotal);
+  const elP = document.getElementById('coMrp');
+  const elRow = document.getElementById('coFirstRow');
+  const elVal = document.getElementById('coFirst');
+  const elTotal = document.getElementById('coPayable') || document.getElementById('coOrderTotal');
+  if(elP) elP.textContent = '₹' + r.productPrice;
+  if(elRow) elRow.style.display = r.discount>0 ? 'flex' : 'none';
+  if(elVal) elVal.textContent = '-₹' + r.discount;
+  if(elTotal) elTotal.textContent = '₹' + r.orderTotal;
+  // checkout ke baki totals bhi isi se update
+  const codEl = document.getElementById('payCODAmt') || document.getElementById('coCODTotal');
+  const onlineEl = document.getElementById('payOnlineAmt');
+  if(codEl) codEl.textContent = '₹' + r.productPrice; // COD = bina discount (Meesho style)
+  if(onlineEl) onlineEl.textContent = '₹' + r.orderTotal;
+  return r;
+}
+function markFirstOrderUsed(){
+  localStorage.setItem('isFirstOrder','false');
+  localStorage.setItem('firstOrderUsed','true');
+}
+// auto-hook: existing renderCheckout ke baad breakup dikhao
+const _origRenderCheckout = window.renderCheckout;
+if(typeof _origRenderCheckout === 'function'){
+  window.renderCheckout = function(){
+    const res = _origRenderCheckout.apply(this, arguments);
+    try{
+      const cart = (typeof getCart==='function') ? getCart() : [];
+      const total = cart.reduce((s,x)=> s + (Number(x.price)||0)*(Number(x.qty)||1), 0);
+      renderFirstOrderBreakup(total);
+    }catch(e){}
+    return res;
+  };
+}
+// auto-hook: order place success pe flag off (existing placeOrder / confirmPayment ke baad)
+const _origMark = window.markFirstOrderUsed;
+document.addEventListener('click', function(e){
+  if(e.target && e.target.textContent && e.target.textContent.includes('Maine Payment Kar Di')){
+    // thoda delay taaki saveOrderAfterManualPayment pehle chale
+    setTimeout(()=>{ try{ markFirstOrderUsed(); }catch(e){} }, 500);
+  }
+});
+
 loadHome();loadCategories('catRow');loadCategories('exploreCatRow');
 
 // ==================== ADD-ON: 3 standalone helpers (paste-ready) ====================
