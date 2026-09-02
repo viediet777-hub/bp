@@ -418,6 +418,35 @@ async function meeshoAPI(endpoint, method = 'GET', body = null){
   return res.json();
 }
 
+// ==================== STEP 3: ADD TO CART (REAL MEESHO) ====================
+async function addToCart(productId, supplierId, quantity = 1){
+  const cartSession = localStorage.getItem("meesho_cart_session") || null;
+  const body = {
+    "context": "pdp",
+    "identifier": "buy_now",
+    "cart_session": cartSession,
+    "replaceable": false,
+    "items": [{
+      "identifier": "buy_now",
+      "product_id": Number(productId),
+      "supplier_id": Number(supplierId),
+      "variation_id": 167,
+      "variation": "Free Size",
+      "quantity": Number(quantity) || 1,
+      "selected_price_type_id": "premium_return_price"
+    }],
+    "address_id": null,
+    "user_id": Number(MEESHO_CONFIG["app-user-id"])
+  };
+  const data = await meeshoAPI("/1.0/cart/add", "POST", body);
+  // cart_session save karo future requests ke liye
+  if(data && data.cart_session){
+    localStorage.setItem("meesho_cart_session", data.cart_session);
+  }
+  const effectiveTotal = data?.result?.effective_total ?? data?.effective_total ?? null;
+  return { cart_session: data?.cart_session || cartSession, effective_total: effectiveTotal, raw: data };
+}
+
 function headers(){return{'Content-Type':'application/json','X-User-Id':userId}}
 function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2200)}
 function showEl(id,v){document.getElementById(id).style.display=v?'block':'none'}
