@@ -327,35 +327,79 @@ def _apply_fod(price, offer=None):
         return round(max(0, price - cb), 2), f"\u20b9{int(cb)} CASHBACK", cb
     return price, "", None
 
-def roll_fod_sync():
+def roll_fod_sync(for_acc=None):
+    """Try to get best available FOD. If for_acc provided, use its anon_xo/device to get that account's real bucket (120 etc)."""
     best = None
-    for i in range(5):
+    # If account has anon_xo, try that exact identity first (competitor's 120 comes from this)
+    if for_acc and for_acc.get("anon_xo"):
+        try:
+            import json as _j
+            ident = for_acc.get("identity")
+            if isinstance(ident, str):
+                try: ident = _j.loads(ident)
+                except: ident = {}
+            if not isinstance(ident, dict): ident = {}
+            elif "identity" in ident and isinstance(ident.get("identity"), dict):
+                ident = ident.get("identity")
+            dev = dict(_random_device())
+            if ident.get("make"): 
+                # keep brand consistent with make
+                dev["brand"] = ident.get("make").lower() if ident.get("make").lower() in ["oneplus","xiaomi","samsung","motorola"] else dev["brand"]
+            if ident.get("model"): dev["model"] = ident.get("model")
+            if ident.get("android"): dev["os_version"] = str(ident.get("android"))
+            if ident.get("screen_dpi"): dev["screen_dpi"] = int(ident.get("screen_dpi"))
+            if ident.get("screen_width"): dev["screen_width"] = int(ident.get("screen_width"))
+            if ident.get("screen_height"): dev["screen_height"] = int(ident.get("screen_height"))
+            dev["offer_bucket"] = ""  # let Meesho decide for this anon identity
+            xo_to_use = for_acc.get("anon_xo")
+            # Direct FOD call with that specific xo (not random pool) to get true bucket like 120
+            ua = f"Dalvik/2.1.0 (Linux; U; Android {dev['os_version']}; {dev['model']} Build/) Cronet/137.0.7100.61"
+            try:
+                with httpx.Client(timeout=15.0) as client:
+                    resp = client.post(f"{MEESHO_API}/1.0/anonymous/fod-personalisation",
+                        headers=_api_headers(uuid.uuid4().hex, xo_to_use, "anonymous", gaid=dev["gaid"], session_count=dev["session_count"], ua=ua),
+                        json=_fod_body(dev))
+                    if resp.status_code == 200:
+                        mapped = _map_fod(resp.json())
+                        if mapped["ok"] and mapped["offer"]:
+                            offer = dict(mapped["offer"])
+                            buck = int(offer.get("bucket") or 0)
+                            offer["display_bucket"] = buck
+                            offer["display_text"] = f"Upto \u20b9{buck} OFF"
+                            offer["live"] = True
+                            offer["title"] = "Upto"
+                            offer["subtitle"] = "on 1st order"
+                            return {"ok": True, "offer": offer}
+            except: pass
+        except Exception:
+            pass
+    for i in range(10):
         try:
             dev = _random_device()
+            # Try high buckets first: 135,130,120,180 etc. (file has 135,120)
             if i < 3:
-                dev["offer_bucket"] = "180"
+                dev["offer_bucket"] = random.choice(["135","130","120","180"])
+            elif i < 6:
+                dev["offer_bucket"] = random.choice(["120","135","125","150"])
             res = fetch_fod_sync(device=dev)
             if res.get("ok") and res.get("offer"):
                 offer = dict(res["offer"])
                 offer.setdefault("id", str(offer.get("bucket") or "live").lower().replace(" ", ""))
-                offer.setdefault("title", "OFFER")
-                offer.setdefault("text", "")
+                offer.setdefault("title", "Upto")
+                offer.setdefault("text", offer.get("offer_text") or "")
                 offer.setdefault("subtitle", "on 1st order")
                 offer["live"] = True
                 buck = int(offer.get("bucket") or 0)
-                # Always show 180 OFF to user, keep actual bucket for internal use
-                offer["display_bucket"] = 180
-                offer["display_text"] = "Upto \u20b9180 OFF"
-                if buck >= 180:
+                # Show REAL bucket value (like competitor's 120), not hardcoded 180
+                offer["display_bucket"] = buck
+                offer["display_text"] = f"Upto \u20b9{buck} OFF"
+                if buck >= 135:
                     return {"ok": True, "offer": offer}
                 if not best or buck > int(best.get("bucket") or 0):
                     best = offer
         except Exception:
             continue
     if best:
-        # Ensure display_bucket is set on best offer too
-        best.setdefault("display_bucket", 180)
-        best.setdefault("display_text", "Upto \u20b9180 OFF")
         return {"ok": True, "offer": best}
     return {"ok": False, "error": "Could not fetch offer."}
 

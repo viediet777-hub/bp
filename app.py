@@ -965,14 +965,29 @@ def api_fod_roll():
 @app.route("/api/offers")
 def api_offers():
     global _meesho_offer
+    uid = get_uid()
+    # Per-account offer first (so 8959420930 shows 120 like competitor, not 90)
+    if uid:
+        try:
+            acc = get_active_meesho_account(uid)
+            if acc is not None and int(acc.get("is_first_order", 1)) == 0:
+                return jsonify({"offer": None, "reason": "not_first_order"})
+            if acc and acc.get("anon_xo"):
+                # Try that account's real anon identity to get its true bucket (120/135)
+                try:
+                    from meesho import roll_fod_sync as _roll
+                    res = _roll(for_acc=acc)
+                    if res.get("ok") and res.get("offer"):
+                        return jsonify({"offer": res["offer"]})
+                except: pass
+        except Exception:
+            pass
     if not _meesho_offer:
         result = get_meesho_offer()
         if result.get("ok") and result.get("offer"):
             _meesho_offer = result["offer"]
     # Only new accounts get the First-Order banner/off. Old accounts see nothing
-    # so the "always 180 OFF" illusion disappears for them.
     offer = _meesho_offer
-    uid = get_uid()
     if uid and offer:
         try:
             acc = get_active_meesho_account(uid)
@@ -1219,12 +1234,23 @@ def api_json_login():
 
     if not phone and phone_last4:
         phone = f"xxxx{phone_last4}"
+    # Capture anon_xo and full identity for per-account FOD (competitor's 120 vs our 90 fix)
+    anon_xo = data.get("anon_xo") or data.get("identity", {}).get("anon_xo", "") or ""
+    identity = data.get("identity") or {}
+    identity_json = ""
+    try:
+        import json as _json
+        if isinstance(identity, dict) and identity:
+            identity_json = _json.dumps(identity)
+    except: pass
 
     save_meesho_account(uid, phone, str(user_id), xo, 0, instance_id,
                         is_first_order=int(is_first),
                         app_session_id=app_session_id,
                         shield_session_id=shield_session_id,
-                        gaid=gaid)
+                        gaid=gaid,
+                        anon_xo=anon_xo,
+                        identity_json=identity_json)
 
     print(f"[JSON_LOGIN] Saved account: user_id={user_id} instance_id={instance_id} is_first={is_first}", flush=True)
 
@@ -1246,7 +1272,9 @@ def api_json_login():
                                         is_first_order=verified_first,
                                         app_session_id=app_session_id,
                                         shield_session_id=shield_session_id,
-                                        gaid=gaid)
+                                        gaid=gaid,
+                                        anon_xo=anon_xo,
+                                        identity_json=identity_json)
                     is_first = verified_first
                     print(f"[JSON_LOGIN] Verified is_first_order={is_first} via review", flush=True)
         except Exception as e:

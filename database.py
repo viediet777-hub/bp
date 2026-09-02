@@ -153,6 +153,8 @@ def init_db():
         ("app_session_id", "meesho_accounts", "TEXT DEFAULT ''"),
         ("shield_session_id", "meesho_accounts", "TEXT DEFAULT ''"),
         ("gaid", "meesho_accounts", "TEXT DEFAULT ''"),
+        ("anon_xo", "meesho_accounts", "TEXT DEFAULT ''"),
+        ("identity_json", "meesho_accounts", "TEXT DEFAULT ''"),
     ]:
         try:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {decl}")
@@ -448,10 +450,13 @@ def get_wallet_tx(user_id):
 # ─── MEESHO ACCOUNTS ───
 
 def save_meesho_account(user_id, phone, meesho_user_id, xo, xo_exp=0, instance_id="", is_first_order=1,
-                        app_session_id="", shield_session_id="", gaid=""):
+                        app_session_id="", shield_session_id="", gaid="", anon_xo="", identity_json=""):
     """Upsert a Meesho account. Re-logging in with the same meesho_user_id updates
     the existing row instead of inserting a duplicate (duplicates made
     get_active_meesho_account pick a half-populated row)."""
+    # anon_xo and identity_json may be large; ensure they are strings
+    anon_xo = anon_xo or ""
+    identity_json = identity_json or ""
     conn = get_db()
     meesho_user_id = str(meesho_user_id)
     existing = None
@@ -464,7 +469,7 @@ def save_meesho_account(user_id, phone, meesho_user_id, xo, xo_exp=0, instance_i
         # Blank incoming values must not wipe data an earlier (richer) save stored.
         conn.execute(
             """UPDATE meesho_accounts SET phone=?, xo=?, xo_exp=?, instance_id=?,
-               is_first_order=?, app_session_id=?, shield_session_id=?, gaid=?, created_at=?
+               is_first_order=?, app_session_id=?, shield_session_id=?, gaid=?, anon_xo=?, identity_json=?, created_at=?
                WHERE id=?""",
             (phone or old.get("phone", ""),
              xo or old.get("xo", ""),
@@ -474,14 +479,16 @@ def save_meesho_account(user_id, phone, meesho_user_id, xo, xo_exp=0, instance_i
              app_session_id or old.get("app_session_id", ""),
              shield_session_id or old.get("shield_session_id", ""),
              gaid or old.get("gaid", ""),
+             anon_xo or old.get("anon_xo", ""),
+             identity_json or old.get("identity_json", ""),
              time.time(), old["id"]))
     else:
         conn.execute(
             """INSERT INTO meesho_accounts (user_id, phone, meesho_user_id, xo, xo_exp, instance_id,
-               is_first_order, app_session_id, shield_session_id, gaid, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+               is_first_order, app_session_id, shield_session_id, gaid, anon_xo, identity_json, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (user_id, phone, meesho_user_id, xo, xo_exp, instance_id, int(is_first_order),
-             app_session_id, shield_session_id, gaid, time.time()))
+             app_session_id, shield_session_id, gaid, anon_xo, identity_json, time.time()))
     conn.commit()
     conn.close()
 
