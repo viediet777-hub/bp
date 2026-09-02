@@ -514,7 +514,12 @@ async function loadBanner(){
       var offerText=o.display_text||o.text||'Upto ₹180 OFF';
       $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner"><h2>'+o.title+'</h2><p>'+o.subtitle+'</p><div class="banner-offer">'+offerText+'</div></div></div>';
     }else{
-      $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner"><h2>180 OFF Auto-Applied</h2><p>Special discount on all products!</p><div class="banner-offer">Upto ₹180 OFF</div></div></div>';
+      // Old account -> no FOD. Show regular price banner, not 180 OFF
+      if(d.reason==='not_first_order'){
+        $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner" style="background:linear-gradient(135deg,#555,#777)"><h2>Regular Prices</h2><p>New number se login karo aur Upto ₹180 OFF pao</p><div class="banner-offer" style="background:rgba(255,255,255,.15)">No offer on this account</div></div></div>';
+      }else{
+        $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner"><h2>180 OFF Auto-Applied</h2><p>Special discount on all products!</p><div class="banner-offer">Upto ₹180 OFF</div></div></div>';
+      }
     }
   }catch(e){
     $('bannerArea').innerHTML='<div class="banner"><div class="banner-inner"><h2>180 OFF Auto-Applied</h2><p>Special discount on all products!</p><div class="banner-offer">Upto ₹180 OFF</div></div></div>';
@@ -710,25 +715,30 @@ async function handleOnlinePayment(){
     sessionStorage.setItem('pending_upi_amount', String(d.amount));
     // b. UPI app open - GPay/PhonePe/Paytm (exact amount, UPI ID, order ID already in link)
     // Syntax: upi://pay?pa=paytm.s1dw5n0@pty&pn=Payment Gateway&am=355.00&tr=ORD...&tn=Payment&cu=INR
-    window.location.href = d.upi_link;
-    // info box
+    // FIX: desktop pe window.location.href = upi:// se "Failed to load" aata hai, isliye mobile check
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const info=$('payConfirmInfo');
-    if(info){ info.style.display='block'; info.innerHTML='Order #'+d.order_id+' | Amount Rs.'+d.amount+'<br><span style="font-size:11px;word-break:break-all">'+d.upi_link+'</span>'; }
-    setupReturnDetection();
-    // desktop fallback
-    setTimeout(()=>{
-      if(document.visibilityState==='visible' && !document.hidden){
-        showPayModal();
-        // try clipboard for desktop
-        if(navigator.clipboard && d.upi_id){
-          navigator.clipboard.writeText(d.upi_id).catch(()=>{});
-        }
+    if(info){ info.style.display='block'; info.innerHTML='Order #'+d.order_id+' | Amount Rs.'+d.amount+'<br><span style="font-size:11px;word-break:break-all">'+d.upi_link+'</span><br><span style="font-size:11px;color:var(--accent)">UPI ID: '+d.upi_id+'</span>'; }
+    if(isMobile){
+      // mobile: hidden iframe se open karo taaki page unload na ho aur error na aaye
+      try{
+        const ifr=document.createElement('iframe');
+        ifr.style.display='none'; ifr.src=d.upi_link; document.body.appendChild(ifr);
+        setTimeout(()=>{ try{ ifr.remove(); }catch(e){} }, 3000);
+      }catch(e){ window.location.href=d.upi_link; }
+      setupReturnDetection();
+      setTimeout(showPayModal, 1400);
+      toast('UPI app open ho raha hai...');
+    } else {
+      // desktop: UPI app nahi khulega, direct modal + copy
+      showPayModal();
+      if(navigator.clipboard && d.upi_id){
+        navigator.clipboard.writeText(d.upi_id).catch(()=>{});
+        toast('Desktop pe UPI ID copy ho gaya: '+d.upi_id+' - Rs.'+d.amount);
       } else {
-        // app switched - show modal when back
-        setTimeout(showPayModal, 1200);
+        toast('UPI Link ready - Rs.'+d.amount+' - ID: '+d.upi_id);
       }
-    }, 1400);
-    toast('UPI app open ho raha hai...');
+    }
   }catch(e){ toast(e.message||'UPI failed'); console.error(e); }
   finally{ btn.disabled=false; btn.textContent='Place Order'; }
 }
