@@ -439,33 +439,15 @@ def api_place_order():
     clear_cart(uid)
     set_cart_session(uid, "")
 
-    # QR generation: always generate for UPI using seller UPI from cart
+    # QR generation: use Meesho's real QR if available, NO fake seller UPI
     qr_base64 = order_r.get("qr_base64")
     upi_intent_url = order_r.get("upi_intent_url")
     qr_url = ""
-    seller_upi = ""
-    seller_name = ""
-    if payment_method.upper() in ("UPI", "PREPAID"):
-        # Get seller UPI from cart items
-        for c in cart:
-            supi = c.get("sellerUPI") or c.get("seller_upi") or c.get("sellerUpi")
-            if supi:
-                seller_upi = supi
-                seller_name = c.get("sellerName") or c.get("seller_name") or supi.split("@")[0]
-                break
-        if not seller_upi:
-            _map = {"winglet":"winglet.seller@paytm","ridhi":"ridhi.fashion@upi","alisha":"alisha.clothing@paytm"}
-            sid = cart[0].get("sellerId") or cart[0].get("seller_id") if cart else None
-            if sid and sid in _map:
-                seller_upi = _map[sid]
-                seller_name = sid
-        if not seller_upi:
-            seller_upi = GW_UPI_ID
-            seller_name = "Meesho Seller"
-        # Build UPI link with seller UPI + Meesho order ref
-        import urllib.parse as _up
-        txn_id = meesho_order_num or generate_txn_id(uid)
-        upi_intent_url = f"upi://pay?pa={_up.quote(seller_upi, safe='')}&pn={_up.quote(seller_name, safe='')}&am={meesho_amount}&cu=INR&tn={_up.quote(str(txn_id), safe='')}"
+    if qr_base64:
+        # Meesho returned real QR image - use it directly
+        pass
+    elif upi_intent_url:
+        # Meesho returned UPI intent link - render QR from it
         qr_url = get_qr_url(upi_intent_url)
 
     return jsonify({
@@ -474,8 +456,6 @@ def api_place_order():
         "fee_charged": fee,
         "payment_method": payment_method, "mode": user_mode,
         "qr_base64": qr_base64,
-        "seller_upi": seller_upi,
-        "seller_name": seller_name,
         "upi_intent_url": upi_intent_url,
         "qr_url": qr_url,
         "payment_url": order_r.get("payment_url"),
@@ -488,44 +468,82 @@ def api_place_order():
 
 @app.route("/api/orders/create-pending", methods=["POST"])
 def api_create_pending():
+    """UPI order: uses Meesho's real preorder to get actual payment QR/URL.
+    NO fake seller UPI - payment goes through Meesho's real gateway."""
     uid = get_uid()
     cart = get_cart(uid)
     if not cart:
         return jsonify({"ok": False, "error": "cart empty"}), 400
     data = request.json or {}
-    # COMPLETELY FREE: total = only products sum, no fee
-    subtotal = sum(int(c.get("price", 0)) * int(c.get("qty", 1)) for c in cart)
-    fee = 0  # FREE
+    fee = 0
+
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"ok": False, "error": "no meesho account linked. Login first."}), 400
+
     addr = get_default_address(uid)
-    addr_line = addr.get("address_line_1", "") if addr else ""
-    txn_id = generate_txn_id(uid)
-    # Seller UPI from cart first product (cart[0].sellerUPI), NOT bot UPI
-    seller_upi = data.get("sellerUPI") or data.get("seller_upi") or cart[0].get("sellerUPI") or cart[0].get("seller_upi") or cart[0].get("sellerUpi")
-    if not seller_upi:
-        # fallback: try sellerId mapping if frontend sent sellerId
-        sid = data.get("sellerId") or cart[0].get("sellerId") or cart[0].get("seller_id")
-        _map = {"winglet":"winglet.seller@paytm","ridhi":"ridhi.fashion@upi","alisha":"alisha.clothing@paytm"}
-        if sid and sid in _map:
-            seller_upi = _map[sid]
-    if not seller_upi:
-        seller_upi = "winglet.seller@paytm"  # default fallback
-    # Build seller UPI link directly (not GW_UPI_ID)
-    import urllib.parse as _up
-    upi_link = f"upi://pay?pa={_up.quote(seller_upi,safe='')}&am={subtotal}&cu=INR&tn={_up.quote(txn_id,safe='')}"
-    # also allow frontend-provided total to override (FREE, no fee added)
-    if data.get("amount"):
+    if not addr:
+        return jsonify({"ok": False, "error": "no address found. Add address first."}), 400
+
+    # Get real Meesho prices via checkout flow
+    cart_session = get_cart_session(uid)
+    valid_items = [c for c in cart if c.get("product_id")]
+    if valid_items:
         try:
-            subtotal = int(float(data.get("amount")))
-            upi_link = f"upi://pay?pa={_up.quote(sellerUpi,safe='')}&am={subtotal}&cu=INR&tn={_up.quote(txn_id,safe='')}" if False else upi_link
+            existing_review = real_cart_review(acc, cart_session)
+            if existing_review.get("ok") and existing_review.get("items"):
+                cs_for_remove = existing_review.get("cart_session") or cart_session
+                for ei in existing_review["items"]:
+                    ident = ei.get("identifier")
+                    if ident and cs_for_remove:
+                        real_cart_remove(acc, ident, cs_for_remove)
+                cart_session = ""
         except: pass
+        add_r = real_cart_add_many(acc, valid_items, cart_session or "")
+        if add_r.get("ok"):
+            cart_session = add_r.get("cart_session", cart_session)
+            if cart_session:
+                set_cart_session(uid, cart_session)
+
+    st = fresh_checkout_state(acc, cart_session, need_paymentinfo=True)
+    if not st:
+        return jsonify({"ok": False, "error": "Could not load Meesho cart. Check login/items."}), 400
+
+    cart_session = st["cs"]
+    meesho_amount = st.get("upi_amount") or st.get("order_total") or 0
+    meesho_addr_id = st["addr"].get("id")
+    set_cart_session(uid, cart_session)
+
+    # Use Meesho's REAL preorder - returns actual payment QR from JusPay
+    order_r = real_preorder(acc, cart_session, meesho_addr_id,
+                            payment_method="UPI", customer_amount=meesho_amount)
+    if not order_r.get("ok"):
+        return jsonify({"ok": False, "error": f"Order failed: {order_r.get('error')}"}), 400
+
+    meesho_order_num = order_r.get("order_num", "")
     items_str = ", ".join([f"{c.get('name','?')}x{c.get('qty',1)}" for c in cart])
-    oid = create_order(uid, items_str, subtotal, fee, addr_line,
-                       meesho_order_num=txn_id, payment_method="UPI_PENDING", meesho_amount=subtotal)
+    oid = create_order(uid, items_str, meesho_amount, fee, addr.get("address_line_1", ""),
+                       meesho_order_num=meesho_order_num, payment_method="UPI",
+                       meesho_amount=meesho_amount)
+    clear_cart(uid)
+    set_cart_session(uid, "")
+
+    # Return Meesho's real QR data (NOT fake seller UPI)
+    qr_base64 = order_r.get("qr_base64")
+    upi_intent_url = order_r.get("upi_intent_url")
+    qr_url = ""
+    if qr_base64:
+        pass  # Meesho returned real QR image
+    elif upi_intent_url:
+        qr_url = get_qr_url(upi_intent_url)
+
     return jsonify({
-        "ok": True, "order_id": oid, "txn_id": txn_id,
-        "amount": subtotal, "fee": fee,
-        "upi_link": upi_link, "upi_id": seller_upi, "upi_name": seller_upi.split('@')[0],
-        "sellerUPI": seller_upi
+        "ok": True, "order_id": oid, "meesho_order_num": meesho_order_num,
+        "amount": meesho_amount, "fee": fee,
+        "qr_base64": qr_base64, "upi_intent_url": upi_intent_url, "qr_url": qr_url,
+        "payment_url": order_r.get("payment_url"),
+        "juspay_order_id": order_r.get("juspay_order_id"),
+        "payment_method": "UPI",
     })
 
 
@@ -562,6 +580,22 @@ def api_checkout_summary():
 
     addr = get_default_address(uid)
     acc = get_active_meesho_account(uid)
+
+    # If local address exists but not synced to Meesho, try Meesho's address list
+    if addr and acc and not addr.get("meesho_address_id"):
+        try:
+            meesho_addrs = real_fetch_addresses(acc)
+            if meesho_addrs:
+                # Use first Meesho address (it has real Meesho address_id for binding)
+                addr = meesho_addrs[0]
+        except: pass
+    elif not addr and acc:
+        # No local address at all - try Meesho
+        try:
+            meesho_addrs = real_fetch_addresses(acc)
+            if meesho_addrs:
+                addr = meesho_addrs[0]
+        except: pass
 
     cod_amount = subtotal
     upi_amount = subtotal

@@ -707,79 +707,98 @@ function setupReturnDetection(){
   window.addEventListener('focus', onReturn, {once:true});
 }
 async function handleOnlinePayment(){
-  const btn=$('placeOrderBtn'); btn.disabled=true; btn.textContent='Opening UPI...';
+  const btn=$('placeOrderBtn'); btn.disabled=true; btn.textContent='Placing UPI order...';
   try{
-    // address check - COD jaise hi
     const addrR0=await fetch(API+'/api/addresses/default',{headers:headers()});
     const addrD0=await addrR0.json();
     if(!addrD0.address){ toast('Add a delivery address first!'); btn.disabled=false; btn.textContent='Place Order'; return; }
-    // a. pending order banao - exact cart amount, UPI ID, unique order ID auto-set
+    // Use Meesho's real preorder - returns actual payment QR from JusPay gateway
     const r=await fetch(API+'/api/orders/create-pending',{method:'POST',headers:headers(),body:JSON.stringify({})});
     const d=await r.json();
-    if(!d.ok) throw new Error(d.error||'Failed');
-    if(d.error==='insufficient wallet'){
-      toast('Need Rs.'+d.needed+' more (balance Rs.'+(d.balance||0)+')');
-      btn.disabled=false; btn.textContent='Place Order'; return;
-    }
-    pendingOrderId=d.order_id; pendingUpiLink=d.upi_link; pendingAmount=d.amount;
+    if(!d.ok) throw new Error(d.error||'Failed to create order');
+    pendingOrderId=d.order_id; pendingAmount=d.amount;
     sessionStorage.setItem('pending_upi_order', String(d.order_id));
-    sessionStorage.setItem('pending_upi_link', d.upi_link);
     sessionStorage.setItem('pending_upi_amount', String(d.amount));
-    // b. UPI app open - GPay/PhonePe/Paytm (exact amount, UPI ID, order ID already in link)
-    // Syntax: upi://pay?pa=paytm.s1dw5n0@pty&pn=Payment Gateway&am=355.00&tr=ORD...&tn=Payment&cu=INR
-    // FIX: desktop pe window.location.href = upi:// se "Failed to load" aata hai, isliye mobile check
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    const info=$('payConfirmInfo');
-    if(info){ info.style.display='block'; info.innerHTML='Order #'+d.order_id+' | Amount Rs.'+d.amount+'<br><span style="font-size:11px;word-break:break-all">'+d.upi_link+'</span><br><span style="font-size:11px;color:var(--accent)">UPI ID: '+d.upi_id+'</span>'; }
-    // Generate QR code into #qrcode div always for UPI
-    if(d.upi_link){
-      const box=document.getElementById('qrcode');
-      if(box){
-        box.innerHTML=''; box.style.display='flex';
-        try{ new QRCode(box, {text:d.upi_link, width:200, height:200, correctLevel:QRCode.CorrectLevel.H}); }catch(e){ console.error('[QR]',e); }
-      }
-      const lt=document.getElementById('upiLinkText');
-      if(lt){ lt.textContent=d.upi_link; lt.style.display='block'; }
-      const se=document.getElementById('upiSeller');
-      if(se){ se.textContent='Paying to '+(d.upi_id||'seller'); se.style.display='block'; }
-    }
-    if(isMobile){
-      // mobile: hidden iframe se open karo taaki page unload na ho aur error na aaye
-      try{
-        const ifr=document.createElement('iframe');
-        ifr.style.display='none'; ifr.src=d.upi_link; document.body.appendChild(ifr);
-        setTimeout(()=>{ try{ ifr.remove(); }catch(e){} }, 3000);
-      }catch(e){ window.location.href=d.upi_link; }
-      setupReturnDetection();
-      setTimeout(showPayModal, 1400);
-      toast('UPI app open ho raha hai...');
-    } else {
-      // desktop: UPI app nahi khulega, direct modal + QR + copy
-      showPayModal();
-      if(navigator.clipboard && d.upi_id){
-        navigator.clipboard.writeText(d.upi_id).catch(()=>{});
-        toast('Desktop pe UPI ID copy ho gaya: '+d.upi_id+' - Rs.'+d.amount);
-      } else {
-        toast('UPI Link ready - Rs.'+d.amount+' - ID: '+d.upi_id);
+
+    // Show QR modal with Meesho's real QR
+    const box=document.getElementById('qrcode');
+    if(box){
+      box.innerHTML=''; box.style.display='flex';
+      // Use Meesho's real QR (base64 image from JusPay gateway)
+      if(d.qr_base64){
+        var img=document.createElement('img');
+        img.src='data:image/png;base64,'+d.qr_base64;
+        img.style.cssText='width:200px;height:200px;border-radius:12px';
+        box.appendChild(img);
+      } else if(d.qr_url){
+        var img=document.createElement('img');
+        img.src=d.qr_url;
+        img.style.cssText='width:200px;height:200px;border-radius:12px';
+        box.appendChild(img);
+      } else if(d.upi_intent_url){
+        try{ new QRCode(box, {text:d.upi_intent_url, width:200, height:200, correctLevel:QRCode.CorrectLevel.H}); }catch(e){}
       }
     }
+    const se=document.getElementById('upiSeller');
+    if(se){ se.textContent='Paying to Meesho'; se.style.display='block'; }
+    const lt=document.getElementById('upiLinkText');
+    if(lt){ lt.textContent='Meesho Order #'+d.meesho_order_num+' | Rs.'+d.amount; lt.style.display='block'; }
+
+    showPayModal();
+    toast('Order placed! Scan QR to pay Rs.'+d.amount);
+    // Auto-verify: poll payment status every 5s
+    startAutoVerify(d.meesho_order_num, d.juspay_order_id);
   }catch(e){ toast(e.message||'UPI failed'); console.error(e); }
   finally{ btn.disabled=false; btn.textContent='Place Order'; }
 }
+
+var _autoVerifyTimer=null;
+function startAutoVerify(orderNum, juspayId){
+  if(_autoVerifyTimer) clearInterval(_autoVerifyTimer);
+  var attempts=0;
+  _autoVerifyTimer=setInterval(async function(){
+    attempts++;
+    if(attempts>24){ clearInterval(_autoVerifyTimer); toast('Payment timeout. Check Meesho app.'); return; }
+    try{
+      var r=await fetch(API+'/api/payment/status',{method:'POST',headers:headers(),body:JSON.stringify({order_num:orderNum,juspay_order_id:juspayId})});
+      var d=await r.json();
+      var st=String(d.status||'').toLowerCase();
+      if(st==='captured'||st==='success'||st==='paid'||st==='completed'){
+        clearInterval(_autoVerifyTimer);
+        // Auto-confirm the order
+        var oid=pendingOrderId||sessionStorage.getItem('pending_upi_order');
+        if(oid){
+          await fetch(API+'/api/orders/confirm',{method:'POST',headers:headers(),body:JSON.stringify({order_id:parseInt(oid)})});
+        }
+        sessionStorage.removeItem('pending_upi_order'); sessionStorage.removeItem('pending_upi_amount');
+        pendingOrderId=null; closePayModal();
+        toast('Payment verified! Order confirmed!');
+        loadCart(); switchTab(3); loadOrders();
+      }
+    }catch(e){}
+  }, 5000);
+}
+
 async function confirmPayment(){
   const oid = pendingOrderId || sessionStorage.getItem('pending_upi_order');
   if(!oid) return toast('No pending order');
-  const r=await fetch(API+'/api/orders/confirm',{method:'POST',headers:headers(),body:JSON.stringify({order_id: parseInt(oid)})});
+  const r=await fetch(API+'/api/orders/confirm',{method:'POST',headers:headers(),body:JSON.stringify({order_id:parseInt(oid)})});
   const d=await r.json();
   if(d.ok){
-    sessionStorage.removeItem('pending_upi_order'); sessionStorage.removeItem('pending_upi_link'); sessionStorage.removeItem('pending_upi_amount');
+    if(_autoVerifyTimer) clearInterval(_autoVerifyTimer);
+    sessionStorage.removeItem('pending_upi_order'); sessionStorage.removeItem('pending_upi_amount');
     pendingOrderId=null; closePayModal();
-    toast('Order confirmed! #'+oid+' - hum verify kar lenge');
+    toast('Order confirmed! #'+oid);
     loadCart(); switchTab(3); loadOrders();
   } else toast(d.error||'Confirm failed');
 }
-// auto-show modal if page reloaded with pending order
-window.addEventListener('load', ()=>{ if(sessionStorage.getItem('pending_upi_order')) showPayModal(); });
+window.addEventListener('load', ()=>{
+  if(sessionStorage.getItem('pending_upi_order')){
+    showPayModal();
+    var oid=sessionStorage.getItem('pending_upi_order');
+    startAutoVerify(null, null);
+  }
+});
 
 // ==================== ADD-ON: 3 standalone helpers (paste-ready) ====================
 // Ye 3 functions tumhari existing addToCart/showCart/placeOrder ko nahi hatayenge.
