@@ -1200,59 +1200,99 @@ function showQRModal(qrBase64,upiUrl,qrUrl){
 
 async function loadOrders(){
   try{
-    var list=[];
-    // 1. Try local DB orders
+    var localList=[], meeshoList=[];
+    // 1. Local DB orders
     try{
       var r=await fetch(API+'/api/orders',{headers:headers()});
       var orders=await r.json();
-      if(Array.isArray(orders))list=orders;
-    }catch(e){}
-    // 2. Fallback: fetch real Meesho orders from Meesho account
-    if(!list.length){
-      try{
-        var mr=await fetch(API+'/api/meesho/orders/live?limit=15',{headers:headers()});
-        var md=await mr.json();
-        if(md.ok&&md.orders&&md.orders.length){
-          list=md.orders.map(function(o){
-            var statusMap={'Ordered':'pending','Packed':'confirmed','Shipped':'shipped','Delivered':'delivered','Cancelled':'cancelled','Returned':'cancelled'};
-            var st=String(o.sub_order_status||o.order_status||'').toLowerCase();
-            var mapped=Object.keys(statusMap).find(function(k){return k.toLowerCase()===st});
-            var status=mapped?statusMap[mapped]:'pending';
-            var prods=o.product_details||o.products||[];
-            var total=o.order_total||o.total||0;
-            var pay=o.payment_method||'COD';
-            var created=o.sub_order_created||o.created_at||'';
-            return {id:o.sub_order_id||o.order_num||'',status:status,items:prods,created_at:created,total:total,meesho_order_num:o.order_num||'',payment_method:pay,meesho_amount:total,_source:'meesho'};
+      if(Array.isArray(orders)) localList=orders;
+    }catch(e){ console.warn("[ORDERS] local fetch failed", e); }
+    // 2. Always try real Meesho orders (like real Meesho MY ORDERS - shows Cancelled too)
+    try{
+      var mr=await fetch(API+'/api/meesho/orders/live?limit=20',{headers:headers()});
+      var md=await mr.json();
+      // backend now always returns 200 with orders array even if no account
+      var rawOrders = md.orders || md.sub_order_list || md.data || [];
+      if(Array.isArray(rawOrders) && rawOrders.length){
+        meeshoList=rawOrders.map(function(o){
+          // Meesho real shape: sub_order_status can be string "Order Cancelled" or numeric, handle both
+          var rawSt = o.sub_order_status ?? o.order_status ?? o.status ?? "";
+          var st = String(rawSt).toLowerCase().replace(/_/g," ").trim();
+          var statusMap={
+            'ordered':'pending','placed':'pending','confirmed':'confirmed','packed':'confirmed',
+            'shipped':'shipped','out for delivery':'shipped','delivered':'delivered',
+            'cancelled':'cancelled','order cancelled':'cancelled','canceled':'cancelled','returned':'cancelled','refunded':'cancelled',
+            '0':'pending','1':'pending','2':'confirmed','3':'shipped','4':'delivered','5':'cancelled','6':'cancelled'
+          };
+          var status = statusMap[st] || (st.includes("cancel")?'cancelled': st.includes("deliver")?'delivered': st.includes("ship")?'shipped':'pending');
+          // cancelled amount/refund info
+          var total=o.order_total||o.total||o.payable_amount||o.final_amount||0;
+          var refund = o.refund_amount || o.refund || "";
+          // size/qty from first product
+          var prods=o.product_details||o.products||o.items||[];
+          // enhance items with size/qty if available
+          prods = prods.map(function(p){
+            // p may already have product_name etc
+            return p;
           });
-        }
-      }catch(e2){}
-    }
-    if(!list.length){$('orderList').innerHTML='<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><p>No orders yet</p></div>';return}
+          var pay=o.payment_method||o.payment_type||'COD';
+          var created=o.sub_order_created||o.created_at||o.order_date||o.date||'';
+          // image for cancelled card
+          var img = (prods[0] && (prods[0].product_image || prods[0].image || prods[0].thumbnail)) || "";
+          return {id:o.sub_order_id||o.order_id||o.order_num||o.id||'',status:status,rawStatus:rawSt,items:prods,created_at:created,total:total,refund:refund,meesho_order_num:o.order_num||'',payment_method:pay,meesho_amount:total,img:img,_source:'meesho',_raw:o};
+        });
+      }
+    }catch(e2){ console.warn("[ORDERS] meesho fetch failed", e2); }
+    // Merge: meesho first (like real app), then local, dedupe by id
+    var list = [].concat(meeshoList).concat(localList);
+    // dedupe
+    var seen={}; list=list.filter(function(o){ var k=String(o.id||o.order_id); if(!k||seen[k]) return false; seen[k]=1; return true; });
+    if(!list.length){$('orderList').innerHTML='<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><p>No orders yet</p><div style="font-size:11px;color:var(--text3);margin-top:6px">Meesho cancelled orders bhi yahan ayenge jab account login hoga</div></div>';return}
     $('orderList').innerHTML=list.map(function(o){
       var oid=o.id||o.order_id||'';
       var status=(o.status||'pending').toLowerCase();
       var items=o.items||[];
       var date=o.created_at||'';
       var total=o.total||0;
+      var refund=o.refund||'';
       var meeshoNum=o.meesho_order_num||'';
       var payMethod=o.payment_method||'COD';
       var meeshoAmt=o.meesho_amount||0;
+      var img=o.img|| (items[0] && (items[0].product_image||items[0].image)) || "";
+      var isCancelled = status==='cancelled';
+      var statusLabel = isCancelled ? 'Order Cancelled' : status.charAt(0).toUpperCase()+status.slice(1);
+      if(isCancelled && refund) statusLabel += ' • ₹'+refund+' refunded';
+      else if(isCancelled && total) statusLabel = 'Order Cancelled • ₹'+total;
       var steps=['pending','confirmed','shipped','delivered'];
       var stepLabels=['Pending','Confirmed','Shipped','Delivered'];
       var stepIcons=['&#9203;','&#128230;','&#128666;','&#9989;'];
-      var currentIdx=steps.indexOf(status);if(currentIdx===-1)currentIdx=0;
-      var timelineHtml=steps.map(function(s,i){
-        var cls=i<currentIdx?'done':i===currentIdx?'active':'';
-        var lineCls=i<currentIdx?'done':'';
-        var isLast=i===steps.length-1;
-        return '<div class="step '+cls+'"><div class="dot">'+stepIcons[i]+'</div><div class="lbl">'+stepLabels[i]+'</div></div>'+(isLast?'':'<div class="line '+lineCls+'"></div>');
-      }).join('');
+      var currentIdx=steps.indexOf(status);if(currentIdx===-1)currentIdx = isCancelled ? -1 : 0;
+      var timelineHtml='';
+      if(isCancelled){
+        timelineHtml='<div style="margin-top:8px;padding:6px 8px;background:#fdecea;border-radius:8px;font-size:11px;color:#c0392b;text-align:center">❌ Cancelled'+(refund?' • Refunded':'')+'</div>';
+      }else{
+        timelineHtml='<div class="timeline">'+steps.map(function(s,i){
+          var cls=i<currentIdx?'done':i===currentIdx?'active':'';
+          var lineCls=i<currentIdx?'done':'';
+          var isLast=i===steps.length-1;
+          return '<div class="step '+cls+'"><div class="dot">'+stepIcons[i]+'</div><div class="lbl">'+stepLabels[i]+'</div></div>'+(isLast?'':'<div class="line '+lineCls+'"></div>');
+        }).join('')+'</div>';
+      }
       var srcBadge=o._source==='meesho'?'<span style="font-size:9px;background:#e8f5e9;color:#27ae60;padding:2px 6px;border-radius:4px;margin-left:6px">Meesho</span>':'';
       var extra=meeshoNum?'<div class="oi">Meesho #'+meeshoNum+' | '+payMethod+(meeshoAmt?' | Rs.'+meeshoAmt:'')+'</div>':'';
-      var itemNames=items.map(function(p){return p.product_name||p.name||p.title||'Item'}).join(', ');
-      return '<div class="order-card fade-up"><div class="oh"><h4>Order #'+String(oid).slice(-8)+'</h4><span class="badge '+status+'">'+status+'</span>'+srcBadge+'</div><div class="oi">'+(itemNames||items.length+' item(s)')+' | '+date+'</div>'+extra+'<div class="ot">Rs.'+total+'</div><div class="timeline">'+timelineHtml+'</div></div>';
+      // product thumb + size/qty like real Meesho My Orders (Size: Free Size • Qty:1)
+      var firstProd = items[0] || {};
+      var sizeStr = firstProd.variation || firstProd.size || firstProd.selected_size || firstProd.attributes || "";
+      var qtyStr = firstProd.quantity || firstProd.qty || 1;
+      // try to get Size from product details if top-level
+      if(!sizeStr && o._raw){ sizeStr = o._raw.size || o._raw.variation || ""; }
+      var metaLine = '';
+      if(sizeStr || qtyStr){ metaLine='<div class="oi" style="font-size:11px;color:var(--text3)">Size: '+(sizeStr||'Free Size')+' • Qty: '+qtyStr+'</div>'; }
+      var itemNames=items.map(function(p){return p.product_name||p.name||p.title||p.product_title||'Item'}).join(', ');
+      var thumb = img ? '<img src="'+img+'" style="width:48px;height:48px;border-radius:8px;object-fit:cover;background:#f0f0f0" onerror="this.style.display=\'none\'">' : '';
+      return '<div class="order-card fade-up"><div class="oh" style="gap:8px">'+thumb+'<div style="flex:1"><h4>Order #'+String(oid).slice(-8)+'</h4><div style="font-size:11px;color:var(--text2);margin-top:2px">'+statusLabel+'</div></div><span class="badge '+status+'">'+status+'</span>'+srcBadge+'</div><div class="oi">'+(itemNames||items.length+' item(s)')+' | '+date+'</div>'+metaLine+extra+'<div class="ot">Rs.'+total+'</div>'+timelineHtml+'</div>';
     }).join('');
-  }catch(e){$('orderList').innerHTML='<div class="empty"><p>Failed to load orders</p></div>'}
+  }catch(e){ console.error("[ORDERS] fatal",e); $('orderList').innerHTML='<div class="empty"><p>Failed to load orders</p><div style="font-size:11px;color:var(--text3);margin-top:4px">'+(e.message||'error')+'</div></div>'; }
 }
 
 async function loadAccount(){

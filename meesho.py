@@ -1288,16 +1288,33 @@ def real_payments_user_details(acc, cart_session):
         return {"ok": False, "error": str(e)}
 
 def real_user_orders(acc, limit=10, cursor=None):
-    """POST /api/3.0/user/orders - real Meesho orders sync"""
-    body = {"limit": limit, "cursor": cursor, "query": None, "filters": {"sub_order_status": [0], "sub_order_created": None}, "user_id": _acc_uid(acc)}
-    try:
-        with httpx.Client(timeout=12.0) as client:
-            resp = client.post(f"{MEESHO_API}/3.0/user/orders", headers=logged_in_headers(acc), json=body)
-            data = resp.json() or {}
-            lst = data.get("sub_order_list") or data.get("orders") or []
-            return {"ok": resp.status_code==200, "orders": lst, "pagination": data.get("pagination"), "raw": data}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    """POST /api/3.0/user/orders - real Meesho orders sync (includes Cancelled)"""
+    # Try multiple filter combos - real app shows Cancelled too, so [0] alone is too narrow
+    bodies = [
+        {"limit": limit, "cursor": cursor, "query": None, "filters": {"sub_order_status": [], "sub_order_created": None}, "user_id": _acc_uid(acc)},
+        {"limit": limit, "cursor": cursor, "query": None, "filters": {"sub_order_status": [0,1,2,3,4,5,6,7,8,9], "sub_order_created": None}, "user_id": _acc_uid(acc)},
+        {"limit": limit, "cursor": cursor, "query": None, "filters": {"sub_order_status": [0], "sub_order_created": None}, "user_id": _acc_uid(acc)},
+        {"limit": limit, "cursor": cursor, "user_id": _acc_uid(acc)},
+    ]
+    last = {"ok": False, "error": "no data"}
+    for body in bodies:
+        try:
+            with httpx.Client(timeout=12.0) as client:
+                resp = client.post(f"{MEESHO_API}/3.0/user/orders", headers=logged_in_headers(acc), json=body)
+                data = resp.json() or {}
+                lst = data.get("sub_order_list") or data.get("orders") or data.get("data") or []
+                # If API returns success but empty, try next filter
+                if resp.status_code == 200 and lst:
+                    return {"ok": True, "orders": lst, "pagination": data.get("pagination"), "raw": data}
+                # Also accept empty but ok response on first try (for fallback)
+                if resp.status_code == 200:
+                    last = {"ok": True, "orders": lst, "pagination": data.get("pagination"), "raw": data}
+                else:
+                    last = {"ok": False, "error": data.get("error_type") or f"HTTP {resp.status_code}", "raw": data}
+        except Exception as e:
+            last = {"ok": False, "error": str(e)}
+            continue
+    return last
 
 def real_product_recommendations(acc, catalog_id, product_id, sub_sub_category_id=3354, limit=20):
     """POST /api/1.0/catalogs/recommendations"""

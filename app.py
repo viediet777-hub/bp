@@ -1521,9 +1521,10 @@ def api_meesho_orders_live():
     uid = get_uid()
     acc = get_active_meesho_account(uid)
     if not acc:
-        return jsonify({"ok": False, "error": "no account"}), 400
-    # Meesho ke asli orders - har login account ka alag aayega
-    limit = request.args.get("limit", 10, type=int)
+        # No account -> return empty but 200 so frontend doesn't show Failed
+        return jsonify({"ok": True, "orders": [], "reason": "no account"})
+    # Meesho ke asli orders - har login account ka alag aayega (Cancelled bhi)
+    limit = request.args.get("limit", 20, type=int)
     r = real_user_orders(acc, limit=limit)
     return jsonify(r)
 
