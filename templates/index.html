@@ -181,17 +181,22 @@ input,button{font-family:inherit;outline:none;border:none}
     <div class="cart-item fade-up" style="flex-direction:column;gap:8px">
       <div style="font-size:14px;font-weight:700">Payment Method</div>
       <div style="display:flex;gap:8px">
-        <div class="size-chip selected" id="payCOD" onclick="selectPay('COD')" style="flex:1;text-align:center">💰 Cash on Delivery</div>
-        <div class="size-chip" id="payUPI" onclick="selectPay('UPI')" style="flex:1;text-align:center">📱 Pay Online (UPI)</div>
+        <div class="size-chip selected" id="payCOD" onclick="selectPay('COD')" style="flex:1;text-align:center;padding:10px 6px;line-height:1.2">💰 Cash on Delivery<br><span style="font-size:11px;font-weight:800" id="payCODAmt">Rs.0</span></div>
+        <div class="size-chip" id="payUPI" onclick="selectPay('UPI')" style="flex:1;text-align:center;padding:10px 6px;line-height:1.2">📱 Pay Online (UPI)<br><span style="font-size:11px;font-weight:800" id="payUPIAmt">Rs.0</span><span id="payUPISave" style="display:none;background:#D3F4EA;color:#038D63;padding:1px 6px;border-radius:6px;font-size:9px;margin-left:4px;font-weight:700"></span></div>
       </div>
       <div id="payDetail" style="font-size:12px;color:var(--text2);margin-top:4px"></div>
     </div>
     <div class="cart-item fade-up" style="flex-direction:column;gap:4px">
-      <div style="display:flex;justify-content:space-between;font-size:13px"><span>Subtotal</span><span id="ckSubtotal">Rs.0</span></div>
+      <div style="font-size:14px;font-weight:700;margin-bottom:6px">Price Details (<span id="ckItemCount">1</span> Items)</div>
+      <div style="display:flex;justify-content:space-between;font-size:13px"><span>Product Price</span><span id="ckProductPrice">Rs.0</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:#038D63"><span>Total Discounts</span><span id="ckDiscounts">- Rs.0</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px"><span>Additional Fees</span><span id="ckFees">+ Rs.0</span></div>
+      <div style="display:none;justify-content:space-between;font-size:13px" id="ckSubtotalRow"><span>Subtotal</span><span id="ckSubtotal">Rs.0</span></div>
       <div id="ckFeeRow" style="display:none;justify-content:space-between;font-size:13px"><span>Order Fee</span><span id="ckFee">Rs.0</span></div>
       <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--green);display:none" id="ckFreeRow"><span>FREE Mode</span><span>- Rs.5</span></div>
       <div style="border-top:1px dashed var(--border);margin:6px 0"></div>
-      <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:800"><span>Total</span><span id="ckTotal" style="color:var(--accent)">Rs.0</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:800"><span>Order Total</span><span id="ckTotal" style="color:var(--accent)">Rs.0</span></div>
+      <div id="ckDiscountBanner" style="display:none;margin-top:8px;background:#D3F4EA;color:#038D63;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;text-align:center"></div>
       <div id="ckMeeshoPrice" style="font-size:11px;color:var(--text3);margin-top:2px"></div>
       <div id="ckBalance" style="font-size:11px;color:var(--text3)"></div>
     </div>
@@ -804,6 +809,17 @@ function renderCart(items){
   // Checkout totals ka immediate fallback - API fail bhi ho to Rs.0 nahi dikhega
   $('ckSubtotal').textContent='Rs.'+total;
   $('ckTotal').textContent='Rs.'+total;
+  if($('ckProductPrice')) $('ckProductPrice').textContent='+ Rs.'+total;
+  if($('ckDiscounts')) $('ckDiscounts').textContent='- Rs.0';
+  if($('ckFees')) $('ckFees').textContent='+ Rs.0';
+  if($('ckItemCount')) $('ckItemCount').textContent=items.length;
+  if($('payCODAmt')) $('payCODAmt').textContent='Rs.'+total;
+  if($('payUPIAmt')){
+    var _pre = total>=200?44:total>=60?28:total>=20?14:Math.max(1,Math.floor(total/2));
+    var _upi = Math.max(1, total-_pre);
+    $('payUPIAmt').textContent='Rs.'+_upi;
+    if($('payUPISave') && _pre>0){ $('payUPISave').textContent='Save ₹'+_pre; $('payUPISave').style.display='inline'; }
+  }
   $('ckMeeshoPrice').textContent='Local total: Rs.'+total;
   showEl('cartBottom',true);showEl('checkoutPanel',true);
   cartCount=items.length;updateCartBadge(items.length);
@@ -861,11 +877,50 @@ async function loadCheckoutSummary(){
       $('checkoutAddr').innerHTML='<span style="color:var(--accent2)">No address saved. </span><span style="color:var(--accent);cursor:pointer" onclick="openAddAddress()">Add one now</span>';
     }
     // subtotal = local sum (reference), but real payable is cod/upi from Meesho
-    // fee is backend-only (Rs.5 wallet deduction per order in paid mode) - NOT added to total
     var realCod = d.cod_amount||d.subtotal||0;
     var realUpi = d.upi_amount||d.subtotal||0;
+    var prepaid = d.prepaid_discount || (realCod - realUpi) || 0;
+    if(prepaid<0) prepaid=Math.abs(prepaid);
     var isRealPrice = !!(d.payinfo_ok || realCod !== d.subtotal);
-    $('ckSubtotal').textContent='Rs.'+ (isRealPrice ? realCod : (d.subtotal||0));
+    // Price Details - Product Price / Discounts / Fees (real screenshot logic)
+    var prodPrice = d.product_price || d.subtotal || realCod;
+    var totDisc = d.total_discounts;
+    var addFees = d.additional_fees || 0;
+    // fallback if backend didn't send breakdown
+    if(totDisc===undefined || totDisc===null){
+      totDisc = realCod - realUpi >0 ? -(realCod - realUpi) : 0;
+      if(prepaid>0 && totDisc===0) totDisc = -prepaid;
+    }
+    var itemCount = (d.items && d.items.length) || 1;
+    if($('ckItemCount')) $('ckItemCount').textContent=itemCount;
+    $('ckSubtotal').textContent='Rs.'+ (d.subtotal||0);
+    if($('ckProductPrice')) $('ckProductPrice').textContent='+ Rs.'+prodPrice;
+    if($('ckDiscounts')) $('ckDiscounts').textContent=(totDisc<0?'- Rs.'+Math.abs(totDisc):'- Rs.0');
+    if($('ckFees')) $('ckFees').textContent='+ Rs.'+(addFees||0);
+    // Update payment chips with amounts (like real Meesho: 250 | COD, 206 | Pay Online)
+    if($('payCODAmt')) $('payCODAmt').textContent='Rs.'+realCod;
+    if($('payUPIAmt')) $('payUPIAmt').textContent='Rs.'+realUpi;
+    if($('payUPISave')){
+      if(prepaid>0 && realUpi < realCod){ $('payUPISave').textContent='Save ₹'+prepaid; $('payUPISave').style.display='inline'; }
+      else { $('payUPISave').style.display='none'; }
+    }
+    // Discount banner like "Yay! Your total discount is ₹82" / "Pay online & get EXTRA ₹28 off"
+    var banner=$('ckDiscountBanner');
+    if(banner){
+      if(prepaid>0){
+        if(selectedPayment==='UPI'){
+          banner.textContent='Yay! Your total discount is ₹'+Math.abs(totDisc||prepaid)+' (includes ₹'+prepaid+' prepaid)';
+        }else{
+          banner.textContent='Pay online & get EXTRA ₹'+prepaid+' off';
+        }
+        banner.style.display='block';
+      }else if(totDisc<0){
+        banner.textContent='Yay! Your total discount is ₹'+Math.abs(totDisc);
+        banner.style.display='block';
+      }else{
+        banner.style.display='none';
+      }
+    }
     // Fee row: show hint, never added to ckTotal
     if(d.fee>0){
       $('ckFee').textContent='Rs.'+d.fee+' (wallet)';
