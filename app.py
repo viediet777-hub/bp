@@ -11,7 +11,7 @@ from database import (
     get_user, create_user, update_user, delete_user, add_wallet, deduct_wallet,
     get_products, get_product, add_product, update_stock,
     get_cart, add_to_cart, update_cart_qty, clear_cart,
-    create_order, get_orders, get_order,
+    create_order, get_orders, get_order, update_order_status,
     create_wallet_tx, get_wallet_tx,
     save_meesho_account, get_meesho_accounts, get_active_meesho_account,
     delete_meesho_account, update_meesho_xo,
@@ -410,6 +410,57 @@ def api_place_order():
         "qr_url": qr_url,
         "payment_url": order_r.get("payment_url"),
     })
+
+
+# ── ONLINE PAYMENT (Direct UPI Intent, no gateway/QR) ─────────────────
+# COD already works via /api/orders/place (real Meesho). This is the manual
+# UPI flow: create pending -> open upi://pay -> user pays -> "Maine pay kiya" -> confirm.
+
+@app.route("/api/orders/create-pending", methods=["POST"])
+def api_create_pending():
+    uid = get_uid()
+    user = get_user(uid)
+    cart = get_cart(uid)
+    if not cart:
+        return jsonify({"ok": False, "error": "cart empty"}), 400
+    data = request.json or {}
+    # amount = exact cart total (fee is NOT mixed into product price)
+    subtotal = sum(int(c.get("price", 0)) * int(c.get("qty", 1)) for c in cart)
+    user_mode = get_global_mode()
+    fee = 0 if user_mode == "free" else ORDER_FEE  # showcase only, per-order wallet cut
+    w = (user.get("wallet", 0) if user else 0)
+    if user_mode == "paid" and w < fee:
+        return jsonify({"ok": False, "error": "insufficient wallet", "needed": fee - w, "balance": w}), 400
+    if fee:
+        deduct_wallet(uid, fee)
+    addr = get_default_address(uid)
+    addr_line = addr.get("address_line_1", "") if addr else ""
+    txn_id = generate_txn_id(uid)  # gateway.py:9 unique ORDER_ID
+    # UPI link with exact amount, UPI ID, order ID - gateway.py:13
+    upi_link = create_upi_link(txn_id, subtotal)
+    items_str = ", ".join([f"{c.get('name','?')}x{c.get('qty',1)}" for c in cart])
+    oid = create_order(uid, items_str, subtotal, fee, addr_line,
+                       meesho_order_num=txn_id, payment_method="UPI_PENDING", meesho_amount=subtotal)
+    return jsonify({
+        "ok": True, "order_id": oid, "txn_id": txn_id,
+        "amount": subtotal, "fee": fee,
+        "upi_link": upi_link, "upi_id": GW_UPI_ID, "upi_name": GW_UPI_NAME
+    })
+
+
+@app.route("/api/orders/confirm", methods=["POST"])
+def api_confirm_order():
+    uid = get_uid()
+    data = request.json or {}
+    oid = data.get("order_id")
+    if not oid:
+        return jsonify({"ok": False, "error": "order_id required"}), 400
+    # verify order belongs to user
+    ord_row = get_order(int(oid))
+    if not ord_row or int(ord_row.get("user_id", 0)) != int(uid):
+        return jsonify({"ok": False, "error": "order not found"}), 404
+    update_order_status(int(oid), "confirmed")
+    return jsonify({"ok": True, "order_id": oid, "status": "confirmed"})
 
 
 # ═══════════════════════════════════════════════════════════════
