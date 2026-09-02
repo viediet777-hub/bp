@@ -801,6 +801,10 @@ function renderCart(items){
     return '<div class="cart-item fade-up"><img src="'+c.image+'" alt=""><div class="cd"><h4>'+c.name+'</h4><div class="cp">Rs.'+sub+'</div><div class="qty-ctrl"><button onclick="updateQty(\''+cid+'\','+((c.qty||1)-1)+')">-</button><span>'+(c.qty||1)+'</span><button onclick="updateQty(\''+cid+'\','+((c.qty||1)+1)+')">+</button></div></div></div>';
   }).join('');
   $('cartTotal').textContent='Rs.'+total;
+  // Checkout totals ka immediate fallback - API fail bhi ho to Rs.0 nahi dikhega
+  $('ckSubtotal').textContent='Rs.'+total;
+  $('ckTotal').textContent='Rs.'+total;
+  $('ckMeeshoPrice').textContent='Local total: Rs.'+total;
   showEl('cartBottom',true);showEl('checkoutPanel',true);
   cartCount=items.length;updateCartBadge(items.length);
   // Show payment chips immediately, prices update async via loadCheckoutSummary
@@ -896,7 +900,11 @@ async function loadCheckoutSummary(){
     }
     // keep payDetail in sync
     updatePayDetail();
-  }catch(e){}
+  }catch(e){
+    console.warn("[CHECKOUT_SUMMARY] failed, keeping local totals", e);
+    // fallback already set in renderCart, bas payDetail update karo
+    try{ updatePayDetail(); }catch(_){}
+  }
 }
 
 async function updateQty(cid,qty){

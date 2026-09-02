@@ -577,6 +577,10 @@ def api_checkout_summary():
     subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
     fee = 0  # COMPLETELY FREE
     balance = user.get("wallet", 0) if user else 0
+    try:
+        user_mode = get_global_mode()
+    except Exception:
+        user_mode = "free"
 
     addr = get_default_address(uid)
     acc = get_active_meesho_account(uid)
