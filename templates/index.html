@@ -447,6 +447,17 @@ async function addToCart(productId, supplierId, quantity = 1){
   return { cart_session: data?.cart_session || cartSession, effective_total: effectiveTotal, raw: data };
 }
 
+// ==================== STEP 4: CART VIEW (REAL MEESHO) ====================
+async function getCart(){
+  const data = await meeshoAPI("/1.0/cart/minview", "GET");
+  const total_quantity = data?.total_quantity ?? data?.result?.total_quantity ?? 0;
+  const effective_total = data?.effective_total ?? data?.result?.effective_total ?? 0;
+  const items = data?.items ?? data?.result?.items ?? data?.splits ?? data?.result?.splits ?? [];
+  const cart_session = data?.cart_session ?? localStorage.getItem("meesho_cart_session") || null;
+  if(data?.cart_session) localStorage.setItem("meesho_cart_session", data.cart_session);
+  return { total_quantity, effective_total, items, cart_session, raw: data };
+}
+
 function headers(){return{'Content-Type':'application/json','X-User-Id':userId}}
 function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2200)}
 function showEl(id,v){document.getElementById(id).style.display=v?'block':'none'}
