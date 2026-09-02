@@ -1045,7 +1045,7 @@ def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True):
 
 def real_preorder(acc, cart_session, address_id, payment_method="COD",
                   customer_amount=None, payment_aggregator=None):
-    """Place real order via /api/4.0/preorders"""
+    """Place real order via /api/4.0/preorders. For UPI, also calls /api/juspay/txns to get actual QR."""
     is_upi = payment_method.upper() in ("UPI", "PREPAID")
     body = {
         "payment_method_type": payment_method.upper() if payment_method.upper() != "PREPAID" else "UPI",
@@ -1074,19 +1074,68 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
                                headers=logged_in_headers(acc), json=body)
             data = resp.json() or {}
             order_num = data.get("order_num")
+            juspay_params = data.get("juspay_transaction_params", {})
             qr_params = data.get("qr_transaction_params", {})
             if order_num:
-                return {
+                result = {
                     "ok": True,
                     "order_num": order_num,
-                    "juspay_order_id": data.get("juspay_order_id"),
+                    "juspay_order_id": data.get("juspay_order_id") or juspay_params.get("payload", {}).get("order_id"),
                     "qr_base64": qr_params.get("payload", {}).get("qr_base64_string"),
                     "upi_intent_url": qr_params.get("payload", {}).get("upi_intent_url"),
                     "payment_url": data.get("payment_url"),
+                    "client_auth_token": juspay_params.get("payload", {}).get("client_auth_token"),
                     "raw": data,
                 }
+                # For UPI: call JusPay txns API to get actual QR with MEESHOONLINEPG@ybl VPA
+                if is_upi and result["juspay_order_id"]:
+                    try:
+                        juspay_txns = real_juspay_txns(client, acc, result["juspay_order_id"])
+                        if juspay_txns.get("ok"):
+                            result["upi_intent_url"] = juspay_txns.get("upi_link") or result["upi_intent_url"]
+                            result["merchant_vpa"] = juspay_txns.get("merchant_vpa", "")
+                            result["merchant_name"] = juspay_txns.get("merchant_name", "")
+                            result["tr"] = juspay_txns.get("tr", "")
+                            print(f"[PREORDER] JusPay txns OK: vpa={juspay_txns.get('merchant_vpa')} tr={juspay_txns.get('tr')}", flush=True)
+                    except Exception as e:
+                        print(f"[PREORDER] JusPay txns failed: {e}", flush=True)
+                return result
             return {"ok": False, "error": data.get("error_type", "order_failed"),
                     "message": data.get("message", ""), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def real_juspay_txns(client, acc, juspay_order_id):
+    """Call /api/juspay/txns to generate UPI QR for a preorder.
+    Returns the actual UPI link with MEESHOONLINEPG@ybl VPA (Meesho's real payment UPI)."""
+    body = {
+        "order_id": juspay_order_id,
+        "merchant_id": "meesho",
+        "redirect_after_payment": True,
+        "format": "json",
+        "txnPayload": {
+            "payment_method_type": "UPI",
+            "payment_method": "UPI",
+            "txn_type": "UPI_QR",
+            "offers": "",
+            "sdk_params": True,
+        }
+    }
+    try:
+        resp = client.post(f"{MEESHO_API}/juspay/txns",
+                           headers=logged_in_headers(acc), json=body)
+        data = resp.json() or {}
+        sdk = data.get("payment", {}).get("sdk_params", {}) or data.get("sdk_params", {})
+        upi_link = sdk.get("pgIntentUrl", "")
+        merchant_vpa = sdk.get("merchant_vpa", "")
+        merchant_name = sdk.get("merchant_name", "")
+        amount = sdk.get("amount", "")
+        tr = sdk.get("tr", "")
+        if upi_link:
+            return {"ok": True, "upi_link": upi_link, "merchant_vpa": merchant_vpa,
+                    "merchant_name": merchant_name, "amount": amount, "tr": tr}
+        return {"ok": False, "error": "no_upi_link", "raw": data}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -1298,8 +1347,9 @@ __all__ = [
     "logged_in_headers", "real_cart_add", "real_cart_add_many", "real_cart_review",
     "real_cart_remove", "real_cart_clear", "real_cart_sync",
     "real_bind_address", "real_paymentinfo", "real_address_create",
-    "real_fetch_addresses", "real_preorder", "real_payment_status",
+    "real_fetch_addresses",     "real_preorder", "real_payment_status",
     "real_preorder_status", "real_payment_options", "fresh_checkout_state",
+    "real_juspay_txns",
     "real_cart_minview", "real_home_for_you", "real_home_fetch", "real_user_delivery_location",
     "real_wallet_list", "real_bnpl_eligibility", "real_offers_list", "real_payments_user_details",
     "real_user_orders", "real_product_recommendations",
