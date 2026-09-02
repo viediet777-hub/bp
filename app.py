@@ -30,6 +30,9 @@ from meesho import (
     real_bind_address, real_paymentinfo, real_address_create, real_fetch_addresses,
     real_preorder, real_payment_status, real_preorder_status, real_payment_options,
     fresh_checkout_state, roll_fod_sync,
+    real_cart_minview, real_home_for_you, real_home_fetch, real_user_delivery_location,
+    real_wallet_list, real_bnpl_eligibility, real_offers_list, real_payments_user_details,
+    real_user_orders, real_product_recommendations,
 )
 
 app = Flask(__name__)
@@ -1333,6 +1336,121 @@ def api_debug():
         results["internet"] = {"ok": False, "error": str(e)}
     
     return jsonify(results)
+
+
+# ═══════════════════════════════════════════════════════════════
+# LIVE MEESHO SYNC - har cheez jo login account se sync hoti hai
+# Ye saare tumhare diye Main Flow ke hisaab se hain - frontend inko call karke live data lega
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/meesho/sync")
+def api_meesho_sync():
+    """Full live sync: cart minview + addresses + orders + wallet + home - jo bhi account login hai usi se"""
+    uid = get_uid()
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"ok": False, "error": "no meesho account linked"}), 400
+    from meesho import _acc_uid
+    out = {"ok": True, "meesho_user_id": _acc_uid(acc), "phone": acc.get("phone")}
+    # 1. Cart minview (badge)
+    try:
+        out["cart_minview"] = real_cart_minview(acc)
+    except Exception as e:
+        out["cart_minview"] = {"ok": False, "error": str(e)}
+    # 2. Addresses live
+    try:
+        out["addresses_live"] = real_fetch_addresses(acc)
+    except Exception as e:
+        out["addresses_live"] = []
+    # 3. Orders live (Meesho ke asli orders)
+    try:
+        out["orders_live"] = real_user_orders(acc, limit=10)
+    except Exception as e:
+        out["orders_live"] = {"ok": False, "error": str(e)}
+    # 4. Wallet
+    try:
+        out["wallet_live"] = real_wallet_list(acc)
+    except Exception as e:
+        out["wallet_live"] = {"ok": False, "error": str(e)}
+    # 5. Home for-you (app open)
+    try:
+        out["home_for_you"] = real_home_for_you(acc, limit=5)
+    except Exception as e:
+        out["home_for_you"] = {"ok": False, "error": str(e)}
+    return jsonify(out)
+
+
+@app.route("/api/meesho/orders/live")
+def api_meesho_orders_live():
+    uid = get_uid()
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"ok": False, "error": "no account"}), 400
+    # Meesho ke asli orders - har login account ka alag aayega
+    limit = request.args.get("limit", 10, type=int)
+    r = real_user_orders(acc, limit=limit)
+    return jsonify(r)
+
+
+@app.route("/api/meesho/cart/minview")
+def api_meesho_cart_minview():
+    uid = get_uid()
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"ok": False, "error": "no account"}), 400
+    return jsonify(real_cart_minview(acc))
+
+
+@app.route("/api/meesho/cart/live")
+def api_meesho_cart_live():
+    uid = get_uid()
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"ok": False, "error": "no account"}), 400
+    cs = get_cart_session(uid)
+    r = real_cart_review(acc, cs)
+    return jsonify(r)
+
+
+@app.route("/api/meesho/addresses/live")
+def api_meesho_addresses_live():
+    uid = get_uid()
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"ok": False, "error": "no account"}), 400
+    return jsonify({"ok": True, "addresses": real_fetch_addresses(acc)})
+
+
+@app.route("/api/meesho/payment/live")
+def api_meesho_payment_live():
+    uid = get_uid()
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"ok": False, "error": "no account"}), 400
+    cs = get_cart_session(uid)
+    out = {}
+    for mode, name in [([], "cod"), (["juspay"], "prepaid")]:
+        r = real_paymentinfo(acc, cs, mode)
+        out[name] = r
+    # also wallet + bnpl + offers
+    out["wallet"] = real_wallet_list(acc)
+    out["bnpl"] = real_bnpl_eligibility(acc, amount=int(request.args.get("amount", 41)))
+    return jsonify(out)
+
+
+@app.route("/api/meesho/product/recommendations")
+def api_meesho_recommendations():
+    uid = get_uid()
+    acc = get_active_meesho_account(uid)
+    pid = request.args.get("product_id", type=int)
+    cid = request.args.get("catalog_id", type=int)
+    if not pid or not cid:
+        return jsonify({"ok": False, "error": "product_id and catalog_id required"}), 400
+    # if no acc, allow anonymous
+    if not acc:
+        # Use anonymous headers inside function - fallback to empty
+        return jsonify({"ok": False, "error": "no account, login for personalized"}), 400
+    return jsonify(real_product_recommendations(acc, cid, pid))
 
 
 if __name__ == "__main__":

@@ -1150,6 +1150,117 @@ def real_payment_options(acc, cart_session, order_total=0):
         return {"ok": False, "error": str(e)}
 
 
+# ============================================================ EXTRA SYNC APIS - har cheez Meesho account se live
+# Ye saare tumhare diye hue Main Flow ke hisaab se hain - koi dummy nahi
+
+def real_cart_minview(acc):
+    """GET /api/1.0/cart/minview - badge count"""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(f"{MEESHO_API}/1.0/cart/minview", headers=logged_in_headers(acc))
+            data = resp.json() or {}
+            return {"ok": True, "total_quantity": data.get("total_quantity", 0), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def real_home_for_you(acc, limit=20):
+    """GET /api/4.0/for-you?l=20&s=created_desc&c=1"""
+    try:
+        with httpx.Client(timeout=12.0) as client:
+            resp = client.get(f"{MEESHO_API}/4.0/for-you", params={"l": limit, "s": "created_desc", "c": 1}, headers=logged_in_headers(acc))
+            data = resp.json() or {}
+            return {"ok": resp.status_code==200, "data": data, "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def real_home_fetch(acc):
+    """POST /api/1.0/home-page/fetch"""
+    try:
+        with httpx.Client(timeout=12.0) as client:
+            resp = client.post(f"{MEESHO_API}/1.0/home-page/fetch", headers=logged_in_headers(acc), json={})
+            return {"ok": resp.status_code==200, "data": resp.json() if resp.status_code==200 else {}, "status": resp.status_code}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def real_user_delivery_location(acc, pincode="452010"):
+    """POST /api/1.0/user/delivery-location"""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(f"{MEESHO_API}/1.0/user/delivery-location", headers=logged_in_headers(acc), json={"pincode": pincode, "context": "address_add_edit", "user_id": _acc_uid(acc)})
+            data = resp.json() or {}
+            loc = data.get("user_delivery_location") or {}
+            return {"ok": True, "city": loc.get("city"), "lat": loc.get("lat"), "long": loc.get("long"), "pincode": loc.get("pincode"), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def real_wallet_list(acc):
+    """POST /api/v1/wallet/list"""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(f"{MEESHO_API}/v1/wallet/list", headers=logged_in_headers(acc), json={"user_id": _acc_uid(acc)})
+            data = resp.json() or {}
+            return {"ok": True, "items": data.get("items", []), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def real_bnpl_eligibility(acc, amount=0):
+    """POST /api/v1/bnpl/eligibility"""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(f"{MEESHO_API}/v1/bnpl/eligibility", headers=logged_in_headers(acc), json={"amount": amount, "ip_address": "null", "carrier_name": "Unknown", "device_manufacturer": "Google", "device_model": "Pixel 4", "user_id": _acc_uid(acc)})
+            return {"ok": True, "data": resp.json() if resp.status_code==200 else {}, "status": resp.status_code}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def real_offers_list(acc, amount="41"):
+    """POST /api/v1/offers/list - bank offers"""
+    body = {
+        "customer": {"email": None, "id": str(_acc_uid(acc)), "phone": f"+91{acc.get('phone','')}", "udf1": "enable"},
+        "merchant_key_id": "9970",
+        "order": {"amount": str(amount), "currency": "INR", "merchant_id": "meesho", "payment_channel": "ANDROID", "udf1": "enable", "udf3": "applicable", "udf4": "not_applicable", "udf5": "not_applicable", "udf6": "applicable", "udf7": "variant_1", "udf8": "not_applicable", "udf9": "not_applicable", "udf10": "not_applicable"},
+        "payment_method_info": [{"payment_channel": "ANDROID", "payment_method": "MOBIKWIK", "payment_method_reference": "MOBIKWIK", "payment_method_type": "WALLET", "payment_provider": "JUSPAY", "payment_aggregator": "JUSPAY"}],
+        "user_id": _acc_uid(acc)
+    }
+    try:
+        with httpx.Client(timeout=12.0) as client:
+            resp = client.post(f"{MEESHO_API}/v1/offers/list", headers=logged_in_headers(acc), json=body)
+            return {"ok": True, "data": resp.json() if resp.status_code==200 else {}, "status": resp.status_code}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def real_payments_user_details(acc, cart_session):
+    """POST /api/1.0/payments/user-details"""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(f"{MEESHO_API}/1.0/payments/user-details", headers=logged_in_headers(acc), json={"actions": ["updateOrder"], "identifier": "default", "is_headless_enabled": True, "cart_session": cart_session, "user_id": _acc_uid(acc)})
+            data = resp.json() or {}
+            return {"ok": True, "order_total": data.get("order_total"), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def real_user_orders(acc, limit=10, cursor=None):
+    """POST /api/3.0/user/orders - real Meesho orders sync"""
+    body = {"limit": limit, "cursor": cursor, "query": None, "filters": {"sub_order_status": [0], "sub_order_created": None}, "user_id": _acc_uid(acc)}
+    try:
+        with httpx.Client(timeout=12.0) as client:
+            resp = client.post(f"{MEESHO_API}/3.0/user/orders", headers=logged_in_headers(acc), json=body)
+            data = resp.json() or {}
+            lst = data.get("sub_order_list") or data.get("orders") or []
+            return {"ok": resp.status_code==200, "orders": lst, "pagination": data.get("pagination"), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def real_product_recommendations(acc, catalog_id, product_id, sub_sub_category_id=3354, limit=20):
+    """POST /api/1.0/catalogs/recommendations"""
+    body = {"catalog_id": catalog_id, "offset": 0, "recommended_catalog_ids_in_widget": None, "product_id": product_id, "origin": "main", "sub_sub_category_id": sub_sub_category_id, "limit": limit, "user_id": _acc_uid(acc)}
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(f"{MEESHO_API}/1.0/catalogs/recommendations", headers=logged_in_headers(acc), json=body)
+            data = resp.json() or {}
+            return {"ok": True, "catalogs": data.get("catalogs", []), "raw": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 # ============================================================ PUBLIC API
 def get_meesho_offer():
     return roll_fod_sync()
@@ -1189,4 +1300,7 @@ __all__ = [
     "real_bind_address", "real_paymentinfo", "real_address_create",
     "real_fetch_addresses", "real_preorder", "real_payment_status",
     "real_preorder_status", "real_payment_options", "fresh_checkout_state",
+    "real_cart_minview", "real_home_for_you", "real_home_fetch", "real_user_delivery_location",
+    "real_wallet_list", "real_bnpl_eligibility", "real_offers_list", "real_payments_user_details",
+    "real_user_orders", "real_product_recommendations",
 ]
