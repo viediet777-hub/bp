@@ -606,6 +606,9 @@ function renderCart(items){
   $('cartTotal').textContent='Rs.'+total;
   showEl('cartBottom',true);showEl('checkoutPanel',true);
   cartCount=items.length;updateCartBadge(items.length);
+  // Show payment chips immediately, prices update async via loadCheckoutSummary
+  if(selectedPayment==='COD'){$('payCOD').className='size-chip selected';$('payUPI').className='size-chip'}
+  else{$('payCOD').className='size-chip';$('payUPI').className='size-chip selected'}
   loadCheckoutSummary();
 }
 
@@ -642,14 +645,24 @@ async function loadCheckoutSummary(){
     window._ckData=d;
     if(d.address){
       var a=d.address;
-      $('checkoutAddr').innerHTML='<b>'+a.name+'</b> | '+a.mobile+'<br>'+a.address_line_1+(a.city?', '+a.city:'')+(a.state?', '+a.state:'')+' - '+a.pin;
+      var line1=a.address_line_1||a.line1||a.address||'';
+      var nm=a.name||'';
+      var mob=a.mobile||'';
+      var city=a.city||'';
+      var state=a.state||'';
+      var pin=a.pin||'';
+      if(nm||line1||pin){
+        $('checkoutAddr').innerHTML='<b>'+nm+'</b> '+(mob?'| '+mob:'')+'<br>'+line1+(city?', '+city:'')+(state?', '+state:'')+(pin?' - '+pin:'');
+      }else{
+        $('checkoutAddr').innerHTML='<span style="color:var(--accent2)">Address found but incomplete. </span><span style="color:var(--accent);cursor:pointer" onclick="openAddAddress()">Add one now</span>';
+      }
     }else{
       $('checkoutAddr').innerHTML='<span style="color:var(--accent2)">No address saved. </span><span style="color:var(--accent);cursor:pointer" onclick="openAddAddress()">Add one now</span>';
     }
     // subtotal = local sum (reference), but real payable is cod/upi from Meesho
     // fee is backend-only (Rs.5 wallet deduction per order in paid mode) - NOT added to total
-    var realCod = d.cod_amount||0;
-    var realUpi = d.upi_amount||0;
+    var realCod = d.cod_amount||d.subtotal||0;
+    var realUpi = d.upi_amount||d.subtotal||0;
     var isRealPrice = !!(d.payinfo_ok || realCod !== d.subtotal);
     $('ckSubtotal').textContent='Rs.'+ (isRealPrice ? realCod : (d.subtotal||0));
     // Fee row: show hint, never added to ckTotal

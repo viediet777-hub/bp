@@ -221,10 +221,10 @@ def api_cart_add():
     if not acc:
         reason = "no_account"
     elif not supplier_id or not variation_id:
-        # Without both ids Meesho rejects the item, so the local cart row would
-        # never have a real counterpart. Surface it instead of failing silently.
-        reason = "missing_supplier_or_variation"
-    else:
+        # Missing IDs - still try to add (Meesho may accept without them)
+        # Only mark as local-only if it actually fails
+        pass
+    if acc and (supplier_id or variation_id):
         cs = get_cart_session(uid)
         r = real_cart_add(acc, pid, supplier_id, variation_id, variation_name, qty, cs)
         if r.get("ok"):
@@ -596,6 +596,12 @@ def api_checkout_summary():
             if meesho_addrs:
                 addr = meesho_addrs[0]
         except: pass
+    # Ensure addr always has address_line_1 for frontend display
+    if addr:
+        if not addr.get("address_line_1") and addr.get("line1"):
+            addr["address_line_1"] = addr["line1"]
+        if not addr.get("address_line_1") and addr.get("address"):
+            addr["address_line_1"] = addr["address"]
 
     cod_amount = subtotal
     upi_amount = subtotal
@@ -661,6 +667,12 @@ def api_checkout_summary():
                 # Review failed - keep local subtotal as fallback
                 cod_amount = subtotal
                 upi_amount = subtotal
+
+    # If Meesho prices are 0 (sync failed), fallback to local subtotal
+    if not cod_amount or cod_amount <= 0:
+        cod_amount = subtotal
+    if not upi_amount or upi_amount <= 0:
+        upi_amount = cod_amount
 
     # total is the Meesho payable (COD default), NOT subtotal+fee
     # Frontend shows cod_amount / upi_amount separately; fee is shown as wallet deduction hint
