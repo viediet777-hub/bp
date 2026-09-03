@@ -807,12 +807,26 @@ async function loadCart(){
     var r=await fetch(API+'/api/cart',{headers:headers()});
     var items=await r.json();
     renderCart(Array.isArray(items)?items:[]);
-    // Background sync (non-blocking) - like working bot, don't wait, so UI fast
+    // Background sync - strong but no flicker: respect recentlyRemoved (0 sec no re-add)
     fetch(API+'/api/cart/sync/pull',{method:'POST',headers:headers()}).then(function(resp){ return resp.json(); }).then(function(d){
-      if(d && (d.imported>0 || d.updated>0)){
-        // only reload if something changed, and not during qty lock
-        if(!_qtyLock) fetch(API+'/api/cart',{headers:headers()}).then(r=>r.json()).then(function(itms){ if(Array.isArray(itms)) renderCart(itms); });
+      if(!d || (!d.imported && !d.updated)) return;
+      // If sync imported a product that was just removed (within 10 sec), ignore it
+      var now=Date.now();
+      var hasRecent=false;
+      if(d.meessho_items){
+        for(var i=0;i<d.meessho_items.length;i++){
+          var pid=String(d.meessho_items[i].product_id||'');
+          if(_recentlyRemoved[pid] && (now - _recentlyRemoved[pid] < 10000)){
+            hasRecent=true;
+            // Remove that recently removed from local again if it was re-added
+            fetch(API+'/api/cart/update',{method:'POST',headers:headers(),body:JSON.stringify({cart_id: pid, qty:0})}).catch(function(){});
+          }
+        }
       }
+      // Clean up old entries
+      for(var k in _recentlyRemoved){ if(now - _recentlyRemoved[k] > 10000) delete _recentlyRemoved[k]; }
+      if(hasRecent) return; // don't reload if it was flicker re-add
+      if(!_qtyLock) fetch(API+'/api/cart',{headers:headers()}).then(r=>r.json()).then(function(itms){ if(Array.isArray(itms)) renderCart(itms); });
     }).catch(function(){});
   }catch(e){$('cartList').innerHTML='<div class="empty"><p>Failed to load cart</p></div>'}
 }
@@ -1030,28 +1044,39 @@ async function loadCheckoutSummary(){
 }
 
 var _qtyLock=false;
+var _recentlyRemoved = {}; // pid -> timestamp to prevent flicker re-add (0 sec delay fix)
 async function updateQty(cid,qty){
-  if(_qtyLock) return; // single-tap, ignore rapid 3-4 taps (working bot logic)
+  if(_qtyLock) return;
   if(qty<1)qty=0;
   _qtyLock=true;
-  // Optimistic UI - instant remove/update like competitor bot (no wait)
+  // Find product_id for recentlyRemoved tracking (for 0-delay sync)
+  var _pidForRemove = null;
+  if(qty===0){
+    try{
+      var _c=window._cartCache ? window._cartCache.find(function(x){ return String(x.id||x.cart_id)===String(cid); }) : null;
+      if(_c) _pidForRemove = _c.product_id || _c.productId;
+    }catch(e){}
+    if(_pidForRemove) _recentlyRemoved[String(_pidForRemove)] = Date.now();
+  }
+  // Optimistic UI - instant remove/update like competitor bot (no wait, 0 sec)
   var cardEl=document.querySelector('.cart-item[data-cid="'+cid+'"]');
   var origCache = window._cartCache ? window._cartCache.slice() : null;
   if(qty===0 && cardEl){
-    cardEl.style.opacity='0.4'; cardEl.style.pointerEvents='none';
-    // immediate local cache update for speed
+    // Instant 0-sec remove - no fade wait, directly hide
+    cardEl.style.display='none';
+    cardEl.remove();
     if(window._cartCache) window._cartCache = window._cartCache.filter(function(c){ return String(c.id||c.cart_id)!==String(cid); });
-    setTimeout(function(){
-      // if still in DOM after 300ms, hide
-      if(cardEl && cardEl.parentNode) cardEl.style.display='none';
-      // update badge instantly
-      var newCount = window._cartCache ? window._cartCache.length : 0;
-      updateCartBadge(newCount);
-      if(newCount===0){
-        $('cartList').innerHTML='<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg><p>Your cart is empty</p></div>';
-        showEl('cartBottom',false);showEl('checkoutPanel',false);
-      }
-    }, 150);
+    var newCount = window._cartCache ? window._cartCache.length : 0;
+    updateCartBadge(newCount);
+    // Instant totals update
+    var _newTotal = window._cartCache ? window._cartCache.reduce(function(s,x){ return s + (Number(x.price)||0)*(Number(x.qty)||1); },0) : 0;
+    $('cartTotal').textContent='Rs.'+_newTotal;
+    $('ckTotal').textContent='Rs.'+_newTotal;
+    if($('ckProductPrice')) $('ckProductPrice').textContent='+ Rs.'+_newTotal;
+    if(newCount===0){
+      $('cartList').innerHTML='<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg><p>Your cart is empty</p></div>';
+      showEl('cartBottom',false);showEl('checkoutPanel',false);
+    }
   }
   try{
     var r=await fetch(API+'/api/cart/update',{method:'POST',headers:headers(),body:JSON.stringify({cart_id:cid,qty:qty})});

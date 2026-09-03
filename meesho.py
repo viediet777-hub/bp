@@ -1152,33 +1152,38 @@ def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True):
 
 def real_preorder(acc, cart_session, address_id, payment_method="COD",
                   customer_amount=None, payment_aggregator=None):
-    """Place real order via /api/4.0/preorders. For UPI, also calls /api/juspay/txns to get actual QR."""
+    """Place real order via /api/4.0/preorders. Tries both buy_now and default identifiers (captured uses default for cart)."""
     is_upi = payment_method.upper() in ("UPI", "PREPAID")
-    body = {
-        "payment_method_type": payment_method.upper() if payment_method.upper() != "PREPAID" else "UPI",
-        "identifier": "buy_now",
-        "payment_aggregator": payment_aggregator or ("JUSPAY" if is_upi else None),
-        "is_selling_to_customer": False,
-        "cart_session": cart_session,
-        "vpa": None,
-        "address_id": int(address_id),
-        "direct_wallet_token": None,
-        "customer_amount": customer_amount,
-        "upi_package_name": "com.google.android.apps.nbu.paisa.user" if is_upi else None,
-        "payment_flow_type": "qr" if is_upi else None,
-        "sender_id": -1,
-        "accurate_location": json.dumps({"lat": "22.7196", "long": "75.8577"}),
-        "card_token": None,
-        "payment_provider": "JUSPAY" if is_upi else None,
-        "processor_id": "in.juspay.hyperapi" if is_upi else None,
-        "payment_method": "UPI" if is_upi else "COD",
-        "enable_price_unbundling": True,
-        "user_id": _acc_uid(acc),
-    }
-    try:
-        with httpx.Client(timeout=25.0) as client:
-            resp = client.post(f"{MEESHO_API}/4.0/preorders",
-                               headers=logged_in_headers(acc), json=body)
+    # Try both identifiers - cart is atc_cart_v2/default, but preorder may expect buy_now or default
+    for ident in ("default", "buy_now"):
+        body = {
+            "payment_method_type": payment_method.upper() if payment_method.upper() != "PREPAID" else "UPI",
+            "identifier": ident,
+            "payment_aggregator": payment_aggregator or ("JUSPAY" if is_upi else None),
+            "is_selling_to_customer": False,
+            "cart_session": cart_session,
+            "vpa": None,
+            "address_id": int(address_id),
+            "direct_wallet_token": None,
+            "customer_amount": customer_amount,
+            "customer_amount_currency": "INR" if is_upi else None,
+            "upi_package_name": "com.google.android.apps.nbu.paisa.user" if is_upi else None,
+            "payment_flow_type": "qr" if is_upi else None,
+            "sender_id": -1,
+            "accurate_location": json.dumps({"lat": "22.7196", "long": "75.8577"}),
+            "card_token": None,
+            "payment_provider": "JUSPAY" if is_upi else None,
+            "processor_id": "in.juspay.hyperapi" if is_upi else None,
+            "payment_method": "UPI" if is_upi else "COD",
+            "enable_price_unbundling": True,
+            "user_id": _acc_uid(acc),
+        }
+        # Remove None values to avoid invalid payload (Meesho strict)
+        body = {k: v for k, v in body.items() if v is not None}
+        try:
+            with httpx.Client(timeout=25.0) as client:
+                resp = client.post(f"{MEESHO_API}/4.0/preorders",
+                                   headers=logged_in_headers(acc), json=body)
             data = resp.json() or {}
             order_num = data.get("order_num")
             juspay_params = data.get("juspay_transaction_params", {})
@@ -1207,10 +1212,19 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
                     except Exception as e:
                         print(f"[PREORDER] JusPay txns failed: {e}", flush=True)
                 return result
+            # Not success - if this was default ident, try buy_now next, else return error
+            err = data.get("error_type") or data.get("message") or str(data)[:300]
+            print(f"[PREORDER] failed ident={ident} err={err} raw={str(data)[:400]}", flush=True)
+            if ident == "default":
+                continue  # try buy_now
             return {"ok": False, "error": data.get("error_type", "order_failed"),
                     "message": data.get("message", ""), "raw": data}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+        except Exception as e:
+            print(f"[PREORDER] exception ident={ident}: {e}", flush=True)
+            if ident == "default":
+                continue
+            return {"ok": False, "error": str(e)}
+    return {"ok": False, "error": "order_failed - all idents tried", "raw": {}}
 
 
 def real_juspay_txns(client, acc, juspay_order_id):
