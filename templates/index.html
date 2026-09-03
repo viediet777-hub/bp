@@ -636,7 +636,7 @@ function sheetQty(d){
 async function sheetAdd(buy){
   if(!cur) return;
   const sizeEl = document.querySelector('.sizepill.on');
-  const size = sizeEl ? sizeEl.textContent : 'Free Size';
+  const size = (sizeEl && sizeEl.textContent ? sizeEl.textContent : 'Free Size').trim() || 'Free Size';
   try{
     const d = await api('/api/cart/add', {method:'POST', body:{
       product_id: cur.id, supplier_id: cur.supplier_id || 0,
@@ -742,11 +742,29 @@ async function renderCart(){
 }
 async function pullMeeshoCart(){
   // Reconcile local cart with the REAL Meesho cart (prices/session, prune
-  // server-side removals). Never throws — returns the pull payload or null.
+  // server-side removals). Also caches Meesho review identifiers per
+  // product_id so removals can send the exact server identifier.
+  // Never throws — returns the pull payload or null.
   try{
     const p = await api('/api/cart/sync/pull');
-    return (p && p.ok) ? p : null;
+    if(p && p.ok){
+      try{
+        const map = {};
+        (p.meesho_items || []).forEach(function(m){
+          if(m && m.product_id && m.identifier) map[String(m.product_id)] = m.identifier;
+        });
+        window._meeshoIdents = map;
+      }catch(e){}
+      return p;
+    }
+    return null;
   }catch(e){ return null; }
+}
+function meeshoIdent(pid, fallback){
+  try{
+    const m = window._meeshoIdents || {};
+    return m[String(pid)] || fallback;
+  }catch(e){ return fallback; }
 }
 async function chgQty(i, d){
   const c = S.cart[i];
@@ -754,9 +772,9 @@ async function chgQty(i, d){
   const qty = c.qty + d;
   const removing = qty <= 0;
   try{
-    // Send cart_id AND product_id so the backend can match the Meesho-side
-    // item even if identifiers drifted.
-    const r = await api('/api/cart/update', {method:'POST', body:{cart_id: c.key, product_id: c.product_id, qty: qty}});
+    // Send cart_id + product_id + the Meesho review identifier (cached
+    // from the last pull) so the backend removes the exact server item.
+    const r = await api('/api/cart/update', {method:'POST', body:{cart_id: c.key, product_id: c.product_id, identifier: meeshoIdent(c.product_id, c.key), qty: qty}});
     if(!(r && (r.ok || r.success || Array.isArray(r.items)))) return toast(apiErr(r, 'Could not update'), 'err');
     // Confirm sync against the real Meesho cart, then re-render.
     const pull = await pullMeeshoCart();
@@ -891,7 +909,7 @@ async function placeOrder(){
     if(!(d && d.ok)) return toast(apiErr(d, 'Could not start payment'), 'err');
     if(d.order_num == null || d.order_num === '') return toast('No order reference from server', 'err');
     const amt = d.upi_amount ?? d.amount ?? 0;
-    pendPay = {id: d.order_num, amount: amt};
+    pendPay = {id: d.order_num, amount: amt, juspay: d.juspay_order_id || ''};
     // Tolerant QR/intent extraction: backend may send qr_image (data: or
     // URL), qr_base64, qr_url, upi_uri, upi_intent_url, upi_link, intent,
     // or a upi: payment_url. Accept every known shape.

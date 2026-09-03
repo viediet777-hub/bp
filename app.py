@@ -263,6 +263,9 @@ def api_cart_update():
     uid = get_uid()
     data = _d
     cid = data.get("cart_id")
+    # Optional Meesho identifier supplied by the caller (cached from a cart
+    # review/pull). Used ONLY as a fallback inside the verified remover.
+    req_ident = data.get("identifier")
     qty = data.get("qty", 1)
     # capture product info before local delete for Meesho sync - try id first, then product_id fallback (for single-item edge)
     cart_before = get_cart(uid)
@@ -301,7 +304,8 @@ def api_cart_update():
         if acc and prod_id:
             cs = get_cart_session(uid)
             if int(qty) <= 0:
-                vr = meesho_remove_verified(acc, int(prod_id), cs or "", var_id or None)
+                vr = meesho_remove_verified(acc, int(prod_id), cs or "", var_id or None,
+                                            fallback_identifier=req_ident)
                 if vr.get("cart_session"):
                     set_cart_session(uid, vr["cart_session"])
                 meesho_verified = bool(vr.get("verified"))
@@ -2396,6 +2400,10 @@ def adapter_cart_update():
     quantity = _int0(item.get("quantity", 1))
     identifier = item.get("identifier")
     product_id = item.get("product_id")
+    # NOTE: item.identifier stays the LOCAL row id (used by update_cart_qty).
+    # An optional top-level `identifier` carries a Meesho review identifier
+    # and is used ONLY as a fallback inside the verified remover.
+    req_ident = data.get("identifier")
 
     if uid and identifier:
         update_cart_qty(identifier, quantity)
@@ -2436,7 +2444,8 @@ def adapter_cart_update():
             if acc:
                 cs = cart_session or get_cart_session(uid) or ""
                 vr = meesho_remove_verified(acc, int(product_id), cs,
-                                            _int0(item.get("variation_id")) or None)
+                                            _int0(item.get("variation_id")) or None,
+                                            fallback_identifier=req_ident)
                 if vr.get("cart_session"):
                     set_cart_session(uid, vr["cart_session"])
                 meesho_verified = bool(vr.get("verified"))

@@ -599,6 +599,11 @@ def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, 
     pid = int(product_id) if product_id else 0
     vid = _pos_int(variation_id)
     sid = _pos_int(supplier_id)
+    # Contract hardening: variation must be a non-empty string, ids ints-or-null
+    # (Meesho answers 400 "Invalid input check the api contract" otherwise).
+    var_name = (str(variation or "").strip() or "Free Size")
+    qty_int = int(qty) if qty else 1
+    sent_summary = f"pid={pid} sid={sid} vid={vid} var={var_name!r} qty={qty_int}"
     # Captured uses identifier "default" for pdp (folder 31: pdp/default), not "buy_now"
     for ident in ("default", "buy_now"):
         base_item = {
@@ -606,8 +611,8 @@ def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, 
             "product_id": pid,
             "supplier_id": sid,
             "variation_id": vid,
-            "variation": variation or "",
-            "quantity": int(qty) if qty else 1,
+            "variation": var_name,
+            "quantity": qty_int,
             "selected_price_type_id": "premium_return_price",
             "client_metadata": None,
         }
@@ -658,14 +663,15 @@ def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, 
                     }
                 data = r2.get("data", data)
                 err_type = data.get("error_type") or str(data)[:300]
-            print(f"[CART_ADD] FAILED ident={ident} context={context}: {err_type} raw={str(data)[:400]}", flush=True)
+            print(f"[CART_ADD] FAILED ident={ident} context={context} sent=({sent_summary}): {err_type} raw={str(data)[:400]}", flush=True)
             if "context" in str(err_type).lower() or "identifier" in str(err_type).lower():
                 continue  # try next context/ident
             if context == "pdp":
                 continue  # try pdl with same ident
             # pdl also failed with this ident, try next ident
             continue
-    return {"ok": False, "error": "cart add failed (all pdp/pdl + default/buy_now)", "raw": {}}
+    print(f"[CART_ADD] ALL FAILED sent=({sent_summary}) — check supplier/variation ids from product detail", flush=True)
+    return {"ok": False, "error": "cart add failed (all pdp/pdl + default/buy_now)", "sent": sent_summary, "raw": {}}
 
 
 def real_cart_review(acc, cart_session=None):
@@ -805,7 +811,7 @@ def real_cart_remove(acc, item_identifier, cart_session):
     return last
 
 
-def meesho_remove_verified(acc, product_id, cart_session, variation_id=None):
+def meesho_remove_verified(acc, product_id, cart_session, variation_id=None, fallback_identifier=None):
     """Remove a product from the REAL Meesho cart and VERIFY it is gone.
 
     Steps: fresh review (stored session, then empty) -> match item(s) by
@@ -813,10 +819,16 @@ def meesho_remove_verified(acc, product_id, cart_session, variation_id=None):
     the review itself returned, using the FRESH cart_session -> re-review and
     confirm the product is absent.
 
+    `fallback_identifier` (opaque Meesho identifier supplied by the caller,
+    e.g. cached from a previous review/pull) is tried ONLY when review
+    matching yields nothing. Safety: a purely numeric fallback that does not
+    equal product_id is ignored — that shape is a local row id, and feeding
+    it to the API would target the wrong product.
+
     Returns {removed, verified, cart_session, via, items_matched, error}.
     `removed` = a remove call reported success; `verified` = the follow-up
     review no longer lists the product (the only signal that actually counts,
-    since Meesho can answer 200 without deleting on a stale session).
+    since Meeho can answer 200 without deleting on a stale session).
     """
     out = {"removed": False, "verified": False, "cart_session": cart_session or "",
            "via": "", "items_matched": 0, "error": ""}
@@ -853,9 +865,18 @@ def meesho_remove_verified(acc, product_id, cart_session, variation_id=None):
                 pass
         if mi.get("identifier"):
             matches.append(mi)
-    # No identifier-bearing match: fall back to pid-based remove attempt.
+    # No identifier-bearing match: try the caller-supplied Meesho identifier
+    # first (when it is genuinely opaque), then pid-based remove attempt.
     if not matches:
-        r = real_cart_remove(acc, {"product_id": pid}, cs)
+        fb = str(fallback_identifier or "").strip()
+        fb_usable = bool(fb) and ((not fb.isdigit()) or int(fb) == pid)
+        if fb_usable:
+            print(f"[REMOVE_VERIFIED] no review match for pid={pid}; trying caller identifier", flush=True)
+            r = real_cart_remove(acc, fb, cs)
+        else:
+            if fb:
+                print(f"[REMOVE_VERIFIED] ignoring numeric fallback ident={fb!r} != pid={pid} (looks like a local row id)", flush=True)
+            r = real_cart_remove(acc, {"product_id": pid}, cs)
         out["removed"] = bool(r.get("ok"))
         out["via"] = r.get("via", "pid-fallback")
         if r.get("cart_session"):
