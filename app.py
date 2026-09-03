@@ -604,10 +604,13 @@ def api_create_pending():
     elif upi_intent_url:
         qr_url = get_qr_url(upi_intent_url)
 
+    # Also provide working-bot compatible keys (upi_uri, redirect_url) for QR generation
+    upi_uri = upi_intent_url or ""
     return jsonify({
         "ok": True, "order_id": oid, "meesho_order_num": meesho_order_num,
         "amount": meesho_amount, "fee": fee,
         "qr_base64": qr_base64, "upi_intent_url": upi_intent_url, "qr_url": qr_url,
+        "upi_uri": upi_uri, "redirect_url": upi_intent_url or order_r.get("payment_url") or "",
         "payment_url": order_r.get("payment_url"),
         "juspay_order_id": order_r.get("juspay_order_id"),
         "payment_method": "UPI",

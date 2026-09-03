@@ -1137,24 +1137,35 @@ async function handleOnlinePayment(){
     sessionStorage.setItem('pending_upi_order', String(d.order_id));
     sessionStorage.setItem('pending_upi_amount', String(d.amount));
 
-    // Show QR modal with Meesho's real QR
+    // Show QR - working bot style: use upi_uri via qrcode + external service fallback (fast, no extra animation)
     const box=document.getElementById('qrcode');
     if(box){
       box.innerHTML=''; box.style.display='flex';
-      // Use Meesho's real QR (base64 image from JusPay gateway)
+      var upiUri = d.upi_uri || d.upi_intent_url || d.redirect_url || "";
+      // Prefer Meesho's real QR if available, else generate from UPI URI like working bot
       if(d.qr_base64){
         var img=document.createElement('img');
         img.src='data:image/png;base64,'+d.qr_base64;
-        img.style.cssText='width:200px;height:200px;border-radius:12px';
+        img.style.cssText='width:200px;height:200px;border-radius:12px;background:#fff;padding:6px';
         box.appendChild(img);
       } else if(d.qr_url){
         var img=document.createElement('img');
         img.src=d.qr_url;
-        img.style.cssText='width:200px;height:200px;border-radius:12px';
+        img.style.cssText='width:200px;height:200px;border-radius:12px;background:#fff;padding:6px';
         box.appendChild(img);
-      } else if(d.upi_intent_url){
-        try{ new QRCode(box, {text:d.upi_intent_url, width:200, height:200, correctLevel:QRCode.CorrectLevel.H}); }catch(e){}
+      } else if(upiUri){
+        // Working bot method: https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=...
+        var qrImg=document.createElement('img');
+        qrImg.src='https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data='+encodeURIComponent(upiUri);
+        qrImg.style.cssText='width:200px;height:200px;border-radius:12px;background:#fff;padding:6px';
+        qrImg.onerror=function(){ try{ this.remove(); new QRCode(box, {text:upiUri, width:200, height:200, correctLevel:QRCode.CorrectLevel.H}); }catch(e){} };
+        box.appendChild(qrImg);
       }
+      // caption like working bot
+      var cap=document.createElement('div');
+      cap.textContent='Scan with any UPI app to pay';
+      cap.style.cssText='font-size:11px;color:var(--text3);margin-top:6px;text-align:center';
+      box.appendChild(cap);
     }
     const se=document.getElementById('upiSeller');
     if(se){ se.textContent='Paying to Meesho'; se.style.display='block'; }
