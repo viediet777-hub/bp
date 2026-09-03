@@ -256,19 +256,16 @@ def api_cart_add():
 
 @app.route("/api/cart/update", methods=["POST"])
 def api_cart_update():
-    # Working-bot frontend sends {cart_session, item:{...}} — route to adapter.
     _d = request.get_json(silent=True) or {}
     if isinstance(_d.get("item"), dict):
         return adapter_cart_update()
     uid = get_uid()
     data = _d
     cid = data.get("cart_id")
-    # Optional Meesho identifier supplied by the caller (cached from a cart
-    # review/pull). Used ONLY as a fallback inside the verified remover.
     req_ident = data.get("identifier")
     qty = data.get("qty", 1)
-    # capture product info before local delete for Meesho sync - try id first, then product_id fallback (for single-item edge)
     cart_before = get_cart(uid)
+    print(f"[CART_UPDATE] uid={uid} cid={cid} qty={qty} req_ident={str(req_ident)[:30]} cart_before={[(c.get('id'),c.get('product_id'),c.get('qty')) for c in cart_before]}", flush=True)
     target = next((c for c in cart_before if str(c.get("id")) == str(cid)), None)
     if not target:
         # fallback: cid may be product_id when only one item or frontend bug
@@ -289,6 +286,7 @@ def api_cart_update():
         var_name = target.get("variation_name","Free Size")
     if cid:
         update_cart_qty(cid, qty)
+        print(f"[CART_UPDATE] delete/update cid={cid} qty={qty} pid={prod_id}", flush=True)
     else:
         # safety: clear if no cid but qty 0
         if int(qty) <=0 and prod_id:
@@ -2477,7 +2475,6 @@ def _build_cart_response(uid):
     })
 
 
-@app.route("/api/cart/update", methods=["POST"])
 def adapter_cart_update():
     uid = get_uid() or 0
     data = request.json or {}
@@ -2486,9 +2483,6 @@ def adapter_cart_update():
     quantity = _int0(item.get("quantity", 1))
     identifier = item.get("identifier")
     product_id = item.get("product_id")
-    # NOTE: item.identifier stays the LOCAL row id (used by update_cart_qty).
-    # An optional top-level `identifier` carries a Meesho review identifier
-    # and is used ONLY as a fallback inside the verified remover.
     req_ident = data.get("identifier")
 
     if uid and identifier:
