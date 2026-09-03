@@ -458,9 +458,10 @@ def api_place_order():
                         "review": dbg_review}), 400
 
     cart_session = st["cs"]
-    # For COD use effective_total (69), for UPI display upi_amount (41) - captured diff is 28 prepaid discount.
-    # But preorder customer_amount must be in [COD, MRP] else Meesho says Invalid request payload,
-    # so try candidates in order: order_total first, then display amount.
+    # Reference (checkout_method.txt): for UPI use effective_total_with_ppd (UI amount),
+    # for COD use effective_total/without_ppd. Primary candidate = that amount to avoid
+    # price mismatch, then effective_total / subtotal as fallbacks.
+    meesho_amount = st.get("order_total") or subtotal
     if payment_method == "COD":
         meesho_amount = st.get("effective_total") or st.get("order_total") or subtotal
     else:
@@ -470,7 +471,11 @@ def api_place_order():
 
     order_r = None
     tried_amts = []
-    for cand in (st.get("order_total"), st.get("effective_total"), meesho_amount, subtotal):
+    if payment_method == "COD":
+        cands = (st.get("effective_total"), st.get("order_total"), st.get("upi_amount"), subtotal)
+    else:
+        cands = (st.get("upi_amount"), st.get("order_total"), st.get("effective_total"), subtotal)
+    for cand in cands:
         try:
             cand_int = int(cand or 0)
         except:
@@ -602,11 +607,12 @@ def api_create_pending():
     set_cart_session(uid, cart_session)
 
     # Use Meesho's REAL preorder - returns actual payment QR from JusPay.
-    # Capture margin says amount must be in [COD, MRP] (e.g. 83..199) - UPI 56 alone
-    # gets "Invalid request payload". So try order_total first, then upi_amount.
+    # Working bot (checkout_method.txt) uses for UPI: effective_total_with_ppd
+    # (the discounted UPI amount, e.g. 56 not 83). So try upi_amt first (matches
+    # displayed price -> no price mismatch), then effective_total as fallback.
     order_r = None
     tried_amts = []
-    for cand in (order_tot, upi_amt):
+    for cand in (upi_amt, order_tot):
         try:
             cand_int = int(cand or 0)
         except:

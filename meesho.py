@@ -1171,64 +1171,42 @@ def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True):
 
 
 def real_preorder(acc, cart_session, address_id, payment_method="COD",
-                  customer_amount=None, payment_aggregator=None, addr_info=None):
+                  customer_amount=None, payment_aggregator=None, addr_info=None, upi_package_name=None):
     """Place real order via /api/4.0/preorders.
 
-    UPI path uses the EXACT authoritative payload captured from Meesho's own
-    checkout (www.meeshologinqrgen HAR): paymentOptionItem nested object +
-    address{city,pincode}, enable_price_unbundling:false. This is the shape that
-    actually succeeds; the old flat schema caused "Invalid request payload".
+    Uses the EXACT flat payload from the WORKING BOT (checkout_method.txt /
+    meesho_api.py place_order) which is proven to succeed:
+      - identifier default, payment_flow_type "intent" for UPI
+      - payment_aggregator/provider/processor JUSPAY, enable_price_unbundling True
+      - upi_package_name = live UPI app package (com.naviapp)
+    This is the shape that works; the web-checkout QR-style body was NOT accepted.
     """
     is_upi = payment_method.upper() in ("UPI", "PREPAID")
     uid = _acc_uid(acc)
-    addr_info = addr_info or {}
-    # Try both identifiers - captured flow uses "default"; "buy_now" as fallback
+    target_upi_pkg = upi_package_name or "com.naviapp"
     for ident in ("default", "buy_now"):
-        if is_upi:
-            body = {
-                "address_id": int(address_id),
-                "cart_session": cart_session,
-                "customer_amount": int(customer_amount) if customer_amount is not None else None,
-                "enable_price_unbundling": False,
-                "identifier": ident,
-                "is_selling_to_customer": False,
-                "sender_id": -1,
-                "user_id": uid,
-                "paymentOptionItem": {
-                    "payment_method_type": "UPI",
-                    "payment_method": "UPI",
-                    "payment_flow_type": "qr",
-                },
-                "address": {
-                    "city": addr_info.get("city") or "",
-                    "pincode": str(addr_info.get("pin") or ""),
-                },
-            }
-        else:
-            # COD: keep conservative flat body (COD path already works in prod)
-            body = {
-                "payment_method_type": "COD",
-                "identifier": ident,
-                "payment_aggregator": None,
-                "is_selling_to_customer": False,
-                "cart_session": cart_session,
-                "vpa": None,
-                "address_id": int(address_id),
-                "direct_wallet_token": None,
-                "customer_amount": int(customer_amount) if customer_amount is not None else None,
-                "upi_package_name": None,
-                "payment_flow_type": None,
-                "sender_id": -1,
-                "accurate_location": json.dumps({"lat": "22.7196", "long": "75.8577"}),
-                "card_token": None,
-                "payment_provider": None,
-                "processor_id": None,
-                "payment_method": "COD",
-                "enable_price_unbundling": True,
-                "user_id": uid,
-            }
-            # Remove None values to avoid invalid payload (Meesho strict)
-            body = {k: v for k, v in body.items() if v is not None}
+        body = {
+            "payment_method_type": "UPI" if is_upi else "COD",
+            "identifier": ident,
+            "payment_aggregator": "JUSPAY",
+            "is_selling_to_customer": False,
+            "cart_session": cart_session,
+            "vpa": None,
+            "address_id": int(address_id),
+            "direct_wallet_token": None,
+            "customer_amount": int(customer_amount) if customer_amount is not None else None,
+            "upi_package_name": target_upi_pkg if is_upi else None,
+            "payment_flow_type": "intent" if is_upi else None,
+            "sender_id": -1,
+            "card_token": None,
+            "payment_provider": "JUSPAY",
+            "processor_id": "in.juspay.hyperapi",
+            "payment_method": "UPI" if is_upi else "COD",
+            "enable_price_unbundling": True,
+            "user_id": uid,
+        }
+        # Remove None values to avoid invalid payload (Meesho strict)
+        body = {k: v for k, v in body.items() if v is not None}
         try:
             print(f"[PREORDER] body ident={ident} upi={is_upi}: {json.dumps(body)[:500]}", flush=True)
             with httpx.Client(timeout=25.0) as client:
@@ -1254,10 +1232,11 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
                 # For UPI: generate the real UPI intent/QR. Try official Juspay WAPI
                 # first (working bot method), then meesho /api/juspay/txns, then a
                 # guaranteed fallback link so the QR always renders.
-                if is_upi and result["juspay_order_id"]:
+                if is_upi and (result["juspay_order_id"] or result["order_num"]):
+                    upi_ref = result["juspay_order_id"] or result["order_num"]
                     try:
                         wapi = real_juspay_wapi_intent(
-                            result["juspay_order_id"],
+                            upi_ref,
                             result["client_auth_token"],
                             upi_app="com.naviapp",
                             amount=result.get("customer_amount") or customer_amount,
@@ -1268,7 +1247,7 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
                             print(f"[PREORDER] WAPI intent OK: {result['upi_intent_url'][:80]}", flush=True)
                         else:
                             print(f"[PREORDER] WAPI failed ({wapi.get('error')}), trying meesho txns", flush=True)
-                            juspay_txns = real_juspay_txns(client, acc, result["juspay_order_id"])
+                            juspay_txns = real_juspay_txns(client, acc, upi_ref)
                             if juspay_txns.get("ok"):
                                 result["upi_intent_url"] = juspay_txns.get("upi_link") or result["upi_intent_url"]
                                 result["merchant_vpa"] = juspay_txns.get("merchant_vpa", "")
@@ -1280,8 +1259,7 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
                         print(f"[PREORDER] WAPI/txns exception: {e}", flush=True)
                     # Ensure a UPI URI always exists so QR always renders
                     if not result.get("upi_intent_url"):
-                        result["upi_intent_url"] = real_juspay_fallback_link(
-                            result["juspay_order_id"], customer_amount)
+                        result["upi_intent_url"] = real_juspay_fallback_link(upi_ref, customer_amount)
                         result["qr_source"] = "fallback"
                         print(f"[PREORDER] using fallback UPI link for QR", flush=True)
                 return result
