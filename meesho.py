@@ -64,7 +64,7 @@ APP_POOL = [
     {"id": 88, "package_name": "com.truecaller"}, {"id": 44, "package_name": "com.phonepe.app"},
 ]
 
-BUCKET_POOL = ["180", "180", "180", "175", "150", "135", "120", "100", "90", "75", "60", ""]
+BUCKET_POOL = ["220", "220", "200", "180", "180", "175", "150", "135", "120", "100", "90", "75", "60", ""]
 FOD_FALLBACK = {"offer_title": "Upto", "offer_text": "\u20b975 OFF", "offer_subtitle": "on 1st order", "offer_duration": 3, "max_offer_value": 75}
 
 SEARCH_FILTER = {"min_prices": [], "max_prices": [], "discount_values": [], "ratings": [],
