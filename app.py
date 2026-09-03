@@ -1420,6 +1420,7 @@ def api_addresses():
     acc_id = request.args.get("account_id", type=int)
     addrs = get_addresses(uid, acc_id)
     # Auto-import Meesho addresses if local empty (so real account's addresses show in mini app)
+    # Also dedupe if we previously created duplicates (bot showed 4 vs Meesho 2)
     if not addrs:
         acc = get_active_meesho_account(uid)
         if acc:
@@ -1434,6 +1435,26 @@ def api_addresses():
                     except: pass
                 addrs = get_addresses(uid, acc_id)
             except: pass
+    # Dedupe existing 4 -> 2 (normalize line1+pin+mobile)
+    if len(addrs) > 2:
+        try:
+            from database import get_db
+            seen={}
+            to_keep=[]
+            for a in addrs:
+                key=(str(a.get("mobile") or "").strip(), str(a.get("pin") or "").strip(), (a.get("address_line_1") or "").strip().lower().replace(" ",""))
+                if key not in seen:
+                    seen[key]=a["id"]
+                    to_keep.append(a["id"])
+                # else duplicate -> will delete
+            if len(to_keep) < len(addrs):
+                conn=get_db()
+                for a in addrs:
+                    if a["id"] not in to_keep:
+                        conn.execute("DELETE FROM addresses WHERE id=?", (a["id"],))
+                conn.commit(); conn.close()
+                addrs = get_addresses(uid, acc_id)
+        except: pass
     default = next((a for a in addrs if a.get("is_default")), addrs[0] if addrs else None)
     return jsonify({"addresses": addrs, "default": default})
 
@@ -1458,19 +1479,39 @@ def api_addresses_sync():
                 d=r.json() or {}
                 live = [{"id":a.get("id"),"name":a.get("name"),"mobile":str(a.get("mobile","")),"pin":a.get("pin"),"city":a.get("city"),"state":a.get("state"),"address_line_1":a.get("address_line_1"),"address_line_2":a.get("address_line_2"),"landmark":a.get("landmark"),"address_type":a.get("address_type"),"latitude":(a.get("coordinates")or{}).get("latitude"),"longitude":(a.get("coordinates")or{}).get("longitude")} for a in (d.get("addresses") or []) if a.get("id")]
         except: pass
+    # Dedupe with normalized key (mobile+pin+line1 without spaces) to prevent 4 vs 2 duplicates
+    def _norm(a): return (str(a.get("mobile") or "").strip(), str(a.get("pin") or "").strip(), (a.get("address_line_1") or "").strip().lower().replace(" ",""))
     imported=0
     addrs = get_addresses(uid)
-    existing_pins = {(a.get("pin"), a.get("address_line_1")) for a in addrs}
+    existing_keys = {_norm(a) for a in addrs}
     for la in live:
-        key=(str(la.get("pin")), la.get("address_line_1"))
-        if key in existing_pins: continue
+        key=_norm(la)
+        if key in existing_keys: continue
         try:
             create_address(uid, 0, la.get("name",""), str(la.get("mobile","")), str(la.get("pin","")),
                            la.get("city",""), la.get("state",""), la.get("address_line_1",""),
                            la.get("address_line_2",""), la.get("landmark",""), la.get("address_type","Home"),
                            la.get("latitude",""), la.get("longitude",""), 0)
             imported+=1
+            existing_keys.add(key)
         except: pass
+    # Cleanup any existing duplicates (4 -> 2)
+    try:
+        addrs2 = get_addresses(uid)
+        if len(addrs2) > len({ _norm(a) for a in addrs2 }):
+            from database import get_db
+            seen2={}; keep=[]
+            for a in addrs2:
+                k=_norm(a)
+                if k not in seen2:
+                    seen2[k]=a["id"]
+                    keep.append(a["id"])
+            conn=get_db()
+            for a in addrs2:
+                if a["id"] not in keep:
+                    conn.execute("DELETE FROM addresses WHERE id=?", (a["id"],))
+            conn.commit(); conn.close()
+    except: pass
     return jsonify({"ok": True, "imported": imported, "live": live})
 
 
@@ -1508,29 +1549,46 @@ def api_cart_sync_pull():
         local = get_cart(uid)
         local_ids = {int(c.get("product_id")) for c in local if c.get("product_id")}
         meesho_ids = {int(m.get("product_id")) for m in meesho_items if m.get("product_id")}
-        # Import missing Meesho items into local and update price for existing to match Meesho's real price
-        imported=0; updated=0
-        for m in meesho_items:
-            pid=int(m.get("product_id") or 0)
-            meesho_price = int(m.get("price") or m.get("effective") or 0)
-            # price may be in different field; try to get from result if needed
-            if not meesho_price:
-                # fallback: try to get from splits product price if available in raw
-                try: meesho_price = int(m.get("mrp") or 0)
-                except: pass
-            if not pid: continue
-            if pid not in local_ids:
+        # Full sync: if Meesho has items, ensure local exactly matches Meesho (price/qty/variation) to fix mismatch
+        imported=0; updated=0; removed=0
+        if meesho_items and len(meesho_items)>0:
+            # Build map for quick lookup
+            meesho_map = {int(m.get("product_id")): m for m in meesho_items if m.get("product_id")}
+            # Update existing and mark for removal
+            for c in list(local):
+                pid=int(c.get("product_id") or 0)
+                m = meesho_map.get(pid)
+                if m:
+                    # update price/qty/variation if different
+                    meesho_price = int(m.get("price") or m.get("mrp") or c.get("price") or 0)
+                    meesho_qty = int(m.get("quantity") or m.get("qty") or 1)
+                    meesho_var = m.get("variation") or c.get("variation_name") or "Free Size"
+                    meesho_var_id = int(m.get("variation_id") or c.get("variation_id") or 0)
+                    if int(c.get("price") or 0) != meesho_price or int(c.get("qty") or 0) != meesho_qty or str(c.get("variation_name") or "") != str(meesho_var):
+                        from database import get_db
+                        conn=get_db()
+                        conn.execute("UPDATE cart SET price=?, qty=?, variation_name=?, variation_id=? WHERE user_id=? AND product_id=?",
+                                     (meesho_price, meesho_qty, meesho_var, meesho_var_id, uid, pid))
+                        conn.commit(); conn.close()
+                        updated+=1
+                else:
+                    # Local item not in Meesho (maybe removed in Meesho) - keep it for now, but if user removed in bot we already synced via remove API
+                    # To avoid price increase from stale items, we do NOT auto-remove here; removal is via explicit remove API
+                    pass
+            # Import Meesho items not in local (e.g., added in Meesho app)
+            for m in meesho_items:
+                pid=int(m.get("product_id") or 0)
+                if not pid or pid in local_ids: continue
+                meesho_price = int(m.get("price") or m.get("mrp") or 0)
                 add_to_cart(uid, pid, m.get("quantity",1), name=m.get("name",""), price=meesho_price or 0, image=m.get("image","") or "", supplier_id=int(m.get("supplier_id") or 0), variation_id=int(m.get("variation_id") or 0), variation_name=m.get("variation","Free Size"))
                 imported+=1
-            else:
-                # update price if mismatch (so card Rs.136 vs real 306 mismatch fixed)
-                if meesho_price and meesho_price>0:
-                    for c in local:
-                        if int(c.get("product_id"))==pid and int(c.get("price") or 0) != meesho_price:
-                            from database import get_db
-                            conn=get_db(); conn.execute("UPDATE cart SET price=? WHERE user_id=? AND product_id=?", (meesho_price, uid, pid)); conn.commit(); conn.close()
-                            updated+=1
-                            break
+        else:
+            # Meesho empty but local has items - try to push local to Meesho (add) if needed, else keep local
+            for m in meesho_items:
+                pid=int(m.get("product_id") or 0)
+                if not pid or pid in local_ids: continue
+                add_to_cart(uid, pid, m.get("quantity",1), name=m.get("name",""), price=int(m.get("price",0) or 0), image=m.get("image","") or "", supplier_id=int(m.get("supplier_id") or 0), variation_id=int(m.get("variation_id") or 0), variation_name=m.get("variation","Free Size"))
+                imported+=1
         # Remove local items that Meesho no longer has (if user removed in Meesho app, reflect in mini app after sync)
         # Only if Meesho has definitive list (not empty due to error) we remove
         removed=0
