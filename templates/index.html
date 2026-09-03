@@ -466,8 +466,11 @@ function fmtCount(n){
   return String(n);
 }
 
-let S = { offer:null, products:[], trend:[], cart:[], summary:null, addresses:[], account:null, orders:[] };
+let S = { offer:null, products:[], trend:[], cart:[], summary:null, addresses:[], account:null, orders:[], cartSession:'' };
 let cur = null, curVid = 0, curQty = 1, payMethod = 'COD', coAddrId = null, pendPay = null, otpS = null;
+// In-flight guards: the backend add is additive, so a double-tap without a
+// guard posts twice and the qty visibly doubles (1 → 2).
+let addBusy = false, cartBusy = false;
 
 function goTab(t){
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -634,7 +637,9 @@ function sheetQty(d){
   document.getElementById('sheetQ').textContent = curQty;
 }
 async function sheetAdd(buy){
-  if(!cur) return;
+  if(!cur || addBusy) return;
+  addBusy = true;
+  try{
   let sizeEl = document.querySelector('.sizepill.on');
   let size = (sizeEl && sizeEl.textContent ? sizeEl.textContent : 'Free Size').trim() || 'Free Size';
   // Self-heal: the backend rejects null supplier/variation ids, so if the
@@ -670,6 +675,7 @@ async function sheetAdd(buy){
     }
     toast(apiErr(d, 'Could not add to cart'), 'err');
   }catch(e){ toast('Network error — try again', 'err'); }
+  }finally{ addBusy = false; }
 }
 
 /* ================= cart ================= */
@@ -684,24 +690,31 @@ function normCart(d){
   }));
 }
 async function refreshCartCount(){
-  try{
-    const d = await api('/api/cart');
-    const items = normCart(d);
-    const n = items.reduce((a, c) => a + c.qty, 0);
-    document.getElementById('cartBdg').textContent = n;
-    document.getElementById('stCart').textContent = n;
-    return items;
-  }catch(e){ return null; }
+  await loadCart();
+  return S.cart;
 }
-async function renderCart(){
-  let items = [];
-  try{ items = normCart(await api('/api/cart')); }
-  catch(e){ items = []; }
-  S.cart = items;
-  const n = items.reduce((a, c) => a + c.qty, 0);
+function updateBadge(){
+  const n = (S.cart || []).reduce((a, c) => a + (Number(c.qty) || 0), 0);
   document.getElementById('cartBdg').textContent = n;
   document.getElementById('stCart').textContent = n;
-
+}
+// State-only refresh (no painting): cart rows + checkout summary + badge +
+// the backend cart_session used by later mutations. Never throws.
+async function loadCart(){
+  try{
+    const d = await api('/api/cart');
+    if(d && d.cart_session) S.cartSession = d.cart_session;
+    S.cart = normCart(d);
+  }catch(e){ S.cart = []; }
+  try{
+    const s = await api('/api/checkout/summary');
+    S.summary = (s && !s.error) ? s : null;
+  }catch(e){ S.summary = null; }
+  updateBadge();
+}
+async function renderCart(){
+  await loadCart();
+  const items = S.cart;
   const list = document.getElementById('cartList');
   if(!items.length){
     list.innerHTML = '<div class="empty"><div class="art">🛒</div>Your cart is empty<br><span style="font-size:11px">Search something you love</span></div>';
@@ -718,10 +731,8 @@ async function renderCart(){
     '<div class="stepper"><button onclick="chgQty(' + i + ',-1)">−</button><span>' + c.qty + '</span><button onclick="chgQty(' + i + ',1)">+</button></div></div>'
   ).join('');
 
-  try{
-    const s = await api('/api/checkout/summary');
-    if(s && !s.error){
-      S.summary = s;
+  const s = S.summary;
+  if(s){
       const mrp = Number(s.product_price || 0);
       const disc = Math.abs(Number(s.total_discounts || 0));
       const cod = Number(s.cod_amount ?? s.total ?? 0);
@@ -739,12 +750,8 @@ async function renderCart(){
       document.getElementById('ctaTot').textContent = inr(cod);
       document.getElementById('ctaBar').style.display = 'flex';
     } else {
-      throw new Error('summary');
-    }
-  }catch(e){
     const mrp = items.reduce((a, c) => a + c.mrp * c.qty, 0);
     const tot = items.reduce((a, c) => a + c.price * c.qty, 0);
-    S.summary = null;
     document.getElementById('sMrp').textContent = inr(mrp);
     document.getElementById('sDisc').textContent = '−' + inr(mrp - tot);
     document.getElementById('sTot').textContent = inr(tot);
@@ -793,13 +800,16 @@ async function syncCart(){
 }
 async function chgQty(i, d){
   const c = S.cart[i];
-  if(!c) return;
+  if(!c || cartBusy) return;
+  cartBusy = true;
+  try{
   const qty = c.qty + d;
   const removing = qty <= 0;
   try{
     // Send cart_id + product_id + the Meesho review identifier (cached
-    // from the last pull) so the backend removes the exact server item.
-    const r = await api('/api/cart/update', {method:'POST', body:{cart_id: c.key, product_id: c.product_id, identifier: meeshoIdent(c.product_id, c.key), qty: qty}});
+    // from the last pull) + cart_session so the backend removes the exact
+    // server item in the right session.
+    const r = await api('/api/cart/update', {method:'POST', body:{cart_id: c.key, product_id: c.product_id, identifier: meeshoIdent(c.product_id, c.key), cart_session: S.cartSession || '', qty: qty}});
     if(!(r && (r.ok || r.success || Array.isArray(r.items)))) return toast(apiErr(r, 'Could not update'), 'err');
     // Confirm sync against the real Meesho cart, then re-render.
     const pull = await syncCart();
@@ -813,6 +823,7 @@ async function chgQty(i, d){
       toast('Cart synced', 'ok');
     }
   }catch(e){ toast('Network error — try again', 'err'); }
+  }finally{ cartBusy = false; }
 }
 function paintCartAddr(){
   const a = S.addresses.find(x => x.active) || S.addresses[0];

@@ -1853,13 +1853,36 @@ def api_cart_sync_pull():
             # resurfaces truthfully after a few minutes.
             try:
                 tombs = _tombstone_recent(uid)
-                local_pids = {int(c.get("product_id") or 0) for c in get_cart(uid)}
+                local_rows = get_cart(uid)
+                local_pids = set()
+                local_keys = set()
+                for c in local_rows:
+                    try:
+                        _p = int(c.get("product_id") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if not _p:
+                        continue
+                    local_pids.add(_p)
+                    try:
+                        local_keys.add((_p, int(c.get("variation_id") or 0)))
+                    except (TypeError, ValueError):
+                        local_keys.add((_p, 0))
                 for m in meesho_items:
                     try:
                         mpid = int(m.get("product_id") or 0)
+                        mvid = int(m.get("variation_id") or 0)
                     except (TypeError, ValueError):
                         continue
-                    if not mpid or mpid in local_pids or mpid in tombs:
+                    if not mpid or mpid in tombs:
+                        continue
+                    if (mpid, mvid) in local_keys:
+                        continue
+                    if mpid in local_pids:
+                        # Same product already local under another variation:
+                        # never create a second row (no duplicates); the
+                        # price/qty updater above already synced the row.
+                        print(f"[SYNC_PULL] skip import pid={mpid} vid={mvid}: product already local", flush=True)
                         continue
                     mprice = int(m.get("price") or m.get("mrp") or 0)
                     mqty = int(m.get("quantity") or m.get("qty") or 1) or 1
