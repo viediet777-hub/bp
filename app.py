@@ -480,7 +480,8 @@ def api_place_order():
         tried_amts.append(cand_int)
         order_r = real_preorder(acc, cart_session, meesho_addr_id,
                                 payment_method=payment_method,
-                                customer_amount=cand_int)
+                                customer_amount=cand_int,
+                                addr_info=st.get("addr") or {})
         print(f"[PLACE_ORDER] preorder try amount={cand_int} ok={order_r.get('ok')} err={order_r.get('error')} meesho_num={order_r.get('order_num')} raw={str(order_r.get('raw'))[:400]}", flush=True)
         if order_r.get("ok"):
             break
@@ -614,7 +615,8 @@ def api_create_pending():
             continue
         tried_amts.append(cand_int)
         order_r = real_preorder(acc, cart_session, meesho_addr_id,
-                                payment_method="UPI", customer_amount=cand_int)
+                                payment_method="UPI", customer_amount=cand_int,
+                                addr_info=st.get("addr") or {})
         print(f"[CREATE_PENDING] preorder try amount={cand_int} ok={order_r.get('ok')} err={order_r.get('error')} raw={str(order_r.get('raw'))[:400]} addr={meesho_addr_id} cs={cart_session[:20] if cart_session else ''}", flush=True)
         if order_r.get("ok"):
             break
