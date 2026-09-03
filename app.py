@@ -394,6 +394,10 @@ def api_place_order():
     # COMPLETELY FREE: cart total = only products sum, no fee at all
     subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
     fee = 0  # FREE - was ORDER_FEE, removed
+    try:
+        user_mode = get_global_mode()
+    except Exception:
+        user_mode = "free"
 
     # Get persisted cart_session, or sync local cart to real Meesho cart
     cart_session = get_cart_session(uid)
@@ -454,7 +458,9 @@ def api_place_order():
                         "review": dbg_review}), 400
 
     cart_session = st["cs"]
-    # For COD use effective_total (69), for UPI use upi_amount (41) - captured diff is 28 prepaid discount
+    # For COD use effective_total (69), for UPI display upi_amount (41) - captured diff is 28 prepaid discount.
+    # But preorder customer_amount must be in [COD, MRP] else Meesho says Invalid request payload,
+    # so try candidates in order: order_total first, then display amount.
     if payment_method == "COD":
         meesho_amount = st.get("effective_total") or st.get("order_total") or subtotal
     else:
@@ -462,22 +468,35 @@ def api_place_order():
     meesho_addr_id = st["addr"].get("id")
     set_cart_session(uid, cart_session)
 
-    order_r = real_preorder(acc, cart_session, meesho_addr_id,
-                            payment_method=payment_method,
-                            customer_amount=meesho_amount)
-    print(f"[PLACE_ORDER] preorder result ok={order_r.get('ok')} err={order_r.get('error')} meesho_num={order_r.get('order_num')} raw={str(order_r.get('raw'))[:600]}", flush=True)
-    if not order_r.get("ok"):
+    order_r = None
+    tried_amts = []
+    for cand in (st.get("order_total"), st.get("effective_total"), meesho_amount, subtotal):
+        try:
+            cand_int = int(cand or 0)
+        except:
+            continue
+        if not cand_int or cand_int in tried_amts:
+            continue
+        tried_amts.append(cand_int)
+        order_r = real_preorder(acc, cart_session, meesho_addr_id,
+                                payment_method=payment_method,
+                                customer_amount=cand_int)
+        print(f"[PLACE_ORDER] preorder try amount={cand_int} ok={order_r.get('ok')} err={order_r.get('error')} meesho_num={order_r.get('order_num')} raw={str(order_r.get('raw'))[:400]}", flush=True)
+        if order_r.get("ok"):
+            break
+    if not order_r or not order_r.get("ok"):
         if user_mode == "paid":
             add_wallet(uid, fee)
         # Try to give actionable hint - if order_failed due to amount, try with cod_amount instead
         hint = ""
-        raw = order_r.get("raw") or {}
+        raw = (order_r or {}).get("raw") or {}
         if "amount" in str(raw).lower() or "customer_amount" in str(raw).lower():
             hint = "Amount mismatch - try COD or check cart price"
-        return jsonify({"error": f"Order failed: {order_r.get('error')}",
-                        "message": order_r.get("message", "") or hint,
+        return jsonify({"error": f"Order failed: {(order_r or {}).get('error')}",
+                        "message": (order_r or {}).get("message", "") or hint,
                         "details": order_r,
                         "sent_amount": meesho_amount,
+                        "tried_amounts": tried_amts,
                         "cart_session": cart_session,
                         "address_id": meesho_addr_id}), 400
 
@@ -575,17 +594,32 @@ def api_create_pending():
         return jsonify({"ok": False, "error": "Could not load Meesho cart. Check login/items."}), 400
 
     cart_session = st["cs"]
-    meesho_amount = st.get("upi_amount") or st.get("order_total") or 0
+    upi_amt = st.get("upi_amount") or st.get("order_total") or 0
+    order_tot = st.get("order_total") or st.get("effective_total") or upi_amt or 0
+    meesho_amount = upi_amt
     meesho_addr_id = st["addr"].get("id")
     set_cart_session(uid, cart_session)
 
-    # Use Meesho's REAL preorder - returns actual payment QR from JusPay
-    order_r = real_preorder(acc, cart_session, meesho_addr_id,
-                            payment_method="UPI", customer_amount=meesho_amount)
-    print(f"[CREATE_PENDING] preorder ok={order_r.get('ok')} err={order_r.get('error')} raw={str(order_r.get('raw'))[:600]} sent_amount={meesho_amount} addr={meesho_addr_id} cs={cart_session[:20] if cart_session else ''}", flush=True)
-    if not order_r.get("ok"):
-        # If UPI fails, try COD as fallback to see if amount was issue
-        return jsonify({"ok": False, "error": f"Order failed: {order_r.get('error')}", "message": order_r.get("message",""), "details": order_r, "sent_amount": meesho_amount, "address_id": meesho_addr_id}), 400
+    # Use Meesho's REAL preorder - returns actual payment QR from JusPay.
+    # Capture margin says amount must be in [COD, MRP] (e.g. 83..199) - UPI 56 alone
+    # gets "Invalid request payload". So try order_total first, then upi_amount.
+    order_r = None
+    tried_amts = []
+    for cand in (order_tot, upi_amt):
+        try:
+            cand_int = int(cand or 0)
+        except:
+            continue
+        if not cand_int or cand_int in tried_amts:
+            continue
+        tried_amts.append(cand_int)
+        order_r = real_preorder(acc, cart_session, meesho_addr_id,
+                                payment_method="UPI", customer_amount=cand_int)
+        print(f"[CREATE_PENDING] preorder try amount={cand_int} ok={order_r.get('ok')} err={order_r.get('error')} raw={str(order_r.get('raw'))[:400]} addr={meesho_addr_id} cs={cart_session[:20] if cart_session else ''}", flush=True)
+        if order_r.get("ok"):
+            break
+    if not order_r or not order_r.get("ok"):
+        return jsonify({"ok": False, "error": f"Order failed: {(order_r or {}).get('error')}", "message": (order_r or {}).get("message",""), "details": order_r, "sent_amount": meesho_amount, "tried_amounts": tried_amts, "address_id": meesho_addr_id}), 400
 
     meesho_order_num = order_r.get("order_num", "")
     items_str = ", ".join([f"{c.get('name','?')}x{c.get('qty',1)}" for c in cart])
@@ -1578,20 +1612,15 @@ def api_cart_sync_pull():
                     # Local item not in Meesho (maybe removed in Meesho) - keep it for now, but if user removed in bot we already synced via remove API
                     # To avoid price increase from stale items, we do NOT auto-remove here; removal is via explicit remove API
                     pass
-            # Import Meesho items not in local (e.g., added in Meesho app)
-            for m in meesho_items:
-                pid=int(m.get("product_id") or 0)
-                if not pid or pid in local_ids: continue
-                meesho_price = int(m.get("price") or m.get("mrp") or 0)
-                add_to_cart(uid, pid, m.get("quantity",1), name=m.get("name",""), price=meesho_price or 0, image=m.get("image","") or "", supplier_id=int(m.get("supplier_id") or 0), variation_id=int(m.get("variation_id") or 0), variation_name=m.get("variation","Free Size"))
-                imported+=1
+            # DO NOT auto-import Meesho items not in local here - this re-adds
+            # items the user just removed (Meesho remove is async / pid-based
+            # remove fails, Meesho still has item for a while). Import causes
+            # 0-sec flicker / reappear glitch. Only update price/qty.
+            # Explicit import happens via dedicated sync action, not pull.
+            pass
         else:
-            # Meesho empty but local has items - try to push local to Meesho (add) if needed, else keep local
-            for m in meesho_items:
-                pid=int(m.get("product_id") or 0)
-                if not pid or pid in local_ids: continue
-                add_to_cart(uid, pid, m.get("quantity",1), name=m.get("name",""), price=int(m.get("price",0) or 0), image=m.get("image","") or "", supplier_id=int(m.get("supplier_id") or 0), variation_id=int(m.get("variation_id") or 0), variation_name=m.get("variation","Free Size"))
-                imported+=1
+            # Meesho empty but local has items - keep local, do not touch
+            pass
         # Remove local items that Meesho no longer has (if user removed in Meesho app, reflect in mini app after sync)
         # Only if Meesho has definitive list (not empty due to error) we remove
         removed=0

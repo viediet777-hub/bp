@@ -831,30 +831,45 @@ def real_cart_sync(acc, local_items, cart_session=None):
 
 def real_bind_address(acc, cart_session, address_id, dest_pin=None):
     """Bind address to cart via /api/1.0/cart/location.
-    CRITICAL: context='review' + identifier='buy_now' matches the real app."""
-    body = {
-        "context": "review", "identifier": "buy_now",
-        "cart_session": cart_session,
-        "dest_pin": dest_pin,
-        "address_id": int(address_id),
-        "customerAmount": None,
-        "payment_modes": None,
-        "replaceable": None,
-        "item": None,
-        "payment_instrument": None,
-        "bank_offers": None,
-        "filter_products": None,
-        "is_self_pickup": None,
-        "self_pickup_address": None,
-        "is_emi": None,
-        "user_id": _acc_uid(acc),
-    }
+    Captured folder-21 uses context='atc_cart_v2' + identifier='default'. Try that first, then review/buy_now fallback."""
+    for ctx, ident in (("atc_cart_v2", "default"), ("review", "buy_now"), ("atc_review", "default")):
+        body = {
+            "context": ctx, "identifier": ident,
+            "cart_session": cart_session,
+            "dest_pin": dest_pin,
+            "address_id": int(address_id),
+            "customerAmount": None,
+            "payment_modes": None,
+            "replaceable": None,
+            "item": None,
+            "payment_instrument": None,
+            "bank_offers": None,
+            "filter_products": None,
+            "is_self_pickup": None,
+            "self_pickup_address": None,
+            "is_emi": None,
+            "user_id": _acc_uid(acc),
+        }
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                resp = client.post(f"{MEESHO_API}/1.0/cart/location",
+                                   headers=logged_in_headers(acc), json=body)
+                data = resp.json() or {}
+                if data.get("success"):
+                    return {"ok": True, "cart_session": data.get("cart_session")}
+        except Exception as e:
+            last = str(e)
+            continue
+    # last try result
     try:
         with httpx.Client(timeout=20.0) as client:
             resp = client.post(f"{MEESHO_API}/1.0/cart/location",
-                               headers=logged_in_headers(acc), json=body)
+                               headers=logged_in_headers(acc), json={
+                                   "context": "atc_cart_v2", "identifier": "default",
+                                   "cart_session": cart_session, "dest_pin": dest_pin,
+                                   "address_id": int(address_id), "user_id": _acc_uid(acc)})
             data = resp.json() or {}
-            return {"ok": data.get("success", False), "cart_session": data.get("cart_session")}
+            return {"ok": data.get("success", False), "cart_session": data.get("cart_session"), "raw": data}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -881,9 +896,9 @@ def real_paymentinfo(acc, cart_session, payment_modes=None):
             "is_emi": None,
             "user_id": _acc_uid(acc),
         }
-        # normalize payment_modes: [] for COD, ["juspay"] for prepaid (captured)
+        # normalize payment_modes per capture: ["cod"] for COD (folder 3,6), ["juspay"] for UPI (folder 2,5,7)
         if payment_modes == []:
-            body["payment_modes"] = []
+            body["payment_modes"] = ["cod"]
         elif payment_modes == ["juspay"] or payment_modes == ["upi_qr"]:
             body["payment_modes"] = ["juspay"]
         tried.append((ctx,ident))
@@ -953,67 +968,69 @@ def real_address_create(acc, name, mobile, pin, city, state, line1, line2="", la
 
 def real_cart_add_many(acc, items, cart_session=""):
     """Add multiple items to real Meesho cart in ONE call via /api/1.0/cart/add.
-    Captured uses context='pdp' for buy_now (folder 56). Try pdp then pdl."""
+    Captured folder-31 uses context='pdp' identifier='default'. Try default first, then buy_now."""
     h = logged_in_headers(acc)
-    its = []
-    for li in items:
-        its.append({
-            "identifier": "buy_now",
-            "product_id": int(li.get("product_id") or 0),
-            "supplier_id": _pos_int(li.get("supplier_id")),
-            "variation_id": _pos_int(li.get("variation_id")),
-            "variation": li.get("variation") or li.get("variation_name") or "Free Size",
-            "quantity": int(li.get("quantity") or li.get("qty") or 1),
-            "selected_price_type_id": li.get("price_type_id") or "premium_return_price",
-            "client_metadata": None,
-        })
-    for context in ("pdp", "pdl"):
-        body = {
-            "context": context, "identifier": "buy_now",
-            "cart_session": cart_session or None,
-            "replaceable": False, "items": [dict(x) for x in its],
-            "address_id": None, "user_id": _acc_uid(acc),
-        }
-        try:
-            with httpx.Client(timeout=25.0) as client:
-                resp = client.post(f"{MEESHO_API}/1.0/cart/add", headers=h, json=body)
-                data = resp.json() or {}
-                print(f"[CART_ADD_MANY] context={context} resp={resp.status_code} data={str(data)[:400]}", flush=True)
-                if data.get("success"):
-                    new_cs = data.get("cart_session") or cart_session
-                    result = data.get("result", {})
-                    return {
-                        "ok": True, "success": True,
-                        "cart_session": new_cs,
-                        "effective_total": result.get("effective_total"),
-                        "total_quantity": result.get("total_quantity"),
-                        "splits": result.get("splits", []),
-                    }
-                ecode = (data.get("error") or {}).get("code") if isinstance(data.get("error"), dict) else None
-                if ecode == "CART_OOS" and resp.status_code == 200:
-                    for li in body["items"]:
-                        li["selected_price_type_id"] = "basic_return_price"
-                    resp2 = client.post(f"{MEESHO_API}/1.0/cart/add", headers=h, json=body)
-                    data2 = resp2.json() or {}
-                    if data2.get("success"):
-                        new_cs = data2.get("cart_session") or cart_session
-                        result = data2.get("result", {})
-                        return {"ok": True, "success": True, "cart_session": new_cs,
-                                "effective_total": result.get("effective_total"),
-                                "total_quantity": result.get("total_quantity"),
-                                "splits": result.get("splits", [])}
-                err_s = str(data.get("error_type") or data.get("message") or data)[:400]
-                if "context" in err_s.lower():
-                    continue
+    for ident in ("default", "buy_now"):
+        its = []
+        for li in items:
+            its.append({
+                "identifier": ident,
+                "product_id": int(li.get("product_id") or 0),
+                "supplier_id": _pos_int(li.get("supplier_id")),
+                "variation_id": _pos_int(li.get("variation_id")),
+                "variation": li.get("variation") or li.get("variation_name") or "Free Size",
+                "quantity": int(li.get("quantity") or li.get("qty") or 1),
+                "selected_price_type_id": li.get("price_type_id") or "premium_return_price",
+                "client_metadata": None,
+            })
+        for context in ("pdp", "pdl"):
+            body = {
+                "context": context, "identifier": ident,
+                "cart_session": cart_session or None,
+                "replaceable": False, "items": [dict(x) for x in its],
+                "address_id": None, "user_id": _acc_uid(acc),
+            }
+            try:
+                with httpx.Client(timeout=25.0) as client:
+                    resp = client.post(f"{MEESHO_API}/1.0/cart/add", headers=h, json=body)
+                    data = resp.json() or {}
+                    print(f"[CART_ADD_MANY] ident={ident} context={context} resp={resp.status_code} data={str(data)[:400]}", flush=True)
+                    if data.get("success"):
+                        new_cs = data.get("cart_session") or cart_session
+                        result = data.get("result", {})
+                        return {
+                            "ok": True, "success": True,
+                            "cart_session": new_cs,
+                            "effective_total": result.get("effective_total"),
+                            "total_quantity": result.get("total_quantity"),
+                            "splits": result.get("splits", []),
+                        }
+                    ecode = (data.get("error") or {}).get("code") if isinstance(data.get("error"), dict) else None
+                    if ecode == "CART_OOS" and resp.status_code == 200:
+                        for li in body["items"]:
+                            li["selected_price_type_id"] = "basic_return_price"
+                        resp2 = client.post(f"{MEESHO_API}/1.0/cart/add", headers=h, json=body)
+                        data2 = resp2.json() or {}
+                        if data2.get("success"):
+                            new_cs = data2.get("cart_session") or cart_session
+                            result = data2.get("result", {})
+                            return {"ok": True, "success": True, "cart_session": new_cs,
+                                    "effective_total": result.get("effective_total"),
+                                    "total_quantity": result.get("total_quantity"),
+                                    "splits": result.get("splits", [])}
+                    err_s = str(data.get("error_type") or data.get("message") or data)[:400]
+                    if "context" in err_s.lower() or "identifier" in err_s.lower():
+                        continue
+                    if context == "pdp":
+                        continue
+                    # pdl also failed with this ident, try next ident
+                    break
+            except Exception as e:
+                print(f"[CART_ADD_MANY] EXCEPTION ident={ident} context={context}: {e}", flush=True)
                 if context == "pdp":
                     continue
-                return {"ok": False, "error": data.get("error_type", "add_failed"), "raw": data}
-        except Exception as e:
-            print(f"[CART_ADD_MANY] EXCEPTION context={context}: {e}", flush=True)
-            if context == "pdp":
-                continue
-            return {"ok": False, "error": str(e)}
-    return {"ok": False, "error": "cart add failed (both pdp/pdl)", "raw": {}}
+                break
+    return {"ok": False, "error": "cart add failed (default+buy_now x pdp/pdl)", "raw": {}}
 
 
 def real_fetch_addresses(acc):
@@ -1163,11 +1180,17 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
             "payment_method_type": payment_method.upper() if payment_method.upper() != "PREPAID" else "UPI",
             "identifier": ident,
             "payment_aggregator": payment_aggregator or ("JUSPAY" if is_upi else None),
+            "is_selling_to_customer": False,
             "cart_session": cart_session,
+            "vpa": None,
             "address_id": int(address_id),
+            "direct_wallet_token": None,
             "customer_amount": int(customer_amount) if customer_amount is not None else None,
             "upi_package_name": "com.google.android.apps.nbu.paisa.user" if is_upi else None,
-            "payment_flow_type": "upi_qr" if is_upi else None,
+            "payment_flow_type": "qr" if is_upi else None,
+            "sender_id": -1,
+            "accurate_location": json.dumps({"lat": "22.7196", "long": "75.8577"}),
+            "card_token": None,
             "payment_provider": "JUSPAY" if is_upi else None,
             "processor_id": "in.juspay.hyperapi" if is_upi else None,
             "payment_method": "UPI" if is_upi else "COD",
@@ -1183,6 +1206,8 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
                                    headers=logged_in_headers(acc), json=body)
             data = resp.json() or {}
             order_num = data.get("order_num")
+            juspay_params = data.get("juspay_transaction_params", {})
+            qr_params = data.get("qr_transaction_params", {})
             if order_num:
                 print(f"[PREORDER] success ident={ident} order_num={order_num}", flush=True)
                 result = {

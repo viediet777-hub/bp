@@ -1078,10 +1078,10 @@ async function updateQty(cid,qty){
     var r=await fetch(API+'/api/cart/update',{method:'POST',headers:headers(),body:JSON.stringify({cart_id:cid,qty:qty})});
     var d=await r.json();
     if(!r.ok || d.error){ throw new Error(d.error||'update failed'); }
-    // success - don't reload from server on remove (keep optimistic state)
+    // success - keep optimistic state, NO server reload on remove (prevents reappear flicker)
     if(qty===0){
-      // sync with Meesho in background, don't re-render from server
-      try{ fetch(API+'/api/cart/sync/pull',{method:'POST',headers:headers()}); }catch(e){}
+      // Meesho sync already done in /api/cart/update backend. Do NOT call
+      // sync/pull here - it used to re-import the just-removed item.
     } else {
       await loadCartFast();
     }
@@ -1130,12 +1130,17 @@ async function handleOnlinePayment(){
     if(!d.ok){
       var msg = d.error || 'Failed to create order';
       if(d.details) msg += ' - ' + (d.details.message || d.details.error || '');
-      if(d.sent_amount) msg += ' (sent ₹'+d.sent_amount+')';
+      if(d.sent_amount) msg += ' (sent Rs.'+d.sent_amount+')';
+      if(d.tried_amounts) msg += ' tried['+d.tried_amounts.join(',')+']';
       throw new Error(msg);
     }
     pendingOrderId=d.order_id; pendingAmount=d.amount;
     sessionStorage.setItem('pending_upi_order', String(d.order_id));
     sessionStorage.setItem('pending_upi_amount', String(d.amount));
+    try{
+      if(d.meesho_order_num) sessionStorage.setItem('pending_meesho_num', String(d.meesho_order_num));
+      if(d.juspay_order_id) sessionStorage.setItem('pending_juspay_id', String(d.juspay_order_id));
+    }catch(e){}
 
     // Show QR - working bot style: use upi_uri via qrcode + external service fallback (fast, no extra animation)
     const box=document.getElementById('qrcode');
@@ -1198,7 +1203,7 @@ function startAutoVerify(orderNum, juspayId){
         if(oid){
           await fetch(API+'/api/orders/confirm',{method:'POST',headers:headers(),body:JSON.stringify({order_id:parseInt(oid)})});
         }
-        sessionStorage.removeItem('pending_upi_order'); sessionStorage.removeItem('pending_upi_amount');
+        try{ sessionStorage.removeItem('pending_upi_order'); sessionStorage.removeItem('pending_upi_amount'); sessionStorage.removeItem('pending_meesho_num'); sessionStorage.removeItem('pending_juspay_id'); }catch(e){}
         pendingOrderId=null; closePayModal();
         toast('Payment verified! Order confirmed!');
         loadCart(); switchTab(3); loadOrders();
@@ -1214,7 +1219,7 @@ async function confirmPayment(){
   const d=await r.json();
   if(d.ok){
     if(_autoVerifyTimer) clearInterval(_autoVerifyTimer);
-    sessionStorage.removeItem('pending_upi_order'); sessionStorage.removeItem('pending_upi_amount');
+    try{ sessionStorage.removeItem('pending_upi_order'); sessionStorage.removeItem('pending_upi_amount'); sessionStorage.removeItem('pending_meesho_num'); sessionStorage.removeItem('pending_juspay_id'); }catch(e){}
     pendingOrderId=null; closePayModal();
     toast('Order confirmed! #'+oid);
     loadCart(); switchTab(3); loadOrders();
@@ -1223,8 +1228,9 @@ async function confirmPayment(){
 window.addEventListener('load', ()=>{
   if(sessionStorage.getItem('pending_upi_order')){
     showPayModal();
-    var oid=sessionStorage.getItem('pending_upi_order');
-    startAutoVerify(null, null);
+    var mnum=null, jid=null;
+    try{ mnum=sessionStorage.getItem('pending_meesho_num'); jid=sessionStorage.getItem('pending_juspay_id'); }catch(e){}
+    if(mnum || jid){ startAutoVerify(mnum, jid); }
   }
 });
 
