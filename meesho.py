@@ -364,8 +364,10 @@ def roll_fod_sync(for_acc=None):
                         if mapped["ok"] and mapped["offer"]:
                             offer = dict(mapped["offer"])
                             buck = int(offer.get("bucket") or 0)
-                            offer["display_bucket"] = buck
-                            offer["display_text"] = f"Upto \u20b9{buck} OFF"
+                            # Home pe 180 dikhana hai (user request) — real bucket alag rakho
+                            offer["bucket"] = buck
+                            offer["display_bucket"] = 180
+                            offer["display_text"] = "Upto \u20b9180 OFF"
                             offer["live"] = True
                             offer["title"] = "Upto"
                             offer["subtitle"] = "on 1st order"
@@ -390,9 +392,10 @@ def roll_fod_sync(for_acc=None):
                 offer.setdefault("subtitle", "on 1st order")
                 offer["live"] = True
                 buck = int(offer.get("bucket") or 0)
-                # Show REAL bucket value (like competitor's 120), not hardcoded 180
-                offer["display_bucket"] = buck
-                offer["display_text"] = f"Upto \u20b9{buck} OFF"
+                # Home pe 180 dikhana hai — real bucket alag rakho (user request 130->180)
+                offer["display_bucket"] = 180
+                offer["display_text"] = "Upto \u20b9180 OFF"
+                # Real bucket kept in offer["bucket"] for internal discount calc
                 if buck >= 135:
                     return {"ok": True, "offer": offer}
                 if not best or buck > int(best.get("bucket") or 0):
@@ -400,6 +403,9 @@ def roll_fod_sync(for_acc=None):
         except Exception:
             continue
     if best:
+        # Ensure 180 display even for best
+        best["display_bucket"] = 180
+        best["display_text"] = "Upto \u20b9180 OFF"
         return {"ok": True, "offer": best}
     return {"ok": False, "error": "Could not fetch offer."}
 
