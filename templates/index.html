@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#2F6BFF">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Meesho Shop</title>
 <script src="/static/UnknownGuy_js/telegram-web-app.js"></script>
 <link rel="stylesheet" href="/static/UnknownGuy_css/leaflet.css"/>
@@ -5567,7 +5571,7 @@ function openAddAccountSheet(){
   AA = { phone:'', request_id:'', instance_id:'' };
   openSheet(
     '<h3>Add Meesho account</h3>' +
-    '<div class="sub" style="color:var(--muted);margin-bottom:8px">Enter your 10-digit number. We&#39;ll send a live OTP from Meesho.</div>' +
+    '<div class="sub" style="color:var(--muted);margin-bottom:8px">Enter your 10-digit number. You&#39;ll get a live OTP on WhatsApp/SMS — enter it here.</div>' +
     '<div style="display:flex;gap:6px;margin-bottom:8px">' +
     '<input class="ai-input" id="aaPhone" inputmode="numeric" maxlength="10" placeholder="Enter 10-digit number" autofocus style="flex:1">' +
     '<button class="cta" id="aaCheckBtn" style="margin-top:0;background:#2ecc71;color:#fff;white-space:nowrap">✓ Check</button>' +
