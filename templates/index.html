@@ -807,25 +807,22 @@ async function loadCart(){
     var r=await fetch(API+'/api/cart',{headers:headers()});
     var items=await r.json();
     renderCart(Array.isArray(items)?items:[]);
-    // Background sync - strong but no flicker: respect recentlyRemoved (0 sec no re-add)
+    // Background sync - 0 sec no re-add, strong sync like working bot (no flicker)
     fetch(API+'/api/cart/sync/pull',{method:'POST',headers:headers()}).then(function(resp){ return resp.json(); }).then(function(d){
       if(!d || (!d.imported && !d.updated)) return;
-      // If sync imported a product that was just removed (within 10 sec), ignore it
       var now=Date.now();
       var hasRecent=false;
       if(d.meessho_items){
         for(var i=0;i<d.meessho_items.length;i++){
           var pid=String(d.meessho_items[i].product_id||'');
-          if(_recentlyRemoved[pid] && (now - _recentlyRemoved[pid] < 10000)){
+          // If this pid was removed in last 30 sec, don't re-add (prevents 0-sec flicker)
+          if(_recentlyRemoved[pid] && (now - _recentlyRemoved[pid] < 30000)){
             hasRecent=true;
-            // Remove that recently removed from local again if it was re-added
-            fetch(API+'/api/cart/update',{method:'POST',headers:headers(),body:JSON.stringify({cart_id: pid, qty:0})}).catch(function(){});
           }
         }
       }
-      // Clean up old entries
-      for(var k in _recentlyRemoved){ if(now - _recentlyRemoved[k] > 10000) delete _recentlyRemoved[k]; }
-      if(hasRecent) return; // don't reload if it was flicker re-add
+      for(var k in _recentlyRemoved){ if(now - _recentlyRemoved[k] > 30000) delete _recentlyRemoved[k]; }
+      if(hasRecent) return;
       if(!_qtyLock) fetch(API+'/api/cart',{headers:headers()}).then(r=>r.json()).then(function(itms){ if(Array.isArray(itms)) renderCart(itms); });
     }).catch(function(){});
   }catch(e){$('cartList').innerHTML='<div class="empty"><p>Failed to load cart</p></div>'}
