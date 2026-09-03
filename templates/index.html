@@ -167,6 +167,17 @@ img{display:block;max-width:100%}
   background:rgba(102,252,241,.14);color:var(--cyan)}
 .stepper button:active{transform:scale(.88)}
 .stepper span{font-family:'Space Grotesk';font-weight:700;font-size:13px;min-width:16px;text-align:center}
+.cart-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
+.cart-actions .qty-label{font-family:'Space Grotesk';font-weight:700;font-size:13px;min-width:16px;text-align:center}
+.cart-actions .btn-inc{width:28px;height:28px;border-radius:999px;font-weight:800;font-size:15px;
+  background:rgba(102,252,241,.14);color:var(--cyan);display:grid;place-items:center}
+.cart-actions .btn-inc:active{transform:scale(.85)}
+.cart-actions .btn-del{width:28px;height:28px;border-radius:999px;font-weight:800;font-size:13px;
+  background:rgba(255,107,129,.14);color:var(--red);display:grid;place-items:center;border:1px solid rgba(255,107,129,.25)}
+.cart-actions .btn-del:active{transform:scale(.85)}
+.detect-btn{width:100%;margin-top:8px;padding:11px;border-radius:13px;font-weight:700;font-size:12px;
+  background:rgba(102,252,241,.08);border:1px solid var(--line);color:var(--cyan);text-align:center}
+.detect-btn:active{transform:scale(.97)}
 .sumcard{padding:15px;margin-top:12px;border-radius:17px}
 .srow{display:flex;justify-content:space-between;font-size:12.5px;font-weight:600;color:var(--txt2);padding:5px 0}
 .srow b{color:var(--txt);font-family:'Space Grotesk'}
@@ -727,9 +738,11 @@ async function renderCart(){
   list.innerHTML = items.map((c, i) =>
     '<div class="glass citem"><img src="' + esc(c.img) + '" onerror="this.src=\'https://via.placeholder.com/300\'">' +
     '<div style="flex:1;min-width:0"><div class="nm">' + esc(c.name) + '</div>' +
-    '<div class="vr">' + esc(c.size) + ' • Qty ' + c.qty + '</div>' +
+    '<div class="vr">' + esc(c.size) + '</div>' +
     '<div class="pr num">' + inr(c.price) + (c.mrp > c.price ? ' <s>' + inr(c.mrp) + '</s>' : '') + '</div></div>' +
-    '<div class="stepper"><button onclick="chgQty(' + i + ',-1)">−</button><span>' + c.qty + '</span><button onclick="chgQty(' + i + ',1)">+</button></div></div>'
+    '<div class="cart-actions"><button class="btn-del" onclick="deleteCartItem(' + i + ')" title="Remove">🗑</button>' +
+    '<span class="qty-label num">×' + c.qty + '</span>' +
+    '<button class="btn-inc" onclick="incCartItem(' + i + ')" title="Add one more">+</button></div></div>'
   ).join('');
 
   const s = S.summary;
@@ -816,39 +829,41 @@ function schedulePull(ms){
   }, ms || 8000);
 }
 function bumpPullToken(){ window._pullToken = (window._pullToken || 0) + 1; }
-async function chgQty(i, d){
+async function incCartItem(i){
   const c = S.cart[i];
   if(!c || cartBusy) return;
   cartBusy = true;
   bumpPullToken();
   try{
-  const qty = c.qty + d;
-  const removing = qty <= 0;
-  try{
-    // Send cart_id + product_id + the Meesho review identifier (cached
-    // from the last pull) + cart_session so the backend removes the exact
-    // server item in the right session.
+    const qty = c.qty + 1;
     const r = await api('/api/cart/update', {method:'POST', body:{cart_id: c.key, product_id: c.product_id, identifier: meeshoIdent(c.product_id, c.key), cart_session: S.cartSession || '', qty: qty}});
     if(!(r && (r.ok || r.success || Array.isArray(r.items)))) return toast(apiErr(r, 'Could not update'), 'err');
-    if(removing){
-      // Do NOT pull immediately: Meesho lags behind the remove and an
-      // instant pull would re-import the item (qty jumps back / doubles).
-      // The local row is already deleted — paint that truth now; the
-      // backend tombstone blocks re-import meanwhile.
-      await renderCart();
-      const v = r.meesho_verified;
-      if(v === true) toast('Removed ✓ Meesho synced', 'ok');
-      else if(v === false) toast('Removed locally — Meesho retry pending', 'err');
-      else toast('Removed', 'ok');
-      schedulePull(8000);
-    } else {
-      // Qty change: immediate confirm-sync is safe (row still exists).
-      const pull = await syncCart();
-      await renderCart();
-      if(pull && pull.updated) toast('Cart synced', 'ok');
-    }
+    const pull = await syncCart();
+    await renderCart();
+    if(pull && pull.updated) toast('Cart synced', 'ok');
   }catch(e){ toast('Network error — try again', 'err'); }
-  }finally{ cartBusy = false; }
+  finally{ cartBusy = false; }
+}
+async function deleteCartItem(i){
+  const c = S.cart[i];
+  if(!c || cartBusy) return;
+  if(!confirm('Remove "' + c.name + '" from cart?')) return;
+  cartBusy = true;
+  bumpPullToken();
+  try{
+    const r = await api('/api/cart/update', {method:'POST', body:{cart_id: c.key, product_id: c.product_id, identifier: meeshoIdent(c.product_id, c.key), cart_session: S.cartSession || '', qty: 0}});
+    if(!(r && (r.ok || r.success || Array.isArray(r.items)))) return toast(apiErr(r, 'Could not remove'), 'err');
+    // Do NOT pull immediately: Meesho lags behind the remove and an
+    // instant pull would re-import the item. Paint local truth now;
+    // the backend tombstone blocks re-import meanwhile.
+    await renderCart();
+    const v = r.meesho_verified;
+    if(v === true) toast('Removed ✓ Meesho synced', 'ok');
+    else if(v === false) toast('Removed locally — Meesho retry pending', 'ok');
+    else toast('Removed', 'ok');
+    schedulePull(5000);
+  }catch(e){ toast('Network error — try again', 'err'); }
+  finally{ cartBusy = false; }
 }
 function paintCartAddr(){
   const a = S.addresses.find(x => x.active) || S.addresses[0];
@@ -885,7 +900,9 @@ function openAddrSheet(newMode){
     '<div class="mini-form">' +
     '<input id="fName" class="fld" placeholder="Full name">' +
     '<input id="fPhone" class="fld" inputmode="numeric" maxlength="10" placeholder="10-digit mobile">' +
+    '<button class="detect-btn" onclick="detectLocation()">📍 Detect Location (auto-fill city/pin)</button>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><input id="fPin" class="fld" inputmode="numeric" placeholder="Pincode"><input id="fCity" class="fld" placeholder="City"></div>' +
+    '<input id="fState" class="fld" placeholder="State" style="display:none">' +
     '<input id="fLine" class="fld" placeholder="House no, street, area">' +
     '<button class="btn btn--go fbtn" onclick="saveAddr()">Save & use this address</button></div>');
   if(newMode) setTimeout(() => { try{ document.getElementById('fName').focus(); }catch(e){} }, 300);
@@ -899,10 +916,29 @@ async function pickAddr(id){
     } else toast(apiErr(d, 'Could not select'), 'err');
   }catch(e){ toast('Network error — try again', 'err'); }
 }
+function detectLocation(){
+  if(!navigator.geolocation){ toast('Geolocation not supported', 'err'); return; }
+  toast('Detecting location…');
+  navigator.geolocation.getCurrentPosition(async function(pos){
+    try{
+      const lat = pos.coords.latitude, lng = pos.coords.longitude;
+      const d = await api('/api/geocode?lat=' + lat + '&lng=' + lng);
+      const r = d && d.results && d.results[0];
+      if(r){
+        if(document.getElementById('fPin')) document.getElementById('fPin').value = r.pin || '';
+        if(document.getElementById('fCity')) document.getElementById('fCity').value = r.city || '';
+        if(document.getElementById('fState')){ document.getElementById('fState').value = r.state || ''; document.getElementById('fState').style.display = 'block'; }
+        toast('Location detected: ' + (r.city || ''), 'ok');
+      } else { toast('Could not detect — enter manually', 'err'); }
+    }catch(e){ toast('Geocode failed — enter manually', 'err'); }
+  }, function(err){
+    toast('Location access denied — enter manually', 'err');
+  }, {timeout:10000, maximumAge:60000});
+}
 async function saveAddr(){
   const v = id => (document.getElementById(id).value || '').trim();
   const body = {name:v('fName'), mobile:v('fPhone').replace(/\D/g, '').slice(-10), pin:v('fPin'),
-    city:v('fCity'), state:'', address_line_1:v('fLine'), address_line_2:'', landmark:'',
+    city:v('fCity'), state:v('fState'), address_line_1:v('fLine'), address_line_2:'', landmark:'',
     address_type:'Home', is_default:1};
   if(!(body.name && body.mobile && body.pin && body.address_line_1)) return toast('Name, mobile, pin, address required', 'err');
   try{
