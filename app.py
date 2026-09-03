@@ -27,6 +27,7 @@ from config import ORDER_FEE, WALLET_MIN, WALLET_MAX, GW_UPI_ID, GW_UPI_NAME, AD
 from meesho import (
     get_meesho_offer, search_meesho, get_meesho_product, send_otp, verify_otp, check_number,
     real_cart_add, real_cart_add_many, real_cart_review, real_cart_clear, real_cart_sync, real_cart_remove,
+    meesho_remove_verified,
     real_bind_address, real_paymentinfo, real_address_create, real_fetch_addresses,
     real_preorder, real_payment_status, real_preorder_status, real_payment_options,
     fresh_checkout_state, roll_fod_sync,
@@ -291,39 +292,20 @@ def api_cart_update():
             # delete by product_id
             from database import get_db
             conn=get_db(); conn.execute("DELETE FROM cart WHERE user_id=? AND product_id=?", (uid, prod_id)); conn.commit(); conn.close()
-    # sync to real Meesho cart - robust for single-item remove
+    # sync to real Meesho cart - remove path is VERIFIED (fresh review ->
+    # remove by Meesho identifier -> re-review confirms absence), because
+    # Meesho can answer 200 without deleting on a stale cart_session.
+    meesho_verified = None
     try:
         acc = get_active_meesho_account(uid)
         if acc and prod_id:
             cs = get_cart_session(uid)
-            # For remove (qty 0), try direct product_id remove first (most reliable), then identifier fallback
             if int(qty) <= 0:
-                # Try direct product_id remove without needing review
-                rr = real_cart_remove(acc, {"product_id": int(prod_id)}, cs or "")
-                print(f"[CART_UPDATE] direct remove pid={prod_id} ok={rr.get('ok')} err={rr.get('error')}", flush=True)
-                if rr.get("ok") and rr.get("cart_session"):
-                    set_cart_session(uid, rr["cart_session"])
-                    cs = rr["cart_session"]
-                else:
-                    # Fallback: try via review identifier as before
-                    review = real_cart_review(acc, cs)
-                    if review.get("ok") and review.get("cart_session"):
-                        cs = review["cart_session"]; set_cart_session(uid, cs)
-                        m_items = review.get("items") or []
-                        m_match = next((mi for mi in m_items if int(mi.get("product_id") or 0)==int(prod_id)), None)
-                        if m_match and m_match.get("identifier"):
-                            rr2 = real_cart_remove(acc, m_match["identifier"], cs)
-                            if rr2.get("cart_session"): set_cart_session(uid, rr2["cart_session"])
-                            print(f"[CART_UPDATE] fallback remove pid={prod_id} ident={m_match['identifier'][:30]} ok={rr2.get('ok')}", flush=True)
-                        else:
-                            # No match found but we already tried product_id, try empty session
-                            rr3 = real_cart_remove(acc, {"product_id": int(prod_id)}, "")
-                            print(f"[CART_UPDATE] empty session remove pid={prod_id} ok={rr3.get('ok')}", flush=True)
-                            if rr3.get("cart_session"): set_cart_session(uid, rr3["cart_session"])
-                    else:
-                        # review failed, try empty session direct
-                        rr3 = real_cart_remove(acc, {"product_id": int(prod_id)}, "")
-                        if rr3.get("cart_session"): set_cart_session(uid, rr3["cart_session"])
+                vr = meesho_remove_verified(acc, int(prod_id), cs or "", var_id or None)
+                if vr.get("cart_session"):
+                    set_cart_session(uid, vr["cart_session"])
+                meesho_verified = bool(vr.get("verified"))
+                print(f"[CART_UPDATE] verified remove pid={prod_id} removed={vr.get('removed')} verified={vr.get('verified')} via={vr.get('via')} err={vr.get('error')}", flush=True)
             else:
                 # qty change: remove and re-add with new qty
                 review = real_cart_review(acc, cs)
@@ -352,7 +334,11 @@ def api_cart_update():
                         if ar.get("cart_session"): set_cart_session(uid, ar["cart_session"])
     except Exception as e:
         import traceback; print(f"[CART_UPDATE] Meesho sync failed: {e} {traceback.format_exc()}", flush=True)
-    return jsonify({"ok": True})
+    out = {"ok": True}
+    if meesho_verified is not None:
+        out["meesho_removed"] = meesho_verified
+        out["meesho_verified"] = meesho_verified
+    return jsonify(out)
 
 
 @app.route("/api/cart/clear", methods=["POST"])
@@ -1749,7 +1735,7 @@ def api_addresses_sync():
     return jsonify({"ok": True, "imported": imported, "live": live})
 
 
-@app.route("/api/cart/sync/pull", methods=["POST"])
+@app.route("/api/cart/sync/pull", methods=["GET", "POST"])
 def api_cart_sync_pull():
     uid = get_uid()
     acc = get_active_meesho_account(uid)
@@ -1783,17 +1769,22 @@ def api_cart_sync_pull():
         local = get_cart(uid)
         local_ids = {int(c.get("product_id")) for c in local if c.get("product_id")}
         meesho_ids = {int(m.get("product_id")) for m in meesho_items if m.get("product_id")}
-        # Full sync: if Meesho has items, ensure local exactly matches Meesho (price/qty/variation) to fix mismatch
+        # Full sync: if Meesho returned a DEFINITIVE review, reconcile local rows.
+        # - update price/qty/variation for rows Meesho still lists
+        # - prune local rows ABSENT from a definitive NON-EMPTY Meesho list
+        #   (e.g. removed directly in the Meesho app)
+        # - NEVER auto-import Meesho->local here: that re-adds items the user
+        #   just removed (Meesho remove can lag), causing the reappear glitch.
+        # - NEVER prune when the Meesho list is empty: an empty/error review
+        #   must not wipe a healthy local cart.
         imported=0; updated=0; removed=0
-        if meesho_items and len(meesho_items)>0:
-            # Build map for quick lookup
+        definitive = bool(review.get("ok") and review.get("cart_session") and meesho_items)
+        if definitive:
             meesho_map = {int(m.get("product_id")): m for m in meesho_items if m.get("product_id")}
-            # Update existing and mark for removal
             for c in list(local):
                 pid=int(c.get("product_id") or 0)
                 m = meesho_map.get(pid)
                 if m:
-                    # update price/qty/variation if different
                     meesho_price = int(m.get("price") or m.get("mrp") or c.get("price") or 0)
                     meesho_qty = int(m.get("quantity") or m.get("qty") or 1)
                     meesho_var = m.get("variation") or c.get("variation_name") or "Free Size"
@@ -1805,29 +1796,18 @@ def api_cart_sync_pull():
                                      (meesho_price, meesho_qty, meesho_var, meesho_var_id, uid, pid))
                         conn.commit(); conn.close()
                         updated+=1
-                else:
-                    # Local item not in Meesho (maybe removed in Meesho) - keep it for now, but if user removed in bot we already synced via remove API
-                    # To avoid price increase from stale items, we do NOT auto-remove here; removal is via explicit remove API
-                    pass
-            # DO NOT auto-import Meesho items not in local here - this re-adds
-            # items the user just removed (Meesho remove is async / pid-based
-            # remove fails, Meesho still has item for a while). Import causes
-            # 0-sec flicker / reappear glitch. Only update price/qty.
-            # Explicit import happens via dedicated sync action, not pull.
-            pass
-        else:
-            # Meesho empty but local has items - keep local, do not touch
-            pass
-        # Remove local items that Meesho no longer has (if user removed in Meesho app, reflect in mini app after sync)
-        # Only if Meesho has definitive list (not empty due to error) we remove
-        removed=0
-        if meesho_items is not None and len(meesho_items)>0:
-            for c in list(local):
-                pid=int(c.get("product_id") or 0)
-                if pid and pid not in meesho_ids:
-                    # don't auto-remove if Meesho cart was empty due to error - require explicit
-                    pass
-        return jsonify({"ok": True, "meesho_items": meesho_items, "imported": imported, "updated": updated, "cart_session": review.get("cart_session")})
+                elif pid:
+                    # Definitive non-empty Meesho list without this pid ->
+                    # it is gone server-side too; drop the stale local row so
+                    # the mini app never shows ghost items.
+                    from database import get_db
+                    conn=get_db()
+                    conn.execute("DELETE FROM cart WHERE user_id=? AND product_id=?", (uid, pid))
+                    conn.commit(); conn.close()
+                    removed+=1
+        return jsonify({"ok": True, "meesho_items": meesho_items, "imported": imported,
+                        "updated": updated, "removed": removed,
+                        "cart_session": review.get("cart_session")})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 
@@ -2427,7 +2407,8 @@ def adapter_cart_update():
             update_cart_qty(row["id"], quantity)
         conn.close()
 
-    # Sync to Meesho
+    # Sync to Meesho (remove path is VERIFIED — see meesho_remove_verified)
+    meesho_verified = None
     try:
         acc = get_active_meesho_account(uid) if uid else None
         if acc and product_id and quantity > 0:
@@ -2440,8 +2421,8 @@ def adapter_cart_update():
                     if int(mi.get("product_id") or 0) == int(product_id):
                         ident = mi.get("identifier")
                         if ident:
-                            real_cart_remove(acc, ident, cs)
-                            new_cs = (real_cart_remove(acc, ident, cs) or {}).get("cart_session") or cs
+                            rr = real_cart_remove(acc, ident, cs)
+                            new_cs = (rr or {}).get("cart_session") or cs
                             ar = real_cart_add(acc, product_id,
                                               _int0(item.get("supplier_id")),
                                               _int0(item.get("variation_id")),
@@ -2454,11 +2435,27 @@ def adapter_cart_update():
             acc = get_active_meesho_account(uid)
             if acc:
                 cs = cart_session or get_cart_session(uid) or ""
-                real_cart_remove(acc, {"product_id": int(product_id)}, cs)
+                vr = meesho_remove_verified(acc, int(product_id), cs,
+                                            _int0(item.get("variation_id")) or None)
+                if vr.get("cart_session"):
+                    set_cart_session(uid, vr["cart_session"])
+                meesho_verified = bool(vr.get("verified"))
+                print(f"[ADAPTER_CART_UPDATE] verified remove pid={product_id} removed={vr.get('removed')} verified={vr.get('verified')} via={vr.get('via')} err={vr.get('error')}", flush=True)
     except Exception as e:
         print(f"[ADAPTER_CART_UPDATE] sync failed: {e}", flush=True)
 
-    return _build_cart_response(uid)
+    resp = _build_cart_response(uid)
+    if meesho_verified is not None:
+        try:
+            data = resp.get_json() or {}
+        except Exception:
+            data = {}
+        data["meesho_removed"] = meesho_verified
+        data["meesho_verified"] = meesho_verified
+        data["sync"] = {"ok": meesho_verified,
+                        "message": "" if meesho_verified else "Meesho still lists this item — pulled latest cart"}
+        resp = jsonify(data)
+    return resp
 
 
 @app.route("/api/cart/location", methods=["POST"])

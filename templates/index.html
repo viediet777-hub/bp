@@ -644,7 +644,9 @@ async function sheetAdd(buy){
       price: cur.price, mrp: cur.mrp, image: cur.img, name: cur.name
     }});
     if(d && (d.ok || d.success || Array.isArray(d.items))){
-      toast('Added to cart', 'ok'); await refreshCartCount();
+      toast('Added to cart', 'ok');
+      await pullMeeshoCart();
+      await refreshCartCount();
       closeSheet();
       if(buy) goTab('cart');
       return;
@@ -738,13 +740,35 @@ async function renderCart(){
   }
   paintCartAddr();
 }
+async function pullMeeshoCart(){
+  // Reconcile local cart with the REAL Meesho cart (prices/session, prune
+  // server-side removals). Never throws — returns the pull payload or null.
+  try{
+    const p = await api('/api/cart/sync/pull');
+    return (p && p.ok) ? p : null;
+  }catch(e){ return null; }
+}
 async function chgQty(i, d){
   const c = S.cart[i];
   if(!c) return;
+  const qty = c.qty + d;
+  const removing = qty <= 0;
   try{
-    const r = await api('/api/cart/update', {method:'POST', body:{cart_id: c.key, qty: c.qty + d}});
-    if(r && (r.ok || r.success || Array.isArray(r.items))){ await renderCart(); return; }
-    toast(apiErr(r, 'Could not update'), 'err');
+    // Send cart_id AND product_id so the backend can match the Meesho-side
+    // item even if identifiers drifted.
+    const r = await api('/api/cart/update', {method:'POST', body:{cart_id: c.key, product_id: c.product_id, qty: qty}});
+    if(!(r && (r.ok || r.success || Array.isArray(r.items)))) return toast(apiErr(r, 'Could not update'), 'err');
+    // Confirm sync against the real Meesho cart, then re-render.
+    const pull = await pullMeeshoCart();
+    await renderCart();
+    if(removing){
+      const v = r.meesho_verified;
+      if(v === true) toast('Removed ✓ Meesho synced', 'ok');
+      else if(v === false) toast('Removed locally — Meesho retry pending', 'err');
+      else toast('Removed', 'ok');
+    } else if(pull && pull.updated){
+      toast('Cart synced', 'ok');
+    }
   }catch(e){ toast('Network error — try again', 'err'); }
 }
 function paintCartAddr(){
@@ -865,11 +889,21 @@ async function placeOrder(){
     btn.innerHTML = 'Place Order • <span class="num">' + inr(s.upi_amount ?? 0) + '</span>';
     btn.classList.remove('btn--dim');
     if(!(d && d.ok)) return toast(apiErr(d, 'Could not start payment'), 'err');
+    if(d.order_num == null || d.order_num === '') return toast('No order reference from server', 'err');
     const amt = d.upi_amount ?? d.amount ?? 0;
     pendPay = {id: d.order_num, amount: amt};
-    const uri = d.upi_uri || d.upi_intent_url || d.redirect_url || '';
-    const qr = d.qr_image || (d.qr_base64 ? 'data:image/png;base64,' + d.qr_base64 : '') || (d.qr_url || '') ||
-      (uri ? 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=' + encodeURIComponent(uri) : '');
+    // Tolerant QR/intent extraction: backend may send qr_image (data: or
+    // URL), qr_base64, qr_url, upi_uri, upi_intent_url, upi_link, intent,
+    // or a upi: payment_url. Accept every known shape.
+    const b64 = d.qr_base64 || d.qr || d.qrCode || '';
+    let qr = d.qr_image || d.qr_url || '';
+    if(!qr && b64) qr = b64.indexOf('data:') === 0 ? b64 : 'data:image/png;base64,' + b64;
+    let uri = d.upi_uri || d.upi_intent_url || d.upi_link || d.upiLink || d.intent || '';
+    if(!uri){
+      const pu = d.redirect_url || d.payment_url || '';
+      if(pu && pu.indexOf('upi:') === 0) uri = pu;
+    }
+    if(!qr && uri) qr = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=' + encodeURIComponent(uri);
     closeSheet();
     document.getElementById('qrAmt').textContent = inr(amt);
     document.getElementById('qrBox').innerHTML = qr ? '<img src="' + qr + '" style="width:100%;height:100%;object-fit:contain">' : 'QR';
@@ -877,8 +911,17 @@ async function placeOrder(){
     const qo = document.getElementById('qrOpen');
     if(uri){ qo.href = uri; qo.style.display = 'block'; } else qo.style.display = 'none';
     window._upiUri = uri;
+    // Show the modal FIRST. Never use window.location.href for upi:// links:
+    // on desktop / handler-less webviews it unloads the mini app and the QR
+    // screen never appears. Telegram.openLink opens externally instead.
     document.getElementById('qrWrap').classList.add('show');
-    if(uri){ try{ window.location.href = uri; }catch(e){} }
+    if(uri){
+      try{
+        const tg = window.Telegram && window.Telegram.WebApp;
+        if(tg && tg.openLink) tg.openLink(uri);
+      }catch(e){}
+    }
+    if(!qr && !uri) toast('Pay ' + inr(amt) + ' in your UPI app, then tap I have paid', 'ok');
   }catch(e){
     toast('Network error — try again', 'err');
     const s = S.summary || {};

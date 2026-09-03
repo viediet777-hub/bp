@@ -778,10 +778,14 @@ def real_cart_remove(acc, item_identifier, cart_session):
         bodies.append({"context": "atc_cart_v2", "identifier": "default", "cart_session": cart_session or "", "items": [{"product_id": int(pid)}], "user_id": _acc_uid(acc)})
         bodies.append({"context": "atc_cart_v2", "identifier": "buy_now", "cart_session": cart_session or "", "items": [{"product_id": int(pid)}], "user_id": _acc_uid(acc)})
     if ident:
-        # Captured: atc_cart_v2/default with opq ident (folder 1) - most important
+        # Identifiers come FROM the review/buy_now context, so removing in that
+        # same context is most likely to actually delete (fixes "200 but the
+        # item stays in the Meesho app"). atc_cart_v2 variants kept as fallback.
+        bodies.append({"context": "review", "identifier": "buy_now", "cart_session": cart_session or "", "items": [ident], "user_id": _acc_uid(acc)})
         bodies.append({"context": "atc_cart_v2", "identifier": "default", "cart_session": cart_session or "", "items": [ident], "user_id": _acc_uid(acc)})
         bodies.append({"context": "atc_cart_v2", "identifier": "buy_now", "cart_session": cart_session or "", "items": [ident], "user_id": _acc_uid(acc)})
         bodies.append({"context": "cart", "identifier": "default", "cart_session": cart_session or "", "items": [ident], "user_id": _acc_uid(acc)})
+        bodies.append({"context": "cart", "identifier": "buy_now", "cart_session": cart_session or "", "items": [ident], "user_id": _acc_uid(acc)})
     if not bodies:
         bodies.append({"context": "atc_cart_v2", "identifier": "default", "cart_session": cart_session or "", "items": [str(item_identifier)], "user_id": _acc_uid(acc)})
 
@@ -792,12 +796,101 @@ def real_cart_remove(acc, item_identifier, cart_session):
                 resp = client.post(f"{MEESHO_API}/1.0/cart/remove", headers=logged_in_headers(acc), json=body)
                 data = resp.json() or {}
                 if data.get("success"):
-                    return {"ok": True, "cart_session": data.get("cart_session", cart_session), "raw": data}
+                    return {"ok": True, "cart_session": data.get("cart_session", cart_session),
+                            "via": f"{body.get('context')}/{body.get('identifier')}", "raw": data}
                 last = {"ok": False, "error": data.get("error_type") or data.get("message") or str(data)[:200], "raw": data}
                 # if error is not about context/identifier, don't retry other bodys? try next anyway
         except Exception as e:
             last = {"ok": False, "error": str(e)}
     return last
+
+
+def meesho_remove_verified(acc, product_id, cart_session, variation_id=None):
+    """Remove a product from the REAL Meesho cart and VERIFY it is gone.
+
+    Steps: fresh review (stored session, then empty) -> match item(s) by
+    product_id (+variation_id when given) -> remove by the Meesho identifier
+    the review itself returned, using the FRESH cart_session -> re-review and
+    confirm the product is absent.
+
+    Returns {removed, verified, cart_session, via, items_matched, error}.
+    `removed` = a remove call reported success; `verified` = the follow-up
+    review no longer lists the product (the only signal that actually counts,
+    since Meesho can answer 200 without deleting on a stale session).
+    """
+    out = {"removed": False, "verified": False, "cart_session": cart_session or "",
+           "via": "", "items_matched": 0, "error": ""}
+    try:
+        pid = int(product_id or 0)
+    except (TypeError, ValueError):
+        out["error"] = "bad product_id"
+        return out
+    if not pid:
+        out["error"] = "bad product_id"
+        return out
+    # 1. Fresh review so the identifier + session are current (stale stored
+    #    sessions are the #1 cause of "200 but item persists").
+    review = real_cart_review(acc, cart_session)
+    if not review.get("ok"):
+        review = real_cart_review(acc, "")
+    if not review.get("ok"):
+        out["error"] = f"review failed: {review.get('error')}"
+        return out
+    cs = review.get("cart_session") or cart_session or ""
+    out["cart_session"] = cs
+    matches = []
+    for mi in (review.get("items") or []):
+        try:
+            if int(mi.get("product_id") or 0) != pid:
+                continue
+        except (TypeError, ValueError):
+            continue
+        if variation_id:
+            try:
+                if mi.get("variation_id") is not None and int(mi.get("variation_id")) != int(variation_id):
+                    continue
+            except (TypeError, ValueError):
+                pass
+        if mi.get("identifier"):
+            matches.append(mi)
+    # No identifier-bearing match: fall back to pid-based remove attempt.
+    if not matches:
+        r = real_cart_remove(acc, {"product_id": pid}, cs)
+        out["removed"] = bool(r.get("ok"))
+        out["via"] = r.get("via", "pid-fallback")
+        if r.get("cart_session"):
+            out["cart_session"] = r["cart_session"]
+            cs = r["cart_session"]
+        if not out["removed"]:
+            out["error"] = r.get("error", "remove failed")
+    else:
+        out["items_matched"] = len(matches)
+        for mi in matches:
+            r = real_cart_remove(acc, mi["identifier"], cs)
+            if r.get("ok"):
+                out["removed"] = True
+                out["via"] = r.get("via", "")
+            if r.get("cart_session"):
+                out["cart_session"] = r["cart_session"]
+                cs = r["cart_session"]
+        if not out["removed"]:
+            out["error"] = "remove rejected for all matched identifiers"
+    # 2. Verify with a fresh review: the product must be gone.
+    try:
+        check = real_cart_review(acc, cs)
+        if check.get("ok"):
+            if check.get("cart_session"):
+                out["cart_session"] = check["cart_session"]
+            still = [mi for mi in (check.get("items") or [])
+                     if str(mi.get("product_id") or "") == str(pid)]
+            out["verified"] = not still
+            if not out["verified"]:
+                out["error"] = out["error"] or "item still listed after remove"
+        else:
+            out["error"] = out["error"] or f"verify review failed: {check.get('error')}"
+    except Exception as e:
+        out["error"] = out["error"] or str(e)
+    return out
 
 
 def real_cart_clear(acc, cart_session):
