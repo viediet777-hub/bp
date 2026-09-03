@@ -593,73 +593,73 @@ def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, 
     pid = int(product_id) if product_id else 0
     vid = _pos_int(variation_id)
     sid = _pos_int(supplier_id)
-    base_item = {
-        "identifier": "buy_now",
-        "product_id": pid,
-        "supplier_id": sid,
-        "variation_id": vid,
-        "variation": variation or "",
-        "quantity": int(qty) if qty else 1,
-        "selected_price_type_id": "premium_return_price",
-        "client_metadata": None,
-    }
-    for context in ("pdp", "pdl"):
-        body = {
-            "context": context,
-            "identifier": "buy_now",
-            "cart_session": cart_session or None,
-            "replaceable": False,
-            "items": [dict(base_item)],
-            "address_id": None,
-            "user_id": _acc_uid(acc),
+    # Captured uses identifier "default" for pdp (folder 31: pdp/default), not "buy_now"
+    for ident in ("default", "buy_now"):
+        base_item = {
+            "identifier": ident,
+            "product_id": pid,
+            "supplier_id": sid,
+            "variation_id": vid,
+            "variation": variation or "",
+            "quantity": int(qty) if qty else 1,
+            "selected_price_type_id": "premium_return_price",
+            "client_metadata": None,
         }
-        r = _cart_add_once(acc, body)
-        if r.get("ok"):
-            data = r["data"]
-            result = r["result"]
-            print(f"[CART_ADD] ok context={context} cs={str(data.get('cart_session'))[:30]}", flush=True)
-            return {
-                "ok": True,
-                "cart_session": data.get("cart_session"),
-                "effective_total": result.get("effective_total"),
-                "effective_total_for_upi_plugin": result.get("effective_total_for_upi_plugin"),
-                "total_quantity": result.get("total_quantity"),
-                "splits": result.get("splits", []),
-                "price_break_up": result.get("price_break_up", []),
+        for context in ("pdp", "pdl"):
+            body = {
+                "context": context,
+                "identifier": ident,
+                "cart_session": cart_session or None,
+                "replaceable": False,
+                "items": [dict(base_item)],
+                "address_id": None,
+                "user_id": _acc_uid(acc),
             }
-        data = r.get("data", {})
-        err_type = data.get("error_type") or data.get("message") or data.get("error") or r.get("error") or ""
-        # CART_OOS -> retry with basic price
-        ecode = (data.get("error") or {}).get("code") if isinstance(data.get("error"), dict) else None
-        if ecode == "CART_OOS" or "CART_OOS" in str(data):
-            base_item["selected_price_type_id"] = "basic_return_price"
-            body["items"] = [dict(base_item)]
-            r2 = _cart_add_once(acc, body)
-            if r2.get("ok"):
-                data2 = r2["data"]
-                result2 = r2["result"]
-                print(f"[CART_ADD] ok after CART_OOS retry context={context}", flush=True)
+            r = _cart_add_once(acc, body)
+            if r.get("ok"):
+                data = r["data"]
+                result = r["result"]
+                print(f"[CART_ADD] ok ident={ident} context={context} cs={str(data.get('cart_session'))[:30]}", flush=True)
                 return {
                     "ok": True,
-                    "cart_session": data2.get("cart_session"),
-                    "effective_total": result2.get("effective_total"),
-                    "effective_total_for_upi_plugin": result2.get("effective_total_for_upi_plugin"),
-                    "total_quantity": result2.get("total_quantity"),
-                    "splits": result2.get("splits", []),
-                    "price_break_up": result2.get("price_break_up", []),
+                    "cart_session": data.get("cart_session"),
+                    "effective_total": result.get("effective_total"),
+                    "effective_total_for_upi_plugin": result.get("effective_total_for_upi_plugin"),
+                    "total_quantity": result.get("total_quantity"),
+                    "splits": result.get("splits", []),
+                    "price_break_up": result.get("price_break_up", []),
                 }
-            data = r2.get("data", data)
-            err_type = data.get("error_type") or str(data)[:300]
-        print(f"[CART_ADD] FAILED context={context}: {err_type} raw={str(data)[:400]}", flush=True)
-        # If context-specific error (e.g. invalid context), try next context
-        if "context" in str(err_type).lower() or "identifier" in str(err_type).lower():
+            data = r.get("data", {})
+            err_type = data.get("error_type") or data.get("message") or data.get("error") or r.get("error") or ""
+            # CART_OOS -> retry with basic price (same ident/context)
+            ecode = (data.get("error") or {}).get("code") if isinstance(data.get("error"), dict) else None
+            if ecode == "CART_OOS" or "CART_OOS" in str(data):
+                base_item["selected_price_type_id"] = "basic_return_price"
+                body["items"] = [dict(base_item)]
+                r2 = _cart_add_once(acc, body)
+                if r2.get("ok"):
+                    data2 = r2["data"]
+                    result2 = r2["result"]
+                    print(f"[CART_ADD] ok after CART_OOS retry ident={ident} context={context}", flush=True)
+                    return {
+                        "ok": True,
+                        "cart_session": data2.get("cart_session"),
+                        "effective_total": result2.get("effective_total"),
+                        "effective_total_for_upi_plugin": result2.get("effective_total_for_upi_plugin"),
+                        "total_quantity": result2.get("total_quantity"),
+                        "splits": result2.get("splits", []),
+                        "price_break_up": result2.get("price_break_up", []),
+                    }
+                data = r2.get("data", data)
+                err_type = data.get("error_type") or str(data)[:300]
+            print(f"[CART_ADD] FAILED ident={ident} context={context}: {err_type} raw={str(data)[:400]}", flush=True)
+            if "context" in str(err_type).lower() or "identifier" in str(err_type).lower():
+                continue  # try next context/ident
+            if context == "pdp":
+                continue  # try pdl with same ident
+            # pdl also failed with this ident, try next ident
             continue
-        # Non-context error -> don't retry other context, just return
-        if context == "pdp":
-            # still try pdl fallback for generic failures
-            continue
-        return {"ok": False, "error": err_type, "raw": data}
-    return {"ok": False, "error": "cart add failed (both pdp/pdl)", "raw": {}}
+    return {"ok": False, "error": "cart add failed (all pdp/pdl + default/buy_now)", "raw": {}}
 
 
 def real_cart_review(acc, cart_session=None):
@@ -766,12 +766,15 @@ def real_cart_remove(acc, item_identifier, cart_session):
     bodies = []
     if pid:
         bodies.append({"context": "cart", "identifier": "default", "cart_session": cart_session or "", "items": [{"product_id": int(pid)}], "user_id": _acc_uid(acc)})
+        bodies.append({"context": "pdp", "identifier": "default", "cart_session": cart_session or "", "items": [{"product_id": int(pid)}], "user_id": _acc_uid(acc)})
         bodies.append({"context": "pdp", "identifier": "buy_now", "cart_session": cart_session or "", "items": [{"product_id": int(pid)}], "user_id": _acc_uid(acc)})
     if ident:
+        # Captured: atc_cart_v2/default with opq ident (folder 1) - most important
+        bodies.append({"context": "atc_cart_v2", "identifier": "default", "cart_session": cart_session or "", "items": [ident], "user_id": _acc_uid(acc)})
         bodies.append({"context": "atc_cart_v2", "identifier": "buy_now", "cart_session": cart_session or "", "items": [ident], "user_id": _acc_uid(acc)})
         bodies.append({"context": "cart", "identifier": "default", "cart_session": cart_session or "", "items": [ident], "user_id": _acc_uid(acc)})
     if not bodies:
-        bodies.append({"context": "cart", "identifier": "default", "cart_session": cart_session or "", "items": [str(item_identifier)], "user_id": _acc_uid(acc)})
+        bodies.append({"context": "atc_cart_v2", "identifier": "default", "cart_session": cart_session or "", "items": [str(item_identifier)], "user_id": _acc_uid(acc)})
 
     last = {"ok": False, "error": "no body"}
     for body in bodies:
