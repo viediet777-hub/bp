@@ -133,7 +133,7 @@ img{display:block;max-width:100%}
     <div class="logo">ShopEasy</div>
     <div class="searchbar" onclick="switchTab('home');document.getElementById('q').focus()"><span style="opacity:.6">⌕</span><input id="q" placeholder="Search by Keyword or Product ID" onkeydown="if(event.key==='Enter') doSearch()"><span style="opacity:.6">🎙️</span><span style="opacity:.6">📷</span></div>
     <div class="icon badge" data-n="2">♡</div>
-    <div class="icon badge" data-n="1" onclick="switchTab('cart')">🛒</div>
+    <div class="icon badge" id="cartBadge" data-n="0" onclick="switchTab('cart')">🛒</div>
   </div>
   <div class="location" onclick="openSheet('addressSheet')">📍 <span id="deliverTo">Delivering to Indore - 452010</span> <small>• Change</small></div>
 </div>
@@ -209,7 +209,7 @@ img{display:block;max-width:100%}
 <!-- CART -->
 <section id="page-cart" class="page">
   <div class="cart-head"><span style="cursor:pointer" onclick="switchTab('home')">←</span><b>CART</b><div class="steps"><b>1</b> STEP 1/3</div></div>
-  <div class="delivery" onclick="openSheet('addressSheet')">📍 <div><b>Delivery at Indore - 452010</b><br><small>Change delivery address</small></div><span style="margin-left:auto">›</span></div>
+  <div class="delivery" onclick="openSheet('addressSheet')">📍 <div><b id="cartDeliverTo">Delivery at Indore - 452010</b><br><small>Change delivery address</small></div><span style="margin-left:auto">›</span></div>
   <div id="cartList"></div>
   <div class="price-details" id="priceDetails">
     <div class="row"><span>Product Price</span><b id="pdMrp">₹0</b></div>
@@ -275,7 +275,7 @@ img{display:block;max-width:100%}
   </div>
   <div class="account-card">
     <b>Refer & Earn</b><p class="muted">Invite friends and earn rewards</p>
-    <div style="display:flex;gap:8px;margin-top:8px"><input id="referLink" class="field" value=""><button class="btn btn--primary" onclick="copyRefer()">Copy</button><button class="btn btn--ghost" onclick="shareRefer()">Share</button></div>
+    <div style="display:flex;gap:8px;margin-top:8px"><input id="referLink" class="field" value="https://app.meesho.com/refer?via=shopeasy"><button class="btn btn--primary" onclick="copyRefer()">Copy</button><button class="btn btn--ghost" onclick="shareRefer()">Share</button></div>
     <div class="muted" id="referStatus" style="margin-top:6px"></div>
   </div>
   <div class="account-card">
@@ -332,92 +332,110 @@ img{display:block;max-width:100%}
 </nav>
 
 <script>
-// ---- Mock data + localStorage single-file prototype ----
-const LS = {
-  get(k, d){ try{return JSON.parse(localStorage.getItem(k)) ?? d}catch{return d}},
-  set(k,v){ localStorage.setItem(k, JSON.stringify(v)) }
-};
-let state = {
-  offer: LS.get('offer', {bucket:220, text:'₹220 OFF', title:'Upto', subtitle:'on 1st order', display:'Upto ₹220 OFF'}),
-  cart: LS.get('cart', []),
-  addresses: LS.get('addresses', [
-    {id:753397809, name:'Vijay', phone:'7797041040', line1:'yadav showroom', line2:'test hain', city:'Indore', state:'MP', pin:'452010', type:'Home', active:true},
-    {id:753454156, name:'Test', phone:'7797041040', line1:'testtest', line2:'testestt28', city:'Indore', state:'MP', pin:'452010', type:'Home'}
-  ]),
-  orders: LS.get('orders', []),
-  session: LS.get('session', null),
-  refer: LS.get('refer', 'https://app.meesho.com/2yoV/r99th0qd?via=8ghwzu&from=account_section')
-};
-let currentProduct=null, payMethod='COD', pendingOrder=null;
-
-// Real anon FOD from backend (Meesho anonymous fod-personalisation) — 220 achievable
-async function rollFOD(){
+// ---- Real backend data layer (Flask + live Meesho APIs, same ShopEasy UI) ----
+function getUid(){
   try{
-    const r=await fetch('/api/offers'); const j=await r.json();
-    if(j.offer && j.offer.bucket){
-      const b=parseInt(j.offer.bucket)||220;
-      const finalBucket = b;
-      state.offer = {bucket:finalBucket, text:`₹${finalBucket} OFF`, title:j.offer.title||'Upto', subtitle:j.offer.subtitle||'on 1st order', display:j.offer.display_text||`Upto ₹${finalBucket} OFF`};
-      LS.set('offer', state.offer);
-      document.getElementById('fodText').textContent=`Get ${state.offer.display} on your order`;
-      document.getElementById('fodSub').textContent=`Bucket ${finalBucket} • 3 days • Real anon`;
-      document.getElementById('offerHint').textContent=`Bucket ${finalBucket} (real)`;
-      toast(`Real FOD: ${finalBucket} ✓`);
-      renderGrid(); return;
-    }
+    const tg = window.Telegram && window.Telegram.WebApp;
+    const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+    if(u && u.id) return String(u.id);
   }catch(e){}
-  // fallback to local random 220
-  const pools=[220,220,200,180,175,150,135,120,100,90,75,60];
-  const bucket = pools[Math.floor(Math.random()*pools.length)];
-  const finalBucket = Math.random()<0.5?220:bucket;
-  state.offer = {bucket:finalBucket, text:`₹${finalBucket} OFF`, title:'Upto', subtitle:'on 1st order', display:`Upto ₹${finalBucket} OFF`};
-  LS.set('offer', state.offer);
-  document.getElementById('fodText').textContent=`Get ${state.offer.display} on your order`;
-  document.getElementById('fodSub').textContent=`Bucket ${finalBucket} • 3 days • ${finalBucket>=220?'220 achieved!':''}`;
-  document.getElementById('offerHint').textContent=`Bucket ${finalBucket}`;
-  toast(`FOD rolled: ${finalBucket} ${finalBucket>=220?'✓ 220 achieved':''}`);
+  try{
+    let d = localStorage.getItem('device_uid');
+    if(!d){ d = '9' + Math.random().toString().slice(2,10); localStorage.setItem('device_uid', d); }
+    return d;
+  }catch(e){ return '1'; }
+}
+const UID = getUid();
+async function api(path, opts){
+  opts = opts || {};
+  const r = await fetch(path, {
+    method: opts.method || 'GET',
+    headers: {'Content-Type':'application/json','X-User-Id': UID},
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined
+  });
+  let d = null;
+  try{ d = await r.json(); }catch(e){ throw new Error('Network error'); }
+  return d;
+}
+let state = { offer:null, products:[], cart:[], addresses:[], orders:[], account:null, summary:null };
+let currentProduct=null, currentSizeId=0, payMethod='COD', pendingOrder=null, otpStore=null;
+
+// ---------- FOD offer (live) ----------
+function applyOffer(o){
+  if(!o) return;
+  const b = parseInt(o.bucket)||0;
+  state.offer = o;
+  const disp = o.display_text || (b ? `Upto ₹${b} OFF` : (o.text || 'Offer'));
+  document.getElementById('fodText').textContent=`Get ${disp} on your order`;
+  document.getElementById('fodSub').textContent=`${o.subtitle||'on 1st order'}${o.duration?` • ${o.duration} days`:''} • Real FOD`;
+  document.getElementById('offerHint').textContent= b ? `Bucket ${b} (real)` : 'Live offer';
   renderGrid();
 }
-const mockProducts = [
-  {id:513295187, supplier:2606874, name:'Elegant Fabulous Men Shorts', price:187, mrp:699, off:'73% OFF', img:'https://images.meesho.com/images/products/513295187/s8iib_512.jpg', rating:'4.1 ★', reviews:'2k', variations:['28','30','S','M','L','XL','XXL']},
-  {id:513295188, supplier:2606875, name:'Women Printed Saree-Georgette', price:349, mrp:899, off:'61% OFF', img:'https://images.meesho.com/images/products/517588395/1_512.jpg', rating:'4.3 ★', reviews:'5k', variations:['Free Size']},
-  {id:513295189, supplier:2606876, name:'Kids Cotton T-Shirt Combo', price:299, mrp:599, off:'50% OFF', img:'https://images.meesho.com/images/products/123456/1_512.jpg', rating:'4.0 ★', reviews:'1.2k', variations:['2-3Y','4-5Y','6-7Y']},
-  {id:513295190, supplier:2606877, name:'Men Analog Watch - Leather', price:199, mrp:999, off:'80% OFF', img:'https://images.meesho.com/images/products/789012/1_512.jpg', rating:'4.2 ★', reviews:'3k', variations:['Free Size']},
-  {id:513295191, supplier:2606878, name:'Home Kitchen Storage Box', price:149, mrp:399, off:'62% OFF', img:'https://images.meesho.com/images/products/345678/1_512.jpg', rating:'4.4 ★', reviews:'800', variations:['Free Size']},
-];
-
-function fodPrice(price){
-  // New users only: apply bucket discount
-  const sess = state.session;
-  const isNew = sess ? !!sess.is_new : true;
-  if(!isNew) return {final:price, save:0, label:''};
-  const bucket = state.offer.bucket;
-  if(bucket && bucket < price){
-    const final = Math.max(0, Math.round(price - bucket));
-    const display = bucket>=220?'Upto ₹220 OFF':`Upto ₹${bucket} OFF`;
-    return {final, save:bucket, label:display};
-  }
-  return {final:price, save:0, label:''};
+async function loadOffer(){
+  try{
+    const j = await api('/api/offers');
+    if(j && j.offer && j.offer.bucket) applyOffer(j.offer);
+  }catch(e){}
+}
+// Roll button (spec): GET /api/fod/roll
+async function rollFOD(){
+  try{
+    const j = await api('/api/fod/roll');
+    if(j && j.offer && j.offer.bucket){ applyOffer(j.offer); toast(`Real FOD: ${j.offer.bucket} ✓`); return; }
+    toast((j && (j.error||j.message)) || 'Roll failed');
+  }catch(e){ toast('Unable to roll offer'); }
 }
 
+// ---------- products (live search) ----------
+function fmtCount(n){
+  n = Number(n)||0;
+  if(n>=1000) return (n/1000).toFixed(1).replace('.0','')+'k';
+  return String(n);
+}
+function mapCatalog(c){
+  const price = Math.round(Number(c.price)||0);
+  const mrp = Math.round(Number(c.original_price || c.mrp || price)||0);
+  const rc = (c.rating && c.rating.count) || c.rating_count || '';
+  const ra = (c.rating && c.rating.average) || c.rating_value || '';
+  return {
+    id: Number(c.product_id)||0, product_id: Number(c.product_id)||0, catalog_id: c.catalog_id||0,
+    supplier: c.supplier_id||0, supplier_id: c.supplier_id||0,
+    name: c.name || 'Product', price, mrp,
+    off: c.discount_text || (mrp>price ? Math.round((mrp-price)*100/mrp)+'% OFF' : ''),
+    img: c.image || '', rating: ra ? `${ra} ★` : '4.0 ★', reviews: rc ? fmtCount(rc) : '',
+    fodBadge: (typeof c.fod_savings === 'string' && c.fod_savings) ? c.fod_savings : ''
+  };
+}
+const GRID_SKELETON = `<div class="card"><div class="card__img" style="background:#EEF2F7"></div><div class="card__body"><div style="height:12px;background:#EEF2F7;border-radius:6px"></div><div style="height:12px;background:#EEF2F7;border-radius:6px;margin-top:6px;width:60%"></div></div></div>`.repeat(4);
 function renderGrid(){
   const g=document.getElementById('grid');
-  const q=(document.getElementById('q').value||'').toLowerCase();
-  const list = mockProducts.filter(p=> !q || p.name.toLowerCase().includes(q) || String(p.id).includes(q));
-  g.innerHTML = list.map(p=>{
-    const f=fodPrice(p.price);
-    return `<div class="card" onclick="openProduct(${p.id})">
+  if(!state.products.length){
+    g.innerHTML=`<div style="grid-column:1/-1;padding:24px;text-align:center" class="muted">No products found</div>`;
+  } else {
+    g.innerHTML = state.products.map(p=>`<div class="card" onclick="openProduct(${p.id})">
       <div class="card__img"><img src="${p.img}" loading="lazy" onerror="this.src='https://via.placeholder.com/300'"><div class="heart">♡</div></div>
       <div class="card__body">
         <div class="card__title">${p.name}</div>
-        <div class="price"><b>₹${f.final}</b><s>₹${p.mrp}</s><span class="off">${p.off}</span></div>
-        ${f.save?`<div class="badge-green">${f.label} • First Order</div>`:''}
-        <div class="rating">${p.rating} <span class="muted">(${p.reviews})</span></div>
+        <div class="price"><b>₹${p.price}</b>${p.mrp>p.price?`<s>₹${p.mrp}</s>`:''}${p.off?`<span class="off">${p.off}</span>`:''}</div>
+        ${p.fodBadge?`<div class="badge-green">${p.fodBadge} • First Order</div>`:''}
+        <div class="rating">${p.rating}${p.reviews?` <span class="muted">(${p.reviews})</span>`:''}</div>
       </div>
-    </div>`;
-  }).join('');
+    </div>`).join('');
+  }
   document.getElementById('catGrid').innerHTML=g.innerHTML;
   document.getElementById('mallGrid').innerHTML=g.innerHTML;
+}
+// Default listing (spec): POST /api/search {query:"fashion trending", limit:20}
+async function loadProducts(query){
+  const g=document.getElementById('grid');
+  g.innerHTML=GRID_SKELETON;
+  try{
+    const j = await api('/api/search',{method:'POST',body:{query: query||'fashion trending', limit:20}});
+    const cats = (j && j.catalogs) || [];
+    state.products = cats.map(mapCatalog).filter(p=>p.id);
+  }catch(e){ state.products = []; }
+  if(!state.products.length) document.getElementById('offerHint').textContent='Unable to load products';
+  renderGrid();
 }
 function renderCats(){
   const cats=['All Categories','8PM Offer','Saree','Western Wear','Jewellery','Men Fashion','Women Fashion','Kitchen Utility','Kurtis & Dresses','Kids','Home','Beauty','Footwear'];
@@ -436,82 +454,180 @@ function switchTab(t){
   if(t==='account') renderAccount();
   window.scrollTo(0,0);
 }
-function doSearch(){ renderGrid(); }
-function openProduct(id){
-  const p=mockProducts.find(x=>x.id===id)||mockProducts[0];
-  currentProduct=p;
-  const f=fodPrice(p.price);
-  document.getElementById('pTitle').textContent=p.name.slice(0,22);
-  document.getElementById('pName').textContent=p.name;
-  document.getElementById('pImg').src=p.img;
-  document.getElementById('pPrice').textContent=`₹${f.final}`;
-  document.getElementById('pMrp').textContent=`₹${p.mrp}`;
-  document.getElementById('pOff').textContent=p.off;
-  document.getElementById('pOffer').textContent=f.save?`${f.label} • First Order • 3 days`:``;
-  document.getElementById('pDeal').textContent=`Deal ends in 10:23:41 • ${f.save?`You save ₹${f.save}`:'Best price'}`;
-  document.getElementById('pDelivery').textContent=`Delivery by ${new Date(Date.now()+3*86400000).toLocaleDateString()} • Free Delivery`;
-  document.getElementById('pAddrPreview').textContent=`Deliver to ${state.addresses.find(a=>a.active)?.city||'Indore'} - ${state.addresses.find(a=>a.active)?.pin||'452010'}`;
-  document.getElementById('pSizes').innerHTML=p.variations.map((v,i)=>`<span class="size ${i===2?'active':''}" onclick="pickSize(this)">${v}</span>`).join('');
-  document.getElementById('pDots').innerHTML='<i class="active"></i><i></i><i></i>';
-  switchTab('product');
+function doSearch(){ loadProducts((document.getElementById('q').value||'').trim()); }
+// ---------- product detail (live) ----------
+function mergeDetail(p, d){
+  const images = (d.images && d.images.length ? d.images : (d.image ? [d.image] : (p.img ? [p.img] : [])));
+  return {
+    ...p,
+    product_id: d.product_id || p.id, id: d.product_id || p.id,
+    name: d.name || p.name,
+    price: Math.round(Number(d.price ?? p.price) || 0),
+    mrp: Math.round(Number(d.mrp ?? d.original_price ?? p.mrp) || 0),
+    off: d.discount_text || p.off,
+    img: images[0] || p.img, images,
+    supplier: d.supplier_id ?? p.supplier, supplier_id: d.supplier_id ?? p.supplier,
+    sizes: Array.isArray(d.sizes) && d.sizes.length ? d.sizes.map(s=>({name:String(s.name||s.size||''), id:Number(s.id ?? s.variation_id ?? 0)||0, in_stock:s.in_stock!==false})).filter(s=>s.name) : [{name:'Free Size', id:0, in_stock:true}],
+    in_stock: d.in_stock !== false,
+    fodBadge: (typeof d.fod_savings === 'string' && d.fod_savings) ? d.fod_savings : p.fodBadge
+  };
 }
-function pickSize(el){ el.parentElement.querySelectorAll('.size').forEach(s=>s.classList.remove('active')); el.classList.add('active'); }
-function addToCart(){
-  if(!currentProduct) return;
+function paintProduct(p){
+  document.getElementById('pTitle').textContent=String(p.name).slice(0,22);
+  document.getElementById('pName').textContent=p.name;
+  document.getElementById('pImg').src=p.img || 'https://via.placeholder.com/300';
+  document.getElementById('pPrice').textContent=`₹${p.price}`;
+  document.getElementById('pMrp').textContent= p.mrp>p.price ? `₹${p.mrp}` : '';
+  document.getElementById('pOff').textContent=p.off || '';
+  document.getElementById('pOffer').textContent= p.fodBadge ? `${p.fodBadge} • First Order • 3 days` : (p.mrp>p.price ? `You save ₹${p.mrp-p.price}` : 'Best price');
+  document.getElementById('pDeal').textContent=`Deal ends in 10:23:41 • ${p.mrp>p.price?`You save ₹${p.mrp-p.price}`:'Best price'}`;
+  document.getElementById('pDelivery').textContent=`Delivery by ${new Date(Date.now()+3*86400000).toLocaleDateString()} • Free Delivery`;
+  const a=selectedAddr();
+  document.getElementById('pAddrPreview').textContent= a ? `Deliver to ${a.city} - ${a.pin}` : 'Deliver to Indore - 452010';
+  const sizes=(p.sizes && p.sizes.length ? p.sizes : [{name:'Free Size', id:0, in_stock:true}]);
+  let sel=sizes.findIndex(s=>s.in_stock!==false); if(sel<0) sel=0;
+  currentSizeId=Number(sizes[sel].id)||0;
+  document.getElementById('pSizes').innerHTML=sizes.map((s,i)=>`<span class="size ${i===sel?'active':''}" data-vid="${Number(s.id)||0}" onclick="pickSize(this)"${s.in_stock===false?' style="opacity:.4" data-oos="1"':''}>${s.name}</span>`).join('');
+  document.getElementById('pDots').innerHTML='<i class="active"></i><i></i><i></i>';
+}
+async function openProduct(id){
+  const p=state.products.find(x=>String(x.id)===String(id)) || state.products[0];
+  if(!p) return;
+  currentProduct={...p}; currentSizeId=0;
+  paintProduct(currentProduct);
+  switchTab('product');
+  try{
+    const d=await api('/api/product?product_id='+encodeURIComponent(currentProduct.product_id || currentProduct.id));
+    if(d && !d.error && (d.product_id || d.name)){
+      currentProduct=mergeDetail(currentProduct, d);
+      if(document.getElementById('page-product').classList.contains('active')) paintProduct(currentProduct);
+    }
+  }catch(e){}
+}
+function pickSize(el){
+  if(el.dataset.oos) return toast('Out of stock');
+  el.parentElement.querySelectorAll('.size').forEach(s=>s.classList.remove('active'));
+  el.classList.add('active');
+  currentSizeId=Number(el.dataset.vid)||0;
+}
+// Spec: POST /api/cart/add {product_id, supplier_id, variation_id, variation, qty, price, mrp, image, ...}
+async function addToCart(){
+  if(!currentProduct) return false;
   const sizeEl=document.querySelector('#pSizes .size.active');
   const size=sizeEl?sizeEl.textContent:'Free Size';
-  const f=fodPrice(currentProduct.price);
-  const existing=state.cart.find(c=>c.id===currentProduct.id && c.size===size);
-  if(existing) existing.qty+=1; else state.cart.push({id:currentProduct.id, supplier:currentProduct.supplier, name:currentProduct.name, price:f.final, mrp:currentProduct.mrp, img:currentProduct.img, size, qty:1});
-  LS.set('cart', state.cart); toast('Added to cart');
-  // local sync to "real" cart_session simulation
-  LS.set('cart_session', 'mock_'+Date.now());
+  const vid=currentSizeId||0;
+  try{
+    const d=await api('/api/cart/add',{method:'POST',body:{
+      product_id: currentProduct.product_id || currentProduct.id,
+      supplier_id: currentProduct.supplier_id || currentProduct.supplier || 0,
+      variation_id: vid, variation: size, qty: 1, quantity: 1,
+      price: currentProduct.price, mrp: currentProduct.mrp,
+      image: currentProduct.img, name: currentProduct.name
+    }});
+    if(d && (d.ok || d.success || Array.isArray(d.items))){
+      toast('Added to cart'); await loadCart(); return true;
+    }
+    toast((d && (d.error||d.message)) || 'Could not add to cart');
+  }catch(e){ toast('Network error — try again'); }
+  return false;
 }
-function buyNow(){ addToCart(); switchTab('cart'); }
-function renderCart(){
+async function buyNow(){ if(await addToCart()) switchTab('cart'); }
+// ---------- cart (live: GET /api/cart + GET /api/checkout/summary) ----------
+function normCart(d){
+  const raw = Array.isArray(d) ? d : (d && Array.isArray(d.items) ? d.items : []);
+  return raw.map(c=>({
+    cart_id: c.identifier ?? c.id, product_id: c.product_id ?? c.id,
+    name: c.name || 'Item', price: Math.round(Number(c.price)||0), mrp: Math.round(Number(c.mrp ?? c.price)||0),
+    img: c.image ?? c.img ?? '', size: c.variation ?? c.variation_name ?? '',
+    qty: Number(c.quantity ?? c.qty ?? 1)||1,
+    supplier_id: c.supplier_id||0, variation_id: c.variation_id||0
+  }));
+}
+async function loadCart(){
+  try{ state.cart = normCart(await api('/api/cart')); }
+  catch(e){ state.cart = []; }
+  try{
+    const s = await api('/api/checkout/summary');
+    state.summary = (s && !s.error) ? s : null;
+  }catch(e){ state.summary = null; }
+  updateBadge();
+}
+function updateBadge(){
+  const n = state.cart.reduce((a,c)=>a + (Number(c.qty)||0), 0);
+  const b = document.getElementById('cartBadge');
+  if(b) b.dataset.n = n;
+}
+function cartTotals(){
+  const mrp = state.cart.reduce((a,c)=>a + c.mrp*c.qty, 0);
+  const s = state.summary;
+  if(s){
+    const total = Number(s.cod_amount ?? s.total ?? 0) || 0;
+    const disc = Math.abs(Number(s.total_discounts ?? (mrp - total)) || 0);
+    const pmrp = Number(s.product_price || mrp) || mrp;
+    const t = total || Math.max(0, pmrp - disc);
+    return {mrp: pmrp, disc, total: t, save: disc, upi: Number(s.upi_amount ?? t) || 0, pre: Number(s.prepaid_discount || 0) || 0};
+  }
+  const total = state.cart.reduce((a,c)=>a + c.price*c.qty, 0);
+  return {mrp, disc: mrp-total, total, save: mrp-total, upi: total, pre: 0};
+}
+async function renderCart(){
+  await loadCart();
   const list=document.getElementById('cartList');
   const details=document.getElementById('priceDetails');
-  if(!state.cart.length){ list.innerHTML=`<div style="padding:24px;text-align:center" class="muted">Your cart is empty</div>`; details.style.display='none'; document.querySelector('#page-cart .checkout-bar').style.display='none'; return; }
-  details.style.display='block'; document.querySelector('#page-cart .checkout-bar').style.display='flex';
-  let mrp=0, total=0;
-  list.innerHTML=state.cart.map((c,i)=>{ mrp+=c.mrp*c.qty; total+=c.price*c.qty; return `<div class="cart-item"><img src="${c.img}"><div style="flex:1"><b style="font-size:12px">${c.name}</b><div class="muted" style="font-size:11px">${c.size} • Qty ${c.qty}</div><div style="font-weight:800;margin-top:4px">₹${c.price} <s class="muted" style="font-size:11px">₹${c.mrp}</s></div><div class="muted" style="font-size:11px">Delivery by ${new Date(Date.now()+4*86400000).toLocaleDateString()}</div></div><div class="qty"><button onclick="chgQty(${i},-1)">−</button><span>${c.qty}</span><button onclick="chgQty(${i},1)">+</button></div></div>`; }).join('');
-  const disc=mrp-total;
-  document.getElementById('pdMrp').textContent=`₹${mrp}`;
-  document.getElementById('pdDisc').textContent=`-₹${disc}`;
-  document.getElementById('pdTotal').textContent=`₹${total}`;
-  document.getElementById('pdSave').textContent=`You save ₹${disc} on this order`;
-  document.getElementById('cartTotal').textContent=`₹${total}`;
-  // keep for later steps
-  state._lastTotal=total; state._lastMrp=mrp; state._lastDisc=disc;
+  const bar=document.querySelector('#page-cart .checkout-bar');
+  if(!state.cart.length){
+    list.innerHTML=`<div style="padding:24px;text-align:center" class="muted">Your cart is empty</div>`;
+    details.style.display='none'; bar.style.display='none'; return;
+  }
+  details.style.display='block'; bar.style.display='flex';
+  list.innerHTML=state.cart.map((c,i)=>`<div class="cart-item"><img src="${c.img}" onerror="this.src='https://via.placeholder.com/300'"><div style="flex:1"><b style="font-size:12px">${c.name}</b><div class="muted" style="font-size:11px">${c.size} • Qty ${c.qty}</div><div style="font-weight:800;margin-top:4px">₹${c.price} ${c.mrp>c.price?`<s class="muted" style="font-size:11px">₹${c.mrp}</s>`:''}</div><div class="muted" style="font-size:11px">Delivery by ${new Date(Date.now()+4*86400000).toLocaleDateString()}</div></div><div class="qty"><button onclick="chgQty(${i},-1)">−</button><span>${c.qty}</span><button onclick="chgQty(${i},1)">+</button></div></div>`).join('');
+  const t=cartTotals();
+  document.getElementById('pdMrp').textContent=`₹${t.mrp}`;
+  document.getElementById('pdDisc').textContent=`-₹${t.disc}`;
+  document.getElementById('pdTotal').textContent=`₹${t.total}`;
+  document.getElementById('pdSave').textContent=`You save ₹${t.disc} on this order`;
+  document.getElementById('cartTotal').textContent=`₹${t.total}`;
+  paintDeliverTo();
 }
-function chgQty(i,d){
-  state.cart[i].qty+=d;
-  if(state.cart[i].qty<=0) state.cart.splice(i,1);
-  LS.set('cart', state.cart); renderCart();
+// Spec: POST /api/cart/update {cart_id, qty}
+async function chgQty(i,d){
+  const c=state.cart[i];
+  if(!c) return;
+  const qty=(Number(c.qty)||0)+d;
+  try{
+    const r=await api('/api/cart/update',{method:'POST',body:{cart_id: c.cart_id, qty}});
+    if(r && (r.ok || r.success || Array.isArray(r.items))){ await renderCart(); return; }
+    toast((r && (r.error||r.message)) || 'Could not update');
+  }catch(e){ toast('Network error — try again'); }
 }
-function goReview(){
+function selectedAddr(){ return state.addresses.find(a=>a.active) || state.addresses[0] || null; }
+function addrText(a){ return a ? `${a.name} • ${a.phone}<br>${a.line1}, ${a.city} - ${a.pin}` : ''; }
+async function goReview(){
+  await loadCart();
   if(!state.cart.length) return toast('Cart empty');
-  // bind address
-  const addr=state.addresses.find(a=>a.active)||state.addresses[0];
-  document.getElementById('reviewAddr').innerHTML=`<div><b>Delivery Address</b><div class="muted">${addr.name} • ${addr.phone}<br>${addr.line1}, ${addr.city} - ${addr.pin}</div></div><span style="margin-left:auto;color:var(--accent);font-weight:700" onclick="openSheet('addressSheet')">Change</span>`;
-  document.getElementById('reviewList').innerHTML=document.getElementById('cartList').innerHTML;
-  document.getElementById('rvMrp').textContent=document.getElementById('pdMrp').textContent;
-  document.getElementById('rvDisc').textContent=document.getElementById('pdDisc').textContent;
-  document.getElementById('rvTotal').textContent=document.getElementById('pdTotal').textContent;
-  document.getElementById('rvTotal2').textContent=document.getElementById('pdTotal').textContent;
+  await loadAddresses();
+  const addr=selectedAddr();
+  if(!addr){ toast('Add address'); openSheet('addressSheet'); return; }
+  document.getElementById('reviewAddr').innerHTML=`<div><b>Delivery Address</b><div class="muted">${addrText(addr)}</div></div><span style="margin-left:auto;color:var(--accent);font-weight:700" onclick="openSheet('addressSheet')">Change</span>`;
+  document.getElementById('reviewList').innerHTML=state.cart.map(c=>`<div class="cart-item"><img src="${c.img}" onerror="this.src='https://via.placeholder.com/300'"><div style="flex:1"><b style="font-size:12px">${c.name}</b><div class="muted" style="font-size:11px">${c.size} • Qty ${c.qty}</div><div style="font-weight:800;margin-top:4px">₹${c.price}</div></div></div>`).join('');
+  const t=cartTotals();
+  document.getElementById('rvMrp').textContent=`₹${t.mrp}`;
+  document.getElementById('rvDisc').textContent=`-₹${t.disc}`;
+  document.getElementById('rvTotal').textContent=`₹${t.total}`;
+  document.getElementById('rvTotal2').textContent=`₹${t.total}`;
   switchTab('review');
 }
-function goPayment(){
-  // checkout_prepare: cod 69 vs upi 41 simulation (captured)
-  const total=state._lastTotal||0;
-  const cod=total;
-  const upi=Math.max(0, total-18); // captured extra 18 for pay online in this prototype (real capture 28)
-  document.getElementById('codPrice').textContent=`₹${cod}`;
-  document.getElementById('upiPrice').textContent=`₹${upi}`;
-  document.getElementById('upiSub').textContent=`Save ₹${cod-upi} • Extra bank offers`;
-  document.getElementById('payTotal').textContent=`₹${cod}`;
-  document.getElementById('payTotal2').textContent=`₹${cod}`;
-  document.getElementById('paySave').textContent=`EXTRA ₹${cod-upi} off | Online payment discount applied`;
+async function goPayment(){
+  await loadCart();
+  if(!state.cart.length) return toast('Cart empty');
+  const t=cartTotals();
+  document.getElementById('codPrice').textContent=`₹${t.total}`;
+  document.getElementById('upiPrice').textContent=`₹${t.upi}`;
+  document.getElementById('upiSub').textContent= t.pre>0 ? `Save ₹${t.pre} • Extra bank offers` : 'Extra discount';
+  document.getElementById('payTotal').textContent=`₹${t.total}`;
+  document.getElementById('payTotal2').textContent=`₹${t.total}`;
+  document.getElementById('paySave').textContent= t.pre>0 ? `EXTRA ₹${t.pre} off | Online payment discount applied` : 'Pay online for extra discount';
+  selectPay('COD');
   switchTab('payment');
 }
 function selectPay(m){
@@ -520,107 +636,229 @@ function selectPay(m){
   if(m==='COD'){ document.querySelectorAll('.pay-card')[0].classList.add('active'); document.getElementById('upiExpand').style.display='none'; document.getElementById('payTotal').textContent=document.getElementById('codPrice').textContent; document.getElementById('payTotal2').textContent=document.getElementById('codPrice').textContent; }
   else { document.querySelectorAll('.pay-card')[1].classList.add('active'); document.getElementById('upiExpand').style.display='block'; document.getElementById('payTotal').textContent=document.getElementById('upiPrice').textContent; document.getElementById('payTotal2').textContent=document.getElementById('upiPrice').textContent; document.getElementById('lastUpi').style.display='block'; }
 }
-// Checkout method from checkout_method.txt
-function placeOrder(){
-  const addr=(state.addresses.find(a=>a.active)||state.addresses[0]);
+// Real checkout (spec): COD → /api/order/place_cod, UPI → /api/order/pay_online → QR → /api/order/confirm
+async function placeOrder(){
+  const addr=selectedAddr();
   if(!addr) return toast('Add address');
-  const total = (payMethod==='UPI' ? document.getElementById('upiPrice').textContent : document.getElementById('codPrice').textContent).replace('₹','');
-  // Simulate 1) cart/location 2) 8.0/cart 3) paymentinfo 4) 4.0/preorders
-  const orderId='ORD'+Date.now().toString().slice(-8);
-  pendingOrder={id:orderId, amount:parseInt(total)||state._lastTotal, method:payMethod, addr};
   if(payMethod==='COD'){
-    // COD success directly
-    state.orders.unshift({id:orderId, amount:pendingOrder.amount, addr:`${addr.city} - ${addr.pin}`, status:'Confirmed', date:new Date().toLocaleDateString(), method:'COD', items:[...state.cart]});
-    LS.set('orders', state.orders); state.cart=[]; LS.set('cart', state.cart);
-    document.getElementById('successId').textContent=`Order ID ${orderId}`;
-    document.getElementById('successAmt').textContent=`₹${pendingOrder.amount} • ${payMethod}`;
-    document.getElementById('successDate').textContent=`Delivery by ${new Date(Date.now()+5*86400000).toLocaleDateString()}`;
-    document.getElementById('successAddr').textContent=`${addr.line1}, ${addr.city} - ${addr.pin} • ${addr.phone}`;
-    switchTab('success');
-    toast('Order placed (COD)');
-  } else {
-    // UPI: generate Juspay intent then QR
-    const juspayOrder='jus_'+orderId;
-    const amt=pendingOrder.amount.toFixed(2);
-    // Try WAPI, fallback to locked VPA
-    const intent=`upi://pay?pa=MEESHOONLINEPG@axl&pn=MEESHO%20TECHNOLOGIES%20PRIVATE%20LIMITED&am=${amt}&mam=${amt}&tr=${juspayOrder}&tn=UPI%20Intent&mc=5262&mode=04&purpose=00&cu=INR&utm_campaign=B2B_PG&utm_medium=MEESHOONLINEPG&utm_source=${juspayOrder}`;
-    document.getElementById('qrBox').innerHTML=`<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(intent)}" style="width:100%;height:100%;object-fit:contain">`;
-    document.getElementById('qrInfo').innerHTML=`<b>₹${pendingOrder.amount}</b> • Order ${orderId}<br><small class="muted">UPI intent: MEESHOONLINEPG@axl</small><br><a href="${intent}" style="color:var(--accent);font-weight:700">Open UPI App</a>`;
-    document.getElementById('qrModal').classList.add('show');
+    let d=null;
+    try{ d=await api('/api/order/place_cod',{method:'POST',body:{address_id: addr.id}}); }
+    catch(e){ return toast('Network error — try again'); }
+    if(d && d.ok){
+      showSuccess(d.order_num, d.total ?? d.amount, 'COD', addr);
+      await afterOrder(); toast('Order placed (COD)');
+    } else toast((d && (d.message||d.error)) || 'Could not place order');
+    return;
   }
+  let d=null;
+  try{ d=await api('/api/order/pay_online',{method:'POST',body:{address_id: addr.id}}); }
+  catch(e){ return toast('Network error — try again'); }
+  if(!(d && d.ok)) return toast((d && (d.message||d.error)) || 'Could not start payment');
+  const amt=d.upi_amount ?? d.amount ?? 0;
+  pendingOrder={id:d.order_num, amount:amt};
+  const uri=d.upi_uri || d.upi_intent_url || d.redirect_url || '';
+  const qrImg=d.qr_image || (d.qr_base64 ? 'data:image/png;base64,'+d.qr_base64 : '') || (d.qr_url || '') || (uri ? 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data='+encodeURIComponent(uri) : '');
+  document.getElementById('qrBox').innerHTML= qrImg ? `<img src="${qrImg}" style="width:100%;height:100%;object-fit:contain">` : 'QR';
+  document.getElementById('qrInfo').innerHTML=`<b>₹${amt}</b> • Order ${d.order_num}${uri?`<br><small class="muted">UPI intent: MEESHOONLINEPG@axl</small><br><a href="${uri}" style="color:var(--accent);font-weight:700">Open UPI App</a>`:''}`;
+  document.getElementById('qrModal').classList.add('show');
 }
-function confirmPayment(){
+async function confirmPayment(){
   if(!pendingOrder) return;
-  state.orders.unshift({id:pendingOrder.id, amount:pendingOrder.amount, addr:`${pendingOrder.addr.city} - ${pendingOrder.addr.pin}`, status:'Paid', date:new Date().toLocaleDateString(), method:'UPI', items:[...state.cart]});
-  LS.set('orders', state.orders); state.cart=[]; LS.set('cart', state.cart);
-  document.getElementById('qrModal').classList.remove('show');
-  document.getElementById('successId').textContent=`Order ID ${pendingOrder.id}`;
-  document.getElementById('successAmt').textContent=`₹${pendingOrder.amount} • UPI`;
-  document.getElementById('successDate').textContent=`Delivery by ${new Date(Date.now()+5*86400000).toLocaleDateString()}`;
-  document.getElementById('successAddr').textContent=`${pendingOrder.addr.line1}, ${pendingOrder.addr.city} - ${pendingOrder.addr.pin}`;
-  switchTab('success'); toast('Payment confirmed');
+  let d=null;
+  try{ d=await api('/api/order/confirm',{method:'POST',body:{order_num: pendingOrder.id}}); }
+  catch(e){ return toast('Network error — try again'); }
+  if(d && d.ok){
+    document.getElementById('qrModal').classList.remove('show');
+    showSuccess(pendingOrder.id, pendingOrder.amount, 'UPI', selectedAddr());
+    await afterOrder(); toast('Payment confirmed');
+  } else toast((d && (d.message||d.error)) || 'Could not confirm — tap again after paying');
 }
 function closeQR(){ document.getElementById('qrModal').classList.remove('show'); }
-function renderOrders(){
+function showSuccess(id, amt, method, addr){
+  document.getElementById('successId').textContent=`Order ID ${id}`;
+  document.getElementById('successAmt').textContent=`₹${amt} • ${method}`;
+  document.getElementById('successDate').textContent=`Delivery by ${new Date(Date.now()+5*86400000).toLocaleDateString()}`;
+  document.getElementById('successAddr').textContent= addr ? `${addr.line1}, ${addr.city} - ${addr.pin} • ${addr.phone}` : '';
+  switchTab('success');
+}
+async function afterOrder(){ pendingOrder=null; await loadCart(); await loadOrders(); }
+// ---------- orders (live: GET /api/orders) ----------
+function normOrders(d){
+  const raw = Array.isArray(d) ? d : (d && Array.isArray(d.orders) ? d.orders : []);
+  return raw.map(o=>{
+    let date = o.updated_date || o.date || '';
+    if(!date && o.created_at){ const t=Number(o.created_at); date=new Date(t>1e12?t:t*1000).toLocaleDateString(); }
+    return {
+      id: o.order_num ?? o.id, amount: o.amount ?? o.total ?? 0,
+      method: o.payment_method || o.method || '',
+      status: o.status_text || o.status || 'Placed',
+      date, addr: o.items_text || o.addr || o.address || ''
+    };
+  });
+}
+async function loadOrders(){
+  try{ state.orders = normOrders(await api('/api/orders')); }
+  catch(e){ state.orders = []; }
+}
+async function renderOrders(){
+  await loadOrders();
   const el=document.getElementById('ordersList');
   if(!state.orders.length){ el.innerHTML=`<div style="padding:24px;text-align:center" class="muted">No orders yet</div>`; return; }
   el.innerHTML=state.orders.map(o=>`<div class="card" style="padding:12px;margin-bottom:10px"><div style="display:flex;justify-content:space-between"><b>${o.id}</b><span class="kbd" style="color:var(--green)">${o.status}</span></div><div class="muted" style="font-size:12px">${o.date} • ${o.method} • ${o.addr}</div><div style="font-weight:800;margin-top:6px">₹${o.amount}</div></div>`).join('');
 }
-function renderAccount(){
-  const s=state.session;
-  if(s){ document.getElementById('accPhone').textContent=s.phone||s.mobile||'Connected'; document.getElementById('accMeta').textContent=`UID ${s.user_id} • ${s.is_new?'NEW 200 eligible':'OLD'}`; document.getElementById('accId').textContent=`instance ${s.instance_id.slice(0,8)}...`; document.getElementById('accStatus').textContent='Session Active'; document.getElementById('accExpiry').textContent=`xo exp: ${s.xo_exp?new Date(s.xo_exp*1000).toLocaleDateString():'—'}`; }
-  else { document.getElementById('accPhone').textContent='Not logged in'; document.getElementById('accMeta').textContent='Tap JSON / OTP login'; document.getElementById('accId').textContent=''; document.getElementById('accStatus').textContent='No Session'; document.getElementById('accExpiry').textContent=''; }
-  document.getElementById('referLink').value=state.refer;
+// ---------- addresses (live) ----------
+function normAddr(a){
+  return {id: a.id, name: a.name||'', phone: a.mobile || a.phone || '', pin: String(a.pin||''),
+    city: a.city||'', state: a.state||'', line1: a.address_line_1 || a.line1 || '',
+    line2: a.address_line_2 || a.line2 || '', type: a.address_type || a.type || 'Home',
+    active: !!(a.is_default || a.active)};
 }
-function loginJSON(){
-  try{ const j=JSON.parse(document.getElementById('jsonInput').value); if(!j.user_id||!j.xo) throw 0; j.is_new = j.is_new ?? true; j.xo_exp = j.xo_exp || Math.floor(Date.now()/1000)+86400*7; state.session=j; LS.set('session', j); document.getElementById('jsonStatus').textContent='Connected ✓'; renderAccount(); renderGrid(); toast('JSON connected'); }catch{ document.getElementById('jsonStatus').textContent='Invalid JSON'; }
+async function loadAddresses(){
+  try{
+    const j = await api('/api/addresses');
+    const list = (j && j.addresses) || [];
+    state.addresses = list.map(normAddr);
+    const dflt = j && j.default;
+    if(dflt) state.addresses.forEach(a=>{ a.active = String(a.id) === String(dflt.id ?? dflt); });
+    if(state.addresses.length && !state.addresses.some(a=>a.active)) state.addresses[0].active = true;
+  }catch(e){ state.addresses = []; }
+  paintDeliverTo();
 }
-function exportSession(){
-  if(!state.session) return toast('No session');
-  const blob=new Blob([JSON.stringify(state.session,null,2)],{type:'application/json'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='meesho_session.json'; a.click();
+function paintDeliverTo(){
+  const a=selectedAddr();
+  document.getElementById('deliverTo').textContent= a ? `Delivering to ${a.city} - ${a.pin}` : 'Add delivery address';
+  const cd=document.getElementById('cartDeliverTo');
+  if(cd) cd.textContent= a ? `Delivery at ${a.city} - ${a.pin}` : 'Delivery address';
 }
-let otpStore=null;
-function sendOTP(){
-  const p=document.getElementById('otpPhone').value.trim();
-  if(p.length!==10) return document.getElementById('otpStatus').textContent='Enter 10-digit';
-  otpStore={phone:p, code:String(Math.floor(100000+Math.random()*900000)), exp:Date.now()+30000};
-  document.getElementById('otpStatus').textContent=`Mock OTP sent: ${otpStore.code} (30s)`;
-  toast(`OTP ${otpStore.code}`);
-}
-function verifyOTP(){
-  const c=document.getElementById('otpCode').value.trim();
-  if(!otpStore||Date.now()>otpStore.exp) return document.getElementById('otpStatus').textContent='OTP expired, resend';
-  if(c!==otpStore.code) return document.getElementById('otpStatus').textContent='Wrong OTP';
-  const sess={user_id:String(Date.now()).slice(-9), mobile:otpStore.phone, phone:'+91'+otpStore.phone, xo:'mock_xo_'+Math.random().toString(36).slice(2), instance_id:Math.random().toString(36).slice(2), is_new:true, xo_exp:Math.floor(Date.now()/1000)+86400*7};
-  state.session=sess; LS.set('session', sess); document.getElementById('otpStatus').textContent='Verified ✓'; renderAccount(); renderGrid(); toast('OTP verified');
-}
-function copyRefer(){ navigator.clipboard.writeText(document.getElementById('referLink').value); toast('Copied'); }
-function shareRefer(){ if(navigator.share) navigator.share({title:'ShopEasy Refer', text:document.getElementById('referLink').value}); else copyRefer(); }
-function refreshSession(){ if(!state.session) return toast('No session'); state.session.xo_exp=Math.floor(Date.now()/1000)+86400*7; LS.set('session', state.session); toast('Refreshed'); renderAccount(); }
-function logout(){ state.session=null; LS.set('session', null); renderAccount(); renderGrid(); toast('Logged out'); }
-function openSheet(id){ document.getElementById(id).classList.add('show'); if(id==='addressSheet') renderAddresses(); }
-function closeSheet(id){ document.getElementById(id).classList.remove('show'); }
 function renderAddresses(){
   const el=document.getElementById('addressList');
+  if(!state.addresses.length){ el.innerHTML=`<div style="padding:16px" class="muted">No addresses yet — add one below.</div>`; return; }
   el.innerHTML=state.addresses.map(a=>`<div class="addr ${a.active?'active':''}" onclick="selectAddr(${a.id})"><div class="addr__top"><b>${a.name} • ${a.type}</b><div class="radio"></div></div><div class="muted" style="font-size:12px;margin-top:6px">${a.line1}, ${a.line2? a.line2+', ':''}${a.city} - ${a.pin}<br>${a.phone}</div><div style="margin-top:8px;display:flex;gap:8px"><span class="muted" style="font-size:11px">✎ Edit</span><span class="kbd">Deliver here</span></div></div>`).join('');
 }
-function selectAddr(id){ state.addresses.forEach(a=>a.active=(a.id===id)); LS.set('addresses', state.addresses); renderAddresses(); document.getElementById('deliverTo').textContent=`Delivering to ${state.addresses.find(a=>a.active).city} - ${state.addresses.find(a=>a.active).pin}`; closeSheet('addressSheet'); toast('Address selected'); }
-function addAddress(){
-  const name=prompt('Name?')||'New User';
-  const phone=prompt('Phone 10-digit?')||'7797041040';
-  const pin=prompt('Pincode?')||'452010';
-  const city=prompt('City?')||'Indore';
-  const line1=prompt('Address line1?')||'yadav showroom';
-  const id=Date.now();
-  state.addresses.forEach(a=>a.active=false);
-  state.addresses.unshift({id, name, phone, line1, line2:'', city, state:'MP', pin, type:'Home', active:true});
-  LS.set('addresses', state.addresses); renderAddresses(); toast('Address added');
+// Spec: POST /api/addresses/set_default
+async function selectAddr(id){
+  let d=null;
+  try{ d=await api('/api/addresses/set_default',{method:'POST',body:{id}}); }
+  catch(e){ return toast('Network error — try again'); }
+  if(d && d.ok){
+    state.addresses.forEach(a=>{ a.active = String(a.id)===String(id); });
+    renderAddresses(); paintDeliverTo(); closeSheet('addressSheet'); toast('Address selected');
+  } else toast((d && (d.error||d.message)) || 'Could not select address');
 }
+// Spec: POST /api/addresses/create (same prompts UI as before)
+async function addAddress(){
+  const name=(prompt('Name?')||'').trim(); if(!name) return;
+  const phone=(prompt('Phone 10-digit?')||'').replace(/\D/g,'').slice(-10);
+  const pin=(prompt('Pincode?')||'').trim();
+  const city=(prompt('City?')||'').trim();
+  const line1=(prompt('Address line1?')||'').trim();
+  if(!(name && phone && pin && line1)) return toast('Name, mobile, pin, address required');
+  let d=null;
+  try{
+    d=await api('/api/addresses/create',{method:'POST',body:{name, mobile:phone, pin, city, state:'', address_line_1:line1, address_line_2:'', landmark:'', address_type:'Home', is_default:1}});
+  }catch(e){ return toast('Network error — try again'); }
+  if(d && d.ok){ await loadAddresses(); renderAddresses(); toast('Address added'); }
+  else toast((d && (d.error||d.message)) || 'Could not add address');
+}
+// ---------- account (live) ----------
+async function loadAccount(){
+  try{
+    const j = await api('/api/accounts');
+    const accs = (j && j.accounts) || [];
+    state.account = accs[0] || null;
+  }catch(e){ state.account = null; }
+  renderAccount();
+  try{ await loadOffer(); }catch(e){}
+}
+function renderAccount(){
+  const a=state.account;
+  if(a){
+    document.getElementById('accPhone').textContent=a.phone_display || a.phone || 'Connected';
+    document.getElementById('accMeta').textContent=`UID ${a.meesho_user_id||''} • ${(a.is_first_order ?? 1) ? 'NEW — FOD eligible' : 'Existing user'}`;
+    document.getElementById('accId').textContent=`a/c ${a.id}`;
+    document.getElementById('accStatus').textContent='Session Active';
+    document.getElementById('accExpiry').textContent=(a.is_first_order ?? 1) ? 'First-order offer eligible ✓' : '';
+  }
+  else { document.getElementById('accPhone').textContent='Not logged in'; document.getElementById('accMeta').textContent='Tap JSON / OTP login'; document.getElementById('accId').textContent=''; document.getElementById('accStatus').textContent='No Session'; document.getElementById('accExpiry').textContent=''; }
+}
+// Spec: POST /api/auth/json_login
+async function loginJSON(){
+  let j;
+  try{ j=JSON.parse(document.getElementById('jsonInput').value); }
+  catch(e){ document.getElementById('jsonStatus').textContent='Invalid JSON'; return; }
+  document.getElementById('jsonStatus').textContent='Connecting…';
+  let d=null;
+  try{ d=await api('/api/auth/json_login',{method:'POST',body:j}); }
+  catch(e){ document.getElementById('jsonStatus').textContent='Network error'; return; }
+  if(d && d.ok){
+    document.getElementById('jsonStatus').textContent='Connected ✓';
+    await loadAccount();
+    await loadProducts((document.getElementById('q').value||'').trim());
+    toast('JSON connected');
+  } else document.getElementById('jsonStatus').textContent=(d && (d.error||d.message)) || 'Failed';
+}
+async function exportSession(){
+  let d=null;
+  try{ d=await api('/api/user/export'); }catch(e){ return toast('Network error'); }
+  const accs=d && d.meesho_accounts;
+  if(!accs || !accs.length) return toast('No session');
+  const blob=new Blob([JSON.stringify({accounts:accs},null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='meesho_session.json'; a.click();
+  toast('Session exported');
+}
+// Spec: POST /api/auth/otp_send then POST /api/auth/otp_verify
+async function sendOTP(){
+  const p=(document.getElementById('otpPhone').value||'').replace(/\D/g,'').slice(-10);
+  if(p.length!==10) return document.getElementById('otpStatus').textContent='Enter 10-digit';
+  document.getElementById('otpStatus').textContent='Sending…';
+  let d=null;
+  try{ d=await api('/api/auth/otp_send',{method:'POST',body:{phone_number:p}}); }
+  catch(e){ document.getElementById('otpStatus').textContent='Network error'; return; }
+  if(d && d.ok){
+    otpStore={phone:p, request_id:d.request_id, instance_id:d.instance_id};
+    document.getElementById('otpStatus').textContent='OTP sent — check WhatsApp/SMS, then Verify';
+    toast('OTP sent');
+  } else document.getElementById('otpStatus').textContent=(d && (d.error||d.message)) || 'Failed';
+}
+async function verifyOTP(){
+  const c=(document.getElementById('otpCode').value||'').replace(/\D/g,'');
+  if(c.length<4) return document.getElementById('otpStatus').textContent='Enter the OTP you received';
+  const phone=(otpStore && otpStore.phone) || (document.getElementById('otpPhone').value||'').replace(/\D/g,'').slice(-10);
+  document.getElementById('otpStatus').textContent='Verifying…';
+  let d=null;
+  try{ d=await api('/api/auth/otp_verify',{method:'POST',body:{phone_number:phone, otp:c, request_id:otpStore&&otpStore.request_id, instance_id:otpStore&&otpStore.instance_id}}); }
+  catch(e){ document.getElementById('otpStatus').textContent='Network error'; return; }
+  if(d && d.ok){
+    otpStore=null;
+    document.getElementById('otpStatus').textContent='Verified ✓';
+    await loadAccount();
+    await loadProducts((document.getElementById('q').value||'').trim());
+    toast('OTP verified');
+  } else document.getElementById('otpStatus').textContent=(d && (d.error||d.message)) || 'Verification failed';
+}
+function copyRefer(){ try{ navigator.clipboard.writeText(document.getElementById('referLink').value); }catch(e){} toast('Copied'); }
+function shareRefer(){ if(navigator.share) navigator.share({title:'ShopEasy Refer', text:document.getElementById('referLink').value}); else copyRefer(); }
+async function refreshSession(){
+  const a=state.account;
+  if(!a) return toast('No session');
+  let d=null;
+  try{ d=await api('/api/accounts/refresh',{method:'POST',body:{account_id:a.id}}); }
+  catch(e){ return toast('Network error'); }
+  toast(d && d.ok ? 'Refreshed' : ((d && (d.error||d.message)) || 'Failed'));
+  await loadAccount();
+}
+async function logout(){
+  state.account=null; state.cart=[]; state.summary=null;
+  renderAccount(); updateBadge();
+  await loadAccount(); await loadCart();
+  toast('Logged out');
+}
+function openSheet(id){ document.getElementById(id).classList.add('show'); if(id==='addressSheet') renderAddresses(); }
+function closeSheet(id){ document.getElementById(id).classList.remove('show'); }
 function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
 
 // init
-renderCats(); renderGrid(); renderAccount();
+renderCats(); loadOffer(); loadProducts('fashion trending'); loadCart(); loadAddresses(); loadAccount();
 // expose for console
 window.switchTab=switchTab; window.openSheet=openSheet; window.closeSheet=closeSheet; window.rollFOD=rollFOD;
 </script>

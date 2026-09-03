@@ -2243,7 +2243,7 @@ def adapter_cart_add():
     supplier_id = _int0(data.get("supplier_id"))
     variation_id = _int0(data.get("variation_id"))
     variation = data.get("variation") or data.get("variation_name") or "Free Size"
-    quantity = _int0(data.get("quantity", 1)) or 1
+    quantity = _int0(data.get("quantity", data.get("qty", 1))) or 1
     price = _int0(data.get("price", 0))
     price_type_id = data.get("price_type_id", "basic_return_price")
     if not pid:
@@ -2280,18 +2280,25 @@ def adapter_cart_add():
         except Exception as e:
             print(f"[CART_ADD] review price pull failed: {e}", flush=True)
 
-    # Fallback: live product lookup when review gave nothing
+    # Fallback when review gave nothing: prefer explicit client values
+    # (search/detail prices are already FOD-adjusted server-side); live
+    # lookup only when the client sent no usable price.
     if not real_price:
-        try:
-            prod = get_meesho_product(str(pid))
-            if prod:
-                real_price = int(prod.get("price") or price or 0)
-                real_mrp = int(prod.get("mrp") or real_price)
-                real_name = prod.get("name") or ""
-                imgs = prod.get("images") or []
-                real_image = imgs[0] if imgs else ""
-        except Exception:
-            pass
+        if price:
+            real_price, real_mrp = price, _int0(data.get("mrp", price))
+            real_name = data.get("name") or ""
+            real_image = data.get("image") or ""
+        else:
+            try:
+                prod = get_meesho_product(str(pid))
+                if prod:
+                    real_price = int(prod.get("price") or 0)
+                    real_mrp = int(prod.get("mrp") or real_price)
+                    real_name = prod.get("name") or ""
+                    imgs = prod.get("images") or []
+                    real_image = imgs[0] if imgs else ""
+            except Exception:
+                pass
     final_price = real_price or price
     final_mrp = real_mrp or _int0(data.get("mrp", final_price))
 
