@@ -461,7 +461,6 @@ def api_place_order():
     # Reference (checkout_method.txt): for UPI use effective_total_with_ppd (UI amount),
     # for COD use effective_total/without_ppd. Primary candidate = that amount to avoid
     # price mismatch, then effective_total / subtotal as fallbacks.
-    meesho_amount = st.get("order_total") or subtotal
     if payment_method == "COD":
         meesho_amount = st.get("effective_total") or st.get("order_total") or subtotal
     else:
@@ -471,6 +470,7 @@ def api_place_order():
 
     order_r = None
     tried_amts = []
+    actual_amount = meesho_amount  # track what actually succeeded
     if payment_method == "COD":
         cands = (st.get("effective_total"), st.get("order_total"), st.get("upi_amount"), subtotal)
     else:
@@ -489,6 +489,7 @@ def api_place_order():
                                 addr_info=st.get("addr") or {})
         print(f"[PLACE_ORDER] preorder try amount={cand_int} ok={order_r.get('ok')} err={order_r.get('error')} meesho_num={order_r.get('order_num')} raw={str(order_r.get('raw'))[:400]}", flush=True)
         if order_r.get("ok"):
+            actual_amount = cand_int
             break
     if not order_r or not order_r.get("ok"):
         if user_mode == "paid":
@@ -501,7 +502,7 @@ def api_place_order():
         return jsonify({"error": f"Order failed: {(order_r or {}).get('error')}",
                         "message": (order_r or {}).get("message", "") or hint,
                         "details": order_r,
-                        "sent_amount": meesho_amount,
+                        "sent_amount": actual_amount,
                         "tried_amounts": tried_amts,
                         "cart_session": cart_session,
                         "address_id": meesho_addr_id}), 400
@@ -509,9 +510,9 @@ def api_place_order():
     meesho_order_num = order_r.get("order_num", "")
     items_str = ", ".join([f"{c.get('name', '?')}x{c.get('qty', 1)}" for c in cart])
     # total stored = actual Meesho payable (what user pays Meesho), fee is our backend cut
-    oid = create_order(uid, items_str, meesho_amount, fee, addr.get("address_line_1", ""),
+    oid = create_order(uid, items_str, actual_amount, fee, addr.get("address_line_1", ""),
                        meesho_order_num=meesho_order_num, payment_method=payment_method,
-                       meesho_amount=meesho_amount)
+                       meesho_amount=actual_amount)
 
     clear_cart(uid)
     set_cart_session(uid, "")
@@ -529,7 +530,7 @@ def api_place_order():
 
     return jsonify({
         "ok": True, "order_id": oid, "meesho_order_num": meesho_order_num,
-        "total": meesho_amount, "meesho_amount": meesho_amount,
+        "total": actual_amount, "meesho_amount": actual_amount,
         "fee_charged": fee,
         "payment_method": payment_method, "mode": user_mode,
         "qr_base64": qr_base64,
@@ -602,7 +603,6 @@ def api_create_pending():
     cart_session = st["cs"]
     upi_amt = st.get("upi_amount") or st.get("order_total") or 0
     order_tot = st.get("order_total") or st.get("effective_total") or upi_amt or 0
-    meesho_amount = upi_amt
     meesho_addr_id = st["addr"].get("id")
     set_cart_session(uid, cart_session)
 
@@ -612,6 +612,7 @@ def api_create_pending():
     # displayed price -> no price mismatch), then effective_total as fallback.
     order_r = None
     tried_amts = []
+    actual_amount = upi_amt  # track what actually succeeded
     for cand in (upi_amt, order_tot):
         try:
             cand_int = int(cand or 0)
@@ -625,15 +626,16 @@ def api_create_pending():
                                 addr_info=st.get("addr") or {})
         print(f"[CREATE_PENDING] preorder try amount={cand_int} ok={order_r.get('ok')} err={order_r.get('error')} raw={str(order_r.get('raw'))[:400]} addr={meesho_addr_id} cs={cart_session[:20] if cart_session else ''}", flush=True)
         if order_r.get("ok"):
+            actual_amount = cand_int  # this is the amount that worked
             break
     if not order_r or not order_r.get("ok"):
-        return jsonify({"ok": False, "error": f"Order failed: {(order_r or {}).get('error')}", "message": (order_r or {}).get("message",""), "details": order_r, "sent_amount": meesho_amount, "tried_amounts": tried_amts, "address_id": meesho_addr_id}), 400
+        return jsonify({"ok": False, "error": f"Order failed: {(order_r or {}).get('error')}", "message": (order_r or {}).get("message",""), "details": order_r, "sent_amount": actual_amount, "tried_amounts": tried_amts, "address_id": meesho_addr_id}), 400
 
     meesho_order_num = order_r.get("order_num", "")
     items_str = ", ".join([f"{c.get('name','?')}x{c.get('qty',1)}" for c in cart])
-    oid = create_order(uid, items_str, meesho_amount, fee, addr.get("address_line_1", ""),
+    oid = create_order(uid, items_str, actual_amount, fee, addr.get("address_line_1", ""),
                        meesho_order_num=meesho_order_num, payment_method="UPI",
-                       meesho_amount=meesho_amount)
+                       meesho_amount=actual_amount)
     clear_cart(uid)
     set_cart_session(uid, "")
 
@@ -650,7 +652,7 @@ def api_create_pending():
     upi_uri = upi_intent_url or ""
     return jsonify({
         "ok": True, "order_id": oid, "meesho_order_num": meesho_order_num,
-        "amount": meesho_amount, "fee": fee,
+        "amount": actual_amount, "fee": fee,
         "qr_base64": qr_base64, "upi_intent_url": upi_intent_url, "qr_url": qr_url,
         "upi_uri": upi_uri, "redirect_url": upi_intent_url or order_r.get("payment_url") or "",
         "payment_url": order_r.get("payment_url"),
@@ -731,13 +733,26 @@ def api_checkout_summary():
     if acc:
         cs = get_cart_session(uid)
         if not cs:
-            valid_items = [c for c in cart if c.get("product_id")]
-            if valid_items:
-                add_r = real_cart_add_many(acc, valid_items, "")
-                if add_r.get("ok"):
-                    cs = add_r.get("cart_session")
-                    if cs:
-                        set_cart_session(uid, cs)
+            # CRITICAL: Try review with empty session FIRST to recover Meesho's
+            # server-side cart (session may have expired but cart persists).
+            # DO NOT call real_cart_add_many here - it ADDS items with
+            # replaceable:false, causing qty auto-increment when items already
+            # exist in Meesho's cart.
+            review_try = real_cart_review(acc, "")
+            if review_try.get("ok") and review_try.get("cart_session"):
+                cs = review_try["cart_session"]
+                set_cart_session(uid, cs)
+                print(f"[CHECKOUT_SUMMARY] recovered Meesho cart_session from review (empty session)", flush=True)
+            else:
+                # Meesho cart truly empty - safe to add local items
+                valid_items = [c for c in cart if c.get("product_id")]
+                if valid_items:
+                    add_r = real_cart_add_many(acc, valid_items, "")
+                    if add_r.get("ok"):
+                        cs = add_r.get("cart_session")
+                        if cs:
+                            set_cart_session(uid, cs)
+                            print(f"[CHECKOUT_SUMMARY] added local items to empty Meesho cart", flush=True)
         if cs:
             review = real_cart_review(acc, cs)
             if review.get("ok"):
