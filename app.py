@@ -309,6 +309,10 @@ def api_cart_update():
                 if vr.get("cart_session"):
                     set_cart_session(uid, vr["cart_session"])
                 meesho_verified = bool(vr.get("verified"))
+                if meesho_verified:
+                    # Tombstone so a later pull can't re-import it during
+                    # Meesho's async lag window (the reappear glitch).
+                    _tombstone_add(uid, int(prod_id))
                 print(f"[CART_UPDATE] verified remove pid={prod_id} removed={vr.get('removed')} verified={vr.get('verified')} via={vr.get('via')} err={vr.get('error')}", flush=True)
             else:
                 # qty change: remove and re-add with new qty
@@ -1077,6 +1081,39 @@ def _otp_store_clear(phone):
         pass
 
 
+# ── Removal tombstones: product_ids the user explicitly removed, so a later
+# pull never re-imports them from Meesho (the "reappear glitch"). Entries
+# expire after a few minutes — if Meesho STILL lists the item then, the
+# remove genuinely failed and re-importing restores truth.
+_TOMBSTONE_TTL = 300
+
+def _tombstone_add(uid, pid):
+    try:
+        from database import get_db as _gdb
+        c = _gdb()
+        c.execute("CREATE TABLE IF NOT EXISTS recently_removed (user_id INTEGER, product_id INTEGER, created_at REAL DEFAULT 0, PRIMARY KEY (user_id, product_id))")
+        c.execute("INSERT OR REPLACE INTO recently_removed (user_id, product_id, created_at) VALUES (?,?,?)",
+                  (uid, int(pid), time.time()))
+        c.execute("DELETE FROM recently_removed WHERE created_at < ?", (time.time() - _TOMBSTONE_TTL,))
+        c.commit()
+        c.close()
+    except Exception as e:
+        print(f"[TOMBSTONE] add failed: {e}", flush=True)
+
+
+def _tombstone_recent(uid):
+    try:
+        from database import get_db as _gdb
+        c = _gdb()
+        c.execute("CREATE TABLE IF NOT EXISTS recently_removed (user_id INTEGER, product_id INTEGER, created_at REAL DEFAULT 0, PRIMARY KEY (user_id, product_id))")
+        rows = c.execute("SELECT product_id FROM recently_removed WHERE user_id=? AND created_at > ?",
+                         (uid, time.time() - _TOMBSTONE_TTL)).fetchall()
+        c.close()
+        return {int(r["product_id"]) for r in rows}
+    except Exception:
+        return set()
+
+
 @app.route("/api/fod/roll")
 def api_fod_roll():
     global _meesho_offer
@@ -1809,6 +1846,39 @@ def api_cart_sync_pull():
                     conn.execute("DELETE FROM cart WHERE user_id=? AND product_id=?", (uid, pid))
                     conn.commit(); conn.close()
                     removed+=1
+            # Import Meesho rows missing locally (e.g. local write was lost
+            # but Meesho has the item) — EXCEPT recently-removed pids, so a
+            # just-removed item can never flicker back during Meesho's lag
+            # window. Tombstones expire, so a genuinely-failed remove still
+            # resurfaces truthfully after a few minutes.
+            try:
+                tombs = _tombstone_recent(uid)
+                local_pids = {int(c.get("product_id") or 0) for c in get_cart(uid)}
+                for m in meesho_items:
+                    try:
+                        mpid = int(m.get("product_id") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if not mpid or mpid in local_pids or mpid in tombs:
+                        continue
+                    mprice = int(m.get("price") or m.get("mrp") or 0)
+                    mqty = int(m.get("quantity") or m.get("qty") or 1) or 1
+                    try:
+                        add_to_cart(uid, mpid, mqty,
+                                    name=m.get("name") or f"Product {mpid}",
+                                    price=mprice,
+                                    image=(m.get("image") or ""),
+                                    source="meesho",
+                                    supplier_id=int(m.get("supplier_id") or 0),
+                                    variation_id=int(m.get("variation_id") or 0),
+                                    variation_name=m.get("variation") or "Free Size",
+                                    mrp=int(m.get("mrp") or mprice))
+                        imported += 1
+                        print(f"[SYNC_PULL] imported pid={mpid} qty={mqty} price={mprice}", flush=True)
+                    except Exception as ie:
+                        print(f"[SYNC_PULL] import failed pid={mpid}: {ie}", flush=True)
+            except Exception as e:
+                print(f"[SYNC_PULL] import pass failed: {e}", flush=True)
         return jsonify({"ok": True, "meesho_items": meesho_items, "imported": imported,
                         "updated": updated, "removed": removed,
                         "cart_session": review.get("cart_session")})
@@ -2294,12 +2364,20 @@ def adapter_cart_add():
     final_price = real_price or price
     final_mrp = real_mrp or _int0(data.get("mrp", final_price))
 
-    # Also add to local cart (with REAL price so totals/QR match)
+    # Also add to local cart (with REAL price so totals/QR match).
+    # Guarded: a local write failure must surface as an error, never as a
+    # silent empty UI while Meesho holds the item.
     name = data.get("name") or real_name or f"Product {pid}"
     image = data.get("image") or real_image or ""
-    add_to_cart(uid, pid, quantity, name=name, price=final_price, image=image,
-                source="meesho", supplier_id=supplier_id, variation_id=variation_id,
-                variation_name=variation, mrp=final_mrp)
+    try:
+        add_to_cart(uid, pid, quantity, name=name, price=final_price, image=image,
+                    source="meesho", supplier_id=supplier_id, variation_id=variation_id,
+                    variation_name=variation, mrp=final_mrp)
+    except Exception as e:
+        print(f"[CART_ADD] LOCAL WRITE FAILED pid={pid}: {e}", flush=True)
+        return jsonify({"ok": False, "error": "local cart write failed, please retry",
+                        "message": "Could not save to cart — tap Add again",
+                        "synced": synced, "cart_session": cs or ""}), 500
 
     # Return updated cart in working bot format
     cart = get_cart(uid)
@@ -2457,6 +2535,8 @@ def adapter_cart_update():
                 if vr.get("cart_session"):
                     set_cart_session(uid, vr["cart_session"])
                 meesho_verified = bool(vr.get("verified"))
+                if meesho_verified:
+                    _tombstone_add(uid, int(product_id))
                 print(f"[ADAPTER_CART_UPDATE] verified remove pid={product_id} removed={vr.get('removed')} verified={vr.get('verified')} via={vr.get('via')} err={vr.get('error')}", flush=True)
     except Exception as e:
         print(f"[ADAPTER_CART_UPDATE] sync failed: {e}", flush=True)

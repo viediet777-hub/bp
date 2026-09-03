@@ -589,7 +589,7 @@ def _cart_add_once(acc, body):
                 return {"ok": True, "data": data, "result": result, "status": resp.status_code}
             return {"ok": False, "data": data, "status": resp.status_code}
     except Exception as e:
-        return {"ok": False, "error": str(e), "data": {}}
+        return {"ok": False, "error": str(e), "data": {}, "status": None, "exception": True}
 
 
 def _is_invalid_input(data):
@@ -688,10 +688,16 @@ def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, 
         }
         r = _cart_add_once(acc, body)
         if r.get("ok"):
-            return True, r["data"], ""
+            return True, r["data"], "", False
         data = r.get("data", {})
-        err_text = data.get("error_type") or data.get("message") or data.get("error") or r.get("error") or ""
-        return False, data, err_text
+        err_text = (data.get("error_type") or data.get("description") or data.get("message")
+                    or data.get("error") or r.get("error") or "")
+        # Retryable ONLY on transport exceptions (timeout/network) or HTTP 5xx.
+        # Any 4xx (invalid input, OOS handled separately, auth, etc.) must NOT
+        # be retried with equivalent payloads — it just burns seconds.
+        status = r.get("status")
+        retryable = bool(r.get("exception")) or (isinstance(status, int) and status >= 500)
+        return False, data, err_text, retryable
 
     def _win(data):
         result = (data or {}).get("result", {})
@@ -708,31 +714,43 @@ def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, 
             "resolved_variation": var_name,
         }
 
-    # Fast path: pdp/default, then pdp/buy_now (captured real-app flow).
-    for ident in ("default", "buy_now"):
-        ok, data, err = _once(ident, "pdp", "premium_return_price")
+    def _try_slot(ident):
+        """One ident slot: premium, plus basic-price retry on CART_OOS.
+        Returns (win_dict_or_None, data, err, retryable)."""
+        ok, data, err, retryable = _once(ident, "pdp", "premium_return_price")
         if ok:
             print(f"[CART_ADD] ok ident={ident} context=pdp cs={str(data.get('cart_session'))[:30]}", flush=True)
-            return _win(data)
+            return _win(data), data, "", False
         if _is_oos(data):
-            ok2, data2, err2 = _once(ident, "pdp", "basic_return_price")
+            ok2, data2, err2, _ = _once(ident, "pdp", "basic_return_price")
             if ok2:
                 print(f"[CART_ADD] ok after CART_OOS retry ident={ident} context=pdp", flush=True)
-                return _win(data2)
+                return _win(data2), data2, "", False
             data, err = data2, err2
-        print(f"[CART_ADD] FAILED ident={ident} context=pdp sent=({sent_summary}): {err} raw={str(data)[:300]}", flush=True)
-        if _is_invalid_input(data):
-            # Same payload would 400 under every context — stop immediately.
-            return {"ok": False, "error": f"invalid input ({err})", "sent": sent_summary, "raw": data}
-        # Non-input error (context/identifier/network) -> try next ident.
-    # Last resort for non-input errors only: one pdl/default attempt.
-    ok, data, err = _once("default", "pdl", "premium_return_price")
-    if ok:
-        print("[CART_ADD] ok via last-resort pdl/default", flush=True)
-        return _win(data)
-    print(f"[CART_ADD] FAILED ident=default context=pdl sent=({sent_summary}): {err}", flush=True)
-    print(f"[CART_ADD] ALL FAILED sent=({sent_summary}): {err}", flush=True)
-    return {"ok": False, "error": f"cart add failed ({err})", "sent": sent_summary, "raw": data or {}}
+        return None, data, err, retryable
+
+    # Attempt 1: default/pdp (captured real-app flow) — the 1-2s fast path.
+    win, data, err, retryable = _try_slot("default")
+    if win:
+        return win
+    print(f"[CART_ADD] FAILED ident=default context=pdp sent=({sent_summary}): {err} raw={str(data)[:300]}", flush=True)
+    if _is_invalid_input(data):
+        # Same payload would 400 everywhere — stop immediately, no more calls.
+        return {"ok": False, "error": f"invalid input ({err})", "sent": sent_summary, "raw": data}
+    if not retryable:
+        # Non-retryable 4xx (context/auth/etc.): one buy_now attempt max.
+        win2, data2, err2, _ = _try_slot("buy_now")
+        if win2:
+            return win2
+        print(f"[CART_ADD] FAILED ident=buy_now context=pdp sent=({sent_summary}): {err2}", flush=True)
+        return {"ok": False, "error": f"cart add failed ({err2})", "sent": sent_summary, "raw": data2 or {}}
+    # Retryable (timeout/transport/5xx): one buy_now/pdp retry, then stop.
+    print(f"[CART_ADD] retryable error, one buy_now/pdp retry sent=({sent_summary})", flush=True)
+    win2, data2, err2, _ = _try_slot("buy_now")
+    if win2:
+        return win2
+    print(f"[CART_ADD] ALL FAILED sent=({sent_summary}): {err2}", flush=True)
+    return {"ok": False, "error": f"cart add failed ({err2})", "sent": sent_summary, "raw": data2 or {}}
 
 
 def real_cart_review(acc, cart_session=None):

@@ -663,8 +663,7 @@ async function sheetAdd(buy){
     }});
     if(d && (d.ok || d.success || Array.isArray(d.items))){
       toast('Added to cart', 'ok');
-      await pullMeeshoCart();
-      await refreshCartCount();
+      await syncCart();
       closeSheet();
       if(buy) goTab('cart');
       return;
@@ -784,6 +783,14 @@ function meeshoIdent(pid, fallback){
     return m[String(pid)] || fallback;
   }catch(e){ return fallback; }
 }
+// Spec: after EVERY cart mutation, pull the real Meesho cart, reconcile
+// local rows, then reload UI state — the mini app can never drift.
+async function syncCart(){
+  const pull = await pullMeeshoCart();
+  await loadCart();
+  if(pull && pull.imported > 0) toast('Cart synced from Meesho', 'ok');
+  return pull;
+}
 async function chgQty(i, d){
   const c = S.cart[i];
   if(!c) return;
@@ -795,7 +802,7 @@ async function chgQty(i, d){
     const r = await api('/api/cart/update', {method:'POST', body:{cart_id: c.key, product_id: c.product_id, identifier: meeshoIdent(c.product_id, c.key), qty: qty}});
     if(!(r && (r.ok || r.success || Array.isArray(r.items)))) return toast(apiErr(r, 'Could not update'), 'err');
     // Confirm sync against the real Meesho cart, then re-render.
-    const pull = await pullMeeshoCart();
+    const pull = await syncCart();
     await renderCart();
     if(removing){
       const v = r.meesho_verified;
