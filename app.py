@@ -2244,6 +2244,14 @@ def adapter_cart_add():
             if r.get("cart_session"):
                 cs = r["cart_session"]
                 set_cart_session(uid, cs)
+            # Persist Meesho-resolved ids locally (self-healed or confirmed)
+            # so later checkout/add_many calls reuse exact working ids.
+            if r.get("resolved_supplier_id"):
+                supplier_id = int(r["resolved_supplier_id"])
+            if r.get("resolved_variation_id"):
+                variation_id = int(r["resolved_variation_id"])
+            if r.get("resolved_variation"):
+                variation = r["resolved_variation"]
         # Pull REAL prices from Meesho review (frontend sends no price)
         try:
             rev = real_cart_review(acc, cs)

@@ -592,86 +592,147 @@ def _cart_add_once(acc, body):
         return {"ok": False, "error": str(e), "data": {}}
 
 
+def _is_invalid_input(data):
+    """True when Meesho rejects the payload shape itself
+    (400 "Invalid input check the api contract"). Retrying the same payload
+    under another context/identifier can never succeed — caller must stop."""
+    blob = str((data or {}).get("description") or "") + "|" \
+        + str((data or {}).get("error_type") or "") + "|" \
+        + str((data or {}).get("message") or "")
+    return "invalid input" in blob.lower()
+
+
+def _is_oos(data):
+    ecode = (data.get("error") or {}).get("code") if isinstance((data or {}).get("error"), dict) else None
+    return ecode == "CART_OOS" or "CART_OOS" in str(data or "")
+
+
 def real_cart_add(acc, product_id, supplier_id, variation_id, variation, qty=1, cart_session=None):
     """Add product to real Meesho cart via /api/1.0/cart/add.
-    Captured real app uses context='pdp' (folder 56). We try pdp first,
-    then pdl fallback, and also retry with basic_return_price on CART_OOS."""
-    pid = int(product_id) if product_id else 0
+
+    Contract lessons (400 "Invalid input check the api contract"):
+    - supplier_id / variation_id must be REAL ints (nulls always 400). When
+      missing they are resolved from live product detail first; if still
+      unresolvable the call aborts WITHOUT burning retries.
+    - variation must be a non-empty string ("Free Size" fallback).
+    - selected_price_type_id is always sent (premium first, basic on CART_OOS).
+
+    Fast path (1-2s): default/pdp, then buy_now/pdp — the captured real-app
+    flow. Invalid-input failures return immediately. A single pdl/default
+    attempt remains ONLY as a last resort for non-input errors
+    (context/identifier/network), because pdp covers the real flow.
+    """
+    try:
+        pid = int(product_id) if product_id else 0
+    except (TypeError, ValueError):
+        pid = 0
+    if not pid:
+        return {"ok": False, "error": "missing product_id"}
     vid = _pos_int(variation_id)
     sid = _pos_int(supplier_id)
-    # Contract hardening: variation must be a non-empty string, ids ints-or-null
-    # (Meesho answers 400 "Invalid input check the api contract" otherwise).
     var_name = (str(variation or "").strip() or "Free Size")
-    qty_int = int(qty) if qty else 1
+    try:
+        qty_int = int(qty) if qty else 1
+    except (TypeError, ValueError):
+        qty_int = 1
+    if qty_int < 1:
+        qty_int = 1
+    # Self-heal missing ids from live product detail (null ids -> 400).
+    if sid is None or vid is None:
+        prod = None
+        try:
+            prod = meesho_product_sync(str(pid))
+        except Exception as e:
+            print(f"[CART_ADD] detail lookup failed pid={pid}: {e}", flush=True)
+        if prod:
+            if sid is None:
+                sid = _pos_int(prod.get("supplier_id"))
+            sizes = prod.get("sizes") or []
+            if vid is None and sizes:
+                match = None
+                if var_name != "Free Size":
+                    wl = var_name.lower()
+                    match = next((s for s in sizes
+                                  if str(s.get("name") or "").strip().lower() == wl
+                                  and s.get("in_stock") is not False), None)
+                pick = match or next((s for s in sizes if s.get("in_stock") is not False), sizes[0])
+                vid = _pos_int(pick.get("id"))
+                if var_name == "Free Size" and pick.get("name"):
+                    var_name = str(pick["name"])
+            print(f"[CART_ADD] resolved ids pid={pid} sid={sid} vid={vid} var={var_name!r}", flush=True)
+    if sid is None or vid is None:
+        # Critical: never retry Meesho with null ids — every attempt 400s.
+        err = f"missing ids (supplier_id={sid}, variation_id={vid}); product lookup could not resolve them"
+        print(f"[CART_ADD] ABORT pid={pid}: {err}", flush=True)
+        return {"ok": False, "error": err}
     sent_summary = f"pid={pid} sid={sid} vid={vid} var={var_name!r} qty={qty_int}"
-    # Captured uses identifier "default" for pdp (folder 31: pdp/default), not "buy_now"
-    for ident in ("default", "buy_now"):
-        base_item = {
+
+    def _once(ident, context, price_type):
+        body = {
+            "context": context,
             "identifier": ident,
-            "product_id": pid,
-            "supplier_id": sid,
-            "variation_id": vid,
-            "variation": var_name,
-            "quantity": qty_int,
-            "selected_price_type_id": "premium_return_price",
-            "client_metadata": None,
-        }
-        for context in ("pdp", "pdl"):
-            body = {
-                "context": context,
+            "cart_session": cart_session or None,
+            "replaceable": False,
+            "items": [{
                 "identifier": ident,
-                "cart_session": cart_session or None,
-                "replaceable": False,
-                "items": [dict(base_item)],
-                "address_id": None,
-                "user_id": _acc_uid(acc),
-            }
-            r = _cart_add_once(acc, body)
-            if r.get("ok"):
-                data = r["data"]
-                result = r["result"]
-                print(f"[CART_ADD] ok ident={ident} context={context} cs={str(data.get('cart_session'))[:30]}", flush=True)
-                return {
-                    "ok": True,
-                    "cart_session": data.get("cart_session"),
-                    "effective_total": result.get("effective_total"),
-                    "effective_total_for_upi_plugin": result.get("effective_total_for_upi_plugin"),
-                    "total_quantity": result.get("total_quantity"),
-                    "splits": result.get("splits", []),
-                    "price_break_up": result.get("price_break_up", []),
-                }
-            data = r.get("data", {})
-            err_type = data.get("error_type") or data.get("message") or data.get("error") or r.get("error") or ""
-            # CART_OOS -> retry with basic price (same ident/context)
-            ecode = (data.get("error") or {}).get("code") if isinstance(data.get("error"), dict) else None
-            if ecode == "CART_OOS" or "CART_OOS" in str(data):
-                base_item["selected_price_type_id"] = "basic_return_price"
-                body["items"] = [dict(base_item)]
-                r2 = _cart_add_once(acc, body)
-                if r2.get("ok"):
-                    data2 = r2["data"]
-                    result2 = r2["result"]
-                    print(f"[CART_ADD] ok after CART_OOS retry ident={ident} context={context}", flush=True)
-                    return {
-                        "ok": True,
-                        "cart_session": data2.get("cart_session"),
-                        "effective_total": result2.get("effective_total"),
-                        "effective_total_for_upi_plugin": result2.get("effective_total_for_upi_plugin"),
-                        "total_quantity": result2.get("total_quantity"),
-                        "splits": result2.get("splits", []),
-                        "price_break_up": result2.get("price_break_up", []),
-                    }
-                data = r2.get("data", data)
-                err_type = data.get("error_type") or str(data)[:300]
-            print(f"[CART_ADD] FAILED ident={ident} context={context} sent=({sent_summary}): {err_type} raw={str(data)[:400]}", flush=True)
-            if "context" in str(err_type).lower() or "identifier" in str(err_type).lower():
-                continue  # try next context/ident
-            if context == "pdp":
-                continue  # try pdl with same ident
-            # pdl also failed with this ident, try next ident
-            continue
-    print(f"[CART_ADD] ALL FAILED sent=({sent_summary}) — check supplier/variation ids from product detail", flush=True)
-    return {"ok": False, "error": "cart add failed (all pdp/pdl + default/buy_now)", "sent": sent_summary, "raw": {}}
+                "product_id": pid,
+                "supplier_id": sid,
+                "variation_id": vid,
+                "variation": var_name,
+                "quantity": qty_int,
+                "selected_price_type_id": price_type,
+                "client_metadata": None,
+            }],
+            "address_id": None,
+            "user_id": _acc_uid(acc),
+        }
+        r = _cart_add_once(acc, body)
+        if r.get("ok"):
+            return True, r["data"], ""
+        data = r.get("data", {})
+        err_text = data.get("error_type") or data.get("message") or data.get("error") or r.get("error") or ""
+        return False, data, err_text
+
+    def _win(data):
+        result = (data or {}).get("result", {})
+        return {
+            "ok": True,
+            "cart_session": (data or {}).get("cart_session"),
+            "effective_total": result.get("effective_total"),
+            "effective_total_for_upi_plugin": result.get("effective_total_for_upi_plugin"),
+            "total_quantity": result.get("total_quantity"),
+            "splits": result.get("splits", []),
+            "price_break_up": result.get("price_break_up", []),
+            "resolved_supplier_id": sid,
+            "resolved_variation_id": vid,
+            "resolved_variation": var_name,
+        }
+
+    # Fast path: pdp/default, then pdp/buy_now (captured real-app flow).
+    for ident in ("default", "buy_now"):
+        ok, data, err = _once(ident, "pdp", "premium_return_price")
+        if ok:
+            print(f"[CART_ADD] ok ident={ident} context=pdp cs={str(data.get('cart_session'))[:30]}", flush=True)
+            return _win(data)
+        if _is_oos(data):
+            ok2, data2, err2 = _once(ident, "pdp", "basic_return_price")
+            if ok2:
+                print(f"[CART_ADD] ok after CART_OOS retry ident={ident} context=pdp", flush=True)
+                return _win(data2)
+            data, err = data2, err2
+        print(f"[CART_ADD] FAILED ident={ident} context=pdp sent=({sent_summary}): {err} raw={str(data)[:300]}", flush=True)
+        if _is_invalid_input(data):
+            # Same payload would 400 under every context — stop immediately.
+            return {"ok": False, "error": f"invalid input ({err})", "sent": sent_summary, "raw": data}
+        # Non-input error (context/identifier/network) -> try next ident.
+    # Last resort for non-input errors only: one pdl/default attempt.
+    ok, data, err = _once("default", "pdl", "premium_return_price")
+    if ok:
+        print("[CART_ADD] ok via last-resort pdl/default", flush=True)
+        return _win(data)
+    print(f"[CART_ADD] FAILED ident=default context=pdl sent=({sent_summary}): {err}", flush=True)
+    print(f"[CART_ADD] ALL FAILED sent=({sent_summary}): {err}", flush=True)
+    return {"ok": False, "error": f"cart add failed ({err})", "sent": sent_summary, "raw": data or {}}
 
 
 def real_cart_review(acc, cart_session=None):

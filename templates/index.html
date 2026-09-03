@@ -635,12 +635,30 @@ function sheetQty(d){
 }
 async function sheetAdd(buy){
   if(!cur) return;
-  const sizeEl = document.querySelector('.sizepill.on');
-  const size = (sizeEl && sizeEl.textContent ? sizeEl.textContent : 'Free Size').trim() || 'Free Size';
+  let sizeEl = document.querySelector('.sizepill.on');
+  let size = (sizeEl && sizeEl.textContent ? sizeEl.textContent : 'Free Size').trim() || 'Free Size';
+  // Self-heal: the backend rejects null supplier/variation ids, so if the
+  // live detail never loaded (search rows carry no supplier), fetch it now
+  // and resolve the real ids before adding.
+  if(!(Number(cur.supplier_id) && Number(curVid))){
+    toast('Loading size info…');
+    try{
+      const dd = await api('/api/product?product_id=' + encodeURIComponent(cur.id));
+      if(dd && !dd.error && (dd.product_id || dd.name)){
+        cur = mergeDetail(cur, dd);
+        paintProductSheet(cur);
+        const pills = Array.prototype.slice.call(document.querySelectorAll('.sizepill'));
+        const back = pills.filter(function(p){ return p.textContent === size; })[0];
+        if(back) pickSize(back);
+        sizeEl = document.querySelector('.sizepill.on');
+        size = (sizeEl && sizeEl.textContent ? sizeEl.textContent : 'Free Size').trim() || 'Free Size';
+      }
+    }catch(e){}
+  }
   try{
     const d = await api('/api/cart/add', {method:'POST', body:{
-      product_id: cur.id, supplier_id: cur.supplier_id || 0,
-      variation_id: curVid, variation: size, qty: curQty, quantity: curQty,
+      product_id: cur.id, supplier_id: Number(cur.supplier_id) || 0,
+      variation_id: Number(curVid) || 0, variation: size, qty: curQty, quantity: curQty,
       price: cur.price, mrp: cur.mrp, image: cur.img, name: cur.name
     }});
     if(d && (d.ok || d.success || Array.isArray(d.items))){
