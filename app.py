@@ -1947,6 +1947,885 @@ def api_meesho_recommendations():
     return jsonify(real_product_recommendations(acc, cid, pid))
 
 
+# ═══════════════════════════════════════════════════════════════
+# WORKING BOT FRONTEND ADAPTER ROUTES
+# These routes match the API contract expected by the working bot's
+# public/index.html frontend (Royal Blue UI).
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/auth/me")
+def adapter_auth_me():
+    uid = get_uid()
+    if not uid:
+        uid = 0
+    user = get_user(uid) or create_user(uid) if uid else {"user_id": 0, "wallet": 0}
+    acc = get_active_meesho_account(uid) if uid else None
+    return jsonify({
+        "authenticated": True,
+        "user": {
+            "id": uid,
+            "username": f"user_{uid}",
+            "role": "user",
+            "devices": 1,
+            "accounts": 1,
+        },
+        "token": "",
+        "plan": {"key": "free", "label": "Free", "orders": 999, "devices": 99},
+        "used_today": get_order_count(uid) if uid else 0,
+        "orders_left": 999,
+        "trial": False,
+        "trials_left": 0,
+    })
+
+
+@app.route("/api/bootstrap")
+def adapter_bootstrap():
+    uid = get_uid() or 0
+    accs = get_meesho_accounts(uid) if uid else []
+    active = get_active_meesho_account(uid) if uid else None
+    user = get_user(uid) if uid else None
+    balance = user.get("wallet", 0) if user else 0
+    accounts_list = []
+    for a in (accs or []):
+        accounts_list.append({
+            "id": a.get("id"),
+            "mobile": a.get("phone", ""),
+            "source": "json",
+            "xo_exp": False,
+            "user_id": a.get("meesho_user_id") or a.get("user_id", ""),
+            "is_first_order": bool(a.get("is_first_order", 1)),
+            "order_placed": False,
+        })
+    return jsonify({
+        "accounts": accounts_list,
+        "active_id": active.get("id") if active else None,
+        "balance": balance,
+        "per_order_price": 0,
+        "open_in_telegram": False,
+        "maintenance": False,
+    })
+
+
+@app.route("/api/cart", methods=["GET"])
+def adapter_cart():
+    uid = get_uid() or 0
+    cart = get_cart(uid)
+    acc = get_active_meesho_account(uid) if uid else None
+    addr = get_default_address(uid) if uid else None
+    items = []
+    total_qty = 0
+    effective_total = 0
+    for c in (cart or []):
+        q = c.get("qty", 1)
+        p = c.get("price", 0)
+        items.append({
+            "identifier": c.get("id", ""),
+            "product_id": c.get("product_id"),
+            "supplier_id": c.get("supplier_id", 0),
+            "supplier": c.get("supplier_name", ""),
+            "variation_id": c.get("variation_id", 0),
+            "variation": c.get("variation_name", "Free Size"),
+            "name": c.get("name", "Item"),
+            "image": c.get("image", ""),
+            "price": p,
+            "mrp": c.get("mrp", p),
+            "discount_text": f"{int(c.get('mrp', p) - p)}% off" if c.get("mrp", 0) > p else "",
+            "quantity": q,
+            "max_quantity": 10,
+            "price_type_id": c.get("price_type_id", "basic_return_price"),
+            "return_options": [],
+            "price_drop": {},
+            "delivery": {"text": "Free Delivery", "charges": 0},
+        })
+        total_qty += q
+        effective_total += p * q
+
+    cs = get_cart_session(uid) if uid else ""
+    return jsonify({
+        "items": items,
+        "total_quantity": total_qty,
+        "effective_total": effective_total,
+        "effective_online": max(0, effective_total - 28) if effective_total > 30 else effective_total,
+        "address": addr,
+        "price_break_up": [
+            {"type": "PRODUCT_PRICE", "display_name": "Product Price", "value": effective_total},
+        ],
+        "price_banner": None,
+        "cart_session": cs or "",
+        "warning": None,
+        "sync": {"ok": bool(acc), "message": "" if acc else "no account"},
+    })
+
+
+@app.route("/api/cart/add", methods=["POST"])
+def adapter_cart_add():
+    uid = get_uid() or 0
+    data = request.json or {}
+    pid = data.get("product_id")
+    supplier_id = _int0(data.get("supplier_id"))
+    variation_id = _int0(data.get("variation_id"))
+    variation = data.get("variation", "Free Size")
+    quantity = _int0(data.get("quantity", 1))
+    price = _int0(data.get("price", 0))
+    price_type_id = data.get("price_type_id", "basic_return_price")
+
+    acc = get_active_meesho_account(uid) if uid else None
+    synced = False
+    cs = get_cart_session(uid) if uid else ""
+    if acc and pid:
+        r = real_cart_add(acc, pid, supplier_id, variation_id, variation, quantity, cs or "")
+        if r.get("ok"):
+            synced = True
+            if r.get("cart_session"):
+                cs = r["cart_session"]
+                set_cart_session(uid, cs)
+
+    # Also add to local cart
+    name = data.get("name", "")
+    image = data.get("image", "")
+    add_to_cart(uid, pid, quantity, name=name, price=price, image=image,
+                source="meesho", supplier_id=supplier_id, variation_id=variation_id,
+                variation_name=variation, mrp=_int0(data.get("mrp", price)))
+
+    # Return updated cart in working bot format
+    cart = get_cart(uid)
+    items = []
+    total_qty = 0
+    effective_total = 0
+    for c in (cart or []):
+        q = c.get("qty", 1)
+        p = c.get("price", 0)
+        items.append({
+            "identifier": c.get("id", ""),
+            "product_id": c.get("product_id"),
+            "supplier_id": c.get("supplier_id", 0),
+            "supplier": c.get("supplier_name", ""),
+            "variation_id": c.get("variation_id", 0),
+            "variation": c.get("variation_name", "Free Size"),
+            "name": c.get("name", "Item"),
+            "image": c.get("image", ""),
+            "price": p,
+            "mrp": c.get("mrp", p),
+            "discount_text": "",
+            "quantity": q,
+            "max_quantity": 10,
+            "price_type_id": c.get("price_type_id", "basic_return_price"),
+            "return_options": [],
+            "price_drop": {},
+            "delivery": {"text": "Free Delivery", "charges": 0},
+        })
+        total_qty += q
+        effective_total += p * q
+
+    addr = get_default_address(uid) if uid else None
+    return jsonify({
+        "items": items,
+        "total_quantity": total_qty,
+        "effective_total": effective_total,
+        "effective_online": max(0, effective_total - 28) if effective_total > 30 else effective_total,
+        "address": addr,
+        "price_break_up": [
+            {"type": "PRODUCT_PRICE", "display_name": "Product Price", "value": effective_total},
+        ],
+        "price_banner": None,
+        "cart_session": cs or "",
+        "warning": None,
+        "sync": {"ok": synced, "message": ""},
+    })
+
+
+def _build_cart_response(uid):
+    """Build working-bot-format cart response."""
+    cart = get_cart(uid)
+    acc = get_active_meesho_account(uid) if uid else None
+    addr = get_default_address(uid) if uid else None
+    items = []
+    total_qty = 0
+    effective_total = 0
+    for c in (cart or []):
+        q = c.get("qty", 1)
+        p = c.get("price", 0)
+        items.append({
+            "identifier": c.get("id", ""),
+            "product_id": c.get("product_id"),
+            "supplier_id": c.get("supplier_id", 0),
+            "supplier": c.get("supplier_name", ""),
+            "variation_id": c.get("variation_id", 0),
+            "variation": c.get("variation_name", "Free Size"),
+            "name": c.get("name", "Item"),
+            "image": c.get("image", ""),
+            "price": p,
+            "mrp": c.get("mrp", p),
+            "discount_text": f"{int(c.get('mrp', p) - p)}% off" if c.get("mrp", 0) > p else "",
+            "quantity": q,
+            "max_quantity": 10,
+            "price_type_id": c.get("price_type_id", "basic_return_price"),
+            "return_options": [],
+            "price_drop": {},
+            "delivery": {"text": "Free Delivery", "charges": 0},
+        })
+        total_qty += q
+        effective_total += p * q
+
+    cs = get_cart_session(uid) if uid else ""
+    return jsonify({
+        "items": items,
+        "total_quantity": total_qty,
+        "effective_total": effective_total,
+        "effective_online": max(0, effective_total - 28) if effective_total > 30 else effective_total,
+        "address": addr,
+        "price_break_up": [
+            {"type": "PRODUCT_PRICE", "display_name": "Product Price", "value": effective_total},
+        ],
+        "price_banner": None,
+        "cart_session": cs or "",
+        "warning": None,
+        "sync": {"ok": bool(acc), "message": "" if acc else "no account"},
+    })
+
+
+@app.route("/api/cart/update", methods=["POST"])
+def adapter_cart_update():
+    uid = get_uid() or 0
+    data = request.json or {}
+    item = data.get("item", {})
+    cart_session = data.get("cart_session", "")
+    quantity = _int0(item.get("quantity", 1))
+    identifier = item.get("identifier")
+    product_id = item.get("product_id")
+
+    if uid and identifier:
+        update_cart_qty(identifier, quantity)
+    elif uid and product_id:
+        from database import get_db
+        conn = get_db()
+        row = conn.execute("SELECT id FROM cart WHERE user_id=? AND product_id=?", (uid, product_id)).fetchone()
+        if row:
+            update_cart_qty(row["id"], quantity)
+        conn.close()
+
+    # Sync to Meesho
+    try:
+        acc = get_active_meesho_account(uid) if uid else None
+        if acc and product_id and quantity > 0:
+            cs = cart_session or get_cart_session(uid) or ""
+            review = real_cart_review(acc, cs)
+            if review.get("ok"):
+                cs = review.get("cart_session", cs)
+                set_cart_session(uid, cs)
+                for mi in (review.get("items") or []):
+                    if int(mi.get("product_id") or 0) == int(product_id):
+                        ident = mi.get("identifier")
+                        if ident:
+                            real_cart_remove(acc, ident, cs)
+                            new_cs = (real_cart_remove(acc, ident, cs) or {}).get("cart_session") or cs
+                            ar = real_cart_add(acc, product_id,
+                                              _int0(item.get("supplier_id")),
+                                              _int0(item.get("variation_id")),
+                                              item.get("variation", "Free Size"),
+                                              quantity, new_cs)
+                            if ar.get("cart_session"):
+                                set_cart_session(uid, ar["cart_session"])
+                        break
+        elif uid and quantity <= 0 and product_id:
+            acc = get_active_meesho_account(uid)
+            if acc:
+                cs = cart_session or get_cart_session(uid) or ""
+                real_cart_remove(acc, {"product_id": int(product_id)}, cs)
+    except Exception as e:
+        print(f"[ADAPTER_CART_UPDATE] sync failed: {e}", flush=True)
+
+    return _build_cart_response(uid)
+
+
+@app.route("/api/cart/location", methods=["POST"])
+def adapter_cart_location():
+    uid = get_uid() or 0
+    data = request.json or {}
+    address_id = data.get("address_id")
+    dest_pin = data.get("dest_pin", "")
+    if uid and address_id:
+        set_default_address(uid, address_id)
+    return _build_cart_response(uid)
+
+
+@app.route("/api/order/prices", methods=["POST"])
+def adapter_order_prices():
+    uid = get_uid() or 0
+    data = request.json or {}
+    cart = get_cart(uid)
+    if not cart:
+        return jsonify({"error": "cart empty"}), 400
+
+    subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
+    acc = get_active_meesho_account(uid) if uid else None
+    cod_amount = subtotal
+    upi_amount = subtotal
+
+    if acc:
+        cs = get_cart_session(uid) or ""
+        review = real_cart_review(acc, cs)
+        if review.get("ok"):
+            cod_amount = review.get("effective_total") or subtotal
+            upi_amount = (review.get("effective_total_for_upi_plugin")
+                         or review.get("effective_total_with_ppd")
+                         or cod_amount)
+            if upi_amount == cod_amount and cod_amount > 1:
+                if cod_amount >= 200:
+                    upi_amount = cod_amount - 44
+                elif cod_amount >= 60:
+                    upi_amount = cod_amount - 28
+                elif cod_amount >= 20:
+                    upi_amount = cod_amount - 14
+                else:
+                    upi_amount = max(1, cod_amount - 5)
+
+    if upi_amount >= cod_amount:
+        upi_amount = cod_amount
+
+    return jsonify({"cod": cod_amount, "online": upi_amount})
+
+
+@app.route("/api/order/place_cod", methods=["POST"])
+def adapter_place_cod():
+    uid = get_uid() or 0
+    data = request.json or {}
+    address_id = data.get("address_id")
+    cart = get_cart(uid)
+    if not cart:
+        return jsonify({"ok": False, "error": "cart empty", "message": "Cart is empty"}), 400
+    acc = get_active_meesho_account(uid) if uid else None
+    if not acc:
+        return jsonify({"ok": False, "error": "no account", "message": "No Meesho account linked"}), 400
+
+    addr = None
+    if address_id:
+        addr = get_address(address_id)
+    if not addr:
+        addr = get_default_address(uid)
+    if not addr:
+        return jsonify({"ok": False, "error": "no_address", "message": "Select a delivery address"}), 400
+
+    subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
+    cart_session = get_cart_session(uid) or ""
+
+    # Sync cart to Meesho
+    valid_items = [c for c in cart if c.get("product_id")]
+    if valid_items:
+        try:
+            existing_review = real_cart_review(acc, cart_session)
+            if existing_review.get("ok") and existing_review.get("items"):
+                cs_for_remove = existing_review.get("cart_session") or cart_session
+                for ei in existing_review["items"]:
+                    ident = ei.get("identifier")
+                    if ident:
+                        real_cart_remove(acc, ident, cs_for_remove)
+                cart_session = ""
+        except: pass
+        add_r = real_cart_add_many(acc, valid_items, cart_session or "")
+        if add_r.get("ok"):
+            cart_session = add_r.get("cart_session", cart_session)
+            if cart_session:
+                set_cart_session(uid, cart_session)
+
+    st = fresh_checkout_state(acc, cart_session, need_paymentinfo=False)
+    if not st:
+        return jsonify({"ok": False, "error": "checkout failed", "message": "Could not load Meesho cart"}), 400
+
+    cart_session = st["cs"]
+    meesho_amount = st.get("effective_total") or subtotal
+    meesho_addr_id = st["addr"].get("id")
+    set_cart_session(uid, cart_session)
+
+    order_r = None
+    for cand in (st.get("effective_total"), st.get("order_total"), st.get("upi_amount"), subtotal):
+        try:
+            cand_int = int(cand or 0)
+        except: continue
+        if not cand_int: continue
+        order_r = real_preorder(acc, cart_session, meesho_addr_id,
+                                payment_method="COD", customer_amount=cand_int,
+                                addr_info=st.get("addr") or {})
+        if order_r.get("ok"):
+            meesho_amount = cand_int
+            break
+
+    if not order_r or not order_r.get("ok"):
+        return jsonify({"ok": False, "error": (order_r or {}).get("error", "order failed"),
+                        "message": (order_r or {}).get("message", "Could not place order")}), 400
+
+    meesho_order_num = order_r.get("order_num", "")
+    items_str = ", ".join([f"{c.get('name', '?')}x{c.get('qty', 1)}" for c in cart])
+    oid = create_order(uid, items_str, meesho_amount, 0, addr.get("address_line_1", ""),
+                       meesho_order_num=meesho_order_num, payment_method="COD",
+                       meesho_amount=meesho_amount)
+    clear_cart(uid)
+    set_cart_session(uid, "")
+
+    return jsonify({
+        "ok": True,
+        "order_num": str(oid),
+        "total": meesho_amount,
+        "message": "Order placed successfully!",
+    })
+
+
+@app.route("/api/order/pay_online", methods=["POST"])
+def adapter_pay_online():
+    uid = get_uid() or 0
+    data = request.json or {}
+    address_id = data.get("address_id")
+    cart = get_cart(uid)
+    if not cart:
+        return jsonify({"ok": False, "error": "cart empty", "message": "Cart is empty"}), 400
+    acc = get_active_meesho_account(uid) if uid else None
+    if not acc:
+        return jsonify({"ok": False, "error": "no account", "message": "No Meesho account linked"}), 400
+
+    addr = None
+    if address_id:
+        addr = get_address(address_id)
+    if not addr:
+        addr = get_default_address(uid)
+    if not addr:
+        return jsonify({"ok": False, "error": "no_address", "message": "Select a delivery address"}), 400
+
+    subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
+    cart_session = get_cart_session(uid) or ""
+
+    # Sync cart
+    valid_items = [c for c in cart if c.get("product_id")]
+    if valid_items:
+        try:
+            existing_review = real_cart_review(acc, cart_session)
+            if existing_review.get("ok") and existing_review.get("items"):
+                cs_for_remove = existing_review.get("cart_session") or cart_session
+                for ei in existing_review["items"]:
+                    ident = ei.get("identifier")
+                    if ident:
+                        real_cart_remove(acc, ident, cs_for_remove)
+                cart_session = ""
+        except: pass
+        add_r = real_cart_add_many(acc, valid_items, cart_session or "")
+        if add_r.get("ok"):
+            cart_session = add_r.get("cart_session", cart_session)
+            if cart_session:
+                set_cart_session(uid, cart_session)
+
+    st = fresh_checkout_state(acc, cart_session, need_paymentinfo=True)
+    if not st:
+        return jsonify({"ok": False, "error": "checkout failed", "message": "Could not load Meesho cart"}), 400
+
+    cart_session = st["cs"]
+    upi_amt = st.get("upi_amount") or st.get("order_total") or subtotal
+    order_tot = st.get("order_total") or st.get("effective_total") or upi_amt
+    meesho_addr_id = st["addr"].get("id")
+    set_cart_session(uid, cart_session)
+
+    order_r = None
+    actual_amount = upi_amt
+    for cand in (upi_amt, order_tot, st.get("effective_total"), subtotal):
+        try:
+            cand_int = int(cand or 0)
+        except: continue
+        if not cand_int: continue
+        order_r = real_preorder(acc, cart_session, meesho_addr_id,
+                                payment_method="UPI", customer_amount=cand_int,
+                                addr_info=st.get("addr") or {})
+        if order_r.get("ok"):
+            actual_amount = cand_int
+            break
+
+    if not order_r or not order_r.get("ok"):
+        return jsonify({"ok": False, "error": (order_r or {}).get("error", "order failed"),
+                        "message": (order_r or {}).get("message", "Could not start payment")}), 400
+
+    meesho_order_num = order_r.get("order_num", "")
+    items_str = ", ".join([f"{c.get('name','?')}x{c.get('qty',1)}" for c in cart])
+    oid = create_order(uid, items_str, actual_amount, 0, addr.get("address_line_1", ""),
+                       meesho_order_num=meesho_order_num, payment_method="UPI",
+                       meesho_amount=actual_amount)
+    clear_cart(uid)
+    set_cart_session(uid, "")
+
+    qr_base64 = order_r.get("qr_base64", "")
+    upi_intent_url = order_r.get("upi_intent_url", "")
+    juspay_id = order_r.get("juspay_order_id", "")
+
+    qr_image = ""
+    if qr_base64:
+        if qr_base64.startswith("data:"):
+            qr_image = qr_base64
+        else:
+            qr_image = "data:image/png;base64," + qr_base64
+    elif upi_intent_url:
+        import urllib.parse
+        qr_image = "https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=" + urllib.parse.quote(upi_intent_url)
+
+    return jsonify({
+        "ok": True,
+        "order_num": str(oid),
+        "juspay_order_id": juspay_id,
+        "cart_session": "",
+        "amount": actual_amount,
+        "upi_amount": actual_amount,
+        "qr_image": qr_image,
+        "upi_uri": upi_intent_url,
+        "redirect_url": upi_intent_url or order_r.get("payment_url", ""),
+        "share_message": "",
+        "package_name": "com.meesho.supply",
+        "merchant": {"name": "Meesho", "vpa": "MEESHOONLINEPG@axl"},
+        "txn": {"transaction_id": juspay_id, "order_id": meesho_order_num},
+        "resume": False,
+        "payment_state": "pending",
+        "message": "Payment started",
+    })
+
+
+@app.route("/api/order/payment_status", methods=["POST"])
+def adapter_payment_status():
+    uid = get_uid() or 0
+    data = request.json or {}
+    order_num = data.get("order_num")
+    juspay_id = data.get("juspay_order_id")
+    acc = get_active_meesho_account(uid) if uid else None
+    if not acc:
+        return jsonify({"state": "pending", "status": "no_account"})
+    if juspay_id:
+        r = real_payment_status(acc, juspay_id)
+    elif order_num:
+        r = real_preorder_status(acc, order_num, data.get("cart_session", ""))
+    else:
+        return jsonify({"state": "pending", "status": "no_reference"})
+
+    state = str(r.get("state", "")).lower()
+    status = str(r.get("status", "")).upper()
+    if state in ("success", "confirmed"):
+        state = "confirmed"
+    elif state in ("failed",):
+        state = "failed"
+    else:
+        state = "pending"
+
+    return jsonify({"state": state, "status": status})
+
+
+@app.route("/api/order/confirm", methods=["POST"])
+def adapter_order_confirm():
+    uid = get_uid() or 0
+    data = request.json or {}
+    order_num = data.get("order_num")
+    if not order_num:
+        return jsonify({"ok": False, "error": "order_num required", "message": "Missing order number"})
+    try:
+        oid = int(order_num)
+        ord_row = get_order(oid)
+        if ord_row:
+            update_order_status(oid, "confirmed")
+    except: pass
+    return jsonify({"ok": True, "message": "Order confirmed!"})
+
+
+@app.route("/api/orders", methods=["GET"])
+def adapter_orders():
+    uid = get_uid() or 0
+    orders = get_orders(uid) if uid else []
+    status_filter = request.args.get("status", "")
+    filtered = orders
+    if status_filter and status_filter.lower() != "all":
+        filtered = [o for o in orders if str(o.get("status", "")).lower() == status_filter.lower()]
+
+    order_list = []
+    for o in filtered:
+        order_list.append({
+            "order_num": str(o.get("id", "")),
+            "sub_order_num": "",
+            "status_id": o.get("status", ""),
+            "status_text": o.get("status", "pending").title(),
+            "status_color": "#22B8A6" if o.get("status") == "confirmed" else "#C77C0A",
+            "image": "",
+            "size": "",
+            "quantity": 1,
+            "updated_date": o.get("created_at", ""),
+            "delivery_date": "",
+            "awb": "",
+            "carrier_name": "",
+            "tracking_url": "",
+            "juspay_order_id": "",
+            "cart_session": "",
+            "amount": o.get("total", 0),
+            "upi_amount": o.get("total", 0),
+            "items_text": o.get("items", ""),
+            "payment_method": o.get("payment_method", ""),
+        })
+    return jsonify({
+        "orders": order_list,
+        "filters": [
+            {"id": "all", "name": "All"},
+            {"id": "confirmed", "name": "Confirmed"},
+            {"id": "pending", "name": "Pending"},
+            {"id": "cancelled", "name": "Cancelled"},
+        ],
+        "cursor": "",
+    })
+
+
+@app.route("/api/orders/detail", methods=["POST"])
+def adapter_order_detail():
+    uid = get_uid() or 0
+    data = request.json or {}
+    order_num = data.get("order_num", "")
+    try:
+        oid = int(order_num)
+        o = get_order(oid)
+        if o:
+            return jsonify({
+                "product": {"product_id": 0, "name": o.get("items", ""), "images": [], "price": o.get("total", 0), "size": "", "quantity": 1},
+                "tracking": {"title": o.get("status", ""), "icon": "", "delivery_by": ""},
+                "milestones": [],
+                "log": [],
+                "address": {"line1": o.get("address", ""), "city": "", "state": "", "pin": "", "name": "", "mobile": ""},
+                "payment": {"mode": o.get("payment_method", ""), "total": o.get("total", 0), "saved": 0, "price_type": ""},
+                "shipment": {"awb": "", "carrier_name": "", "tracking_url": ""},
+                "supplier": {"name": ""},
+                "status_id": o.get("status", ""),
+                "order_num": str(oid),
+            })
+    except: pass
+    return jsonify({"error": "not found"}), 404
+
+
+@app.route("/api/addresses", methods=["GET"])
+def adapter_addresses():
+    uid = get_uid() or 0
+    acc = get_active_meesho_account(uid) if uid else None
+    addrs = []
+    default_addr = get_default_address(uid) if uid else None
+
+    # Get Meesho addresses if account exists
+    if acc:
+        try:
+            meesho_addrs = real_fetch_addresses(acc)
+            for a in (meesho_addrs or []):
+                addrs.append({
+                    "id": a.get("id"),
+                    "name": a.get("name", ""),
+                    "mobile": a.get("mobile", ""),
+                    "pin": a.get("pin", ""),
+                    "city": a.get("city", ""),
+                    "state": a.get("state", ""),
+                    "address_line_1": a.get("address_line_1") or a.get("line1") or a.get("address", ""),
+                    "address_line_2": a.get("address_line_2", ""),
+                    "landmark": a.get("landmark", ""),
+                    "address_type": a.get("address_type", "Home"),
+                    "pin_serviceable": a.get("pin_serviceable", True),
+                })
+        except: pass
+
+    # Fallback to local addresses
+    if not addrs:
+        local_addrs = get_addresses(uid) if uid else []
+        for a in (local_addrs or []):
+            addrs.append({
+                "id": a.get("id"),
+                "name": a.get("name", ""),
+                "mobile": a.get("mobile", ""),
+                "pin": a.get("pin", ""),
+                "city": a.get("city", ""),
+                "state": a.get("state", ""),
+                "address_line_1": a.get("address_line_1", ""),
+                "address_line_2": a.get("address_line_2", ""),
+                "landmark": a.get("landmark", ""),
+                "address_type": a.get("address_type", "Home"),
+                "pin_serviceable": a.get("pin_serviceable", True),
+            })
+
+    return jsonify({"addresses": addrs, "default": default_addr})
+
+
+@app.route("/api/addresses/create", methods=["POST"])
+def adapter_address_create():
+    uid = get_uid() or 0
+    data = request.json or {}
+    acc = get_active_meesho_account(uid) if uid else None
+    if acc:
+        try:
+            r = real_address_create(acc, data)
+            if r.get("ok"):
+                return jsonify({"ok": True, "message": "Address created on Meesho"})
+        except: pass
+    if uid:
+        create_address(uid, name=data.get("name", ""), mobile=data.get("mobile", ""),
+                       pin=data.get("pin", ""), city=data.get("city", ""),
+                       state=data.get("state", ""),
+                       address_line_1=data.get("address_line_1", ""),
+                       address_line_2=data.get("address_line_2", ""),
+                       landmark=data.get("landmark", ""),
+                       address_type=data.get("address_type", "Home"))
+    return jsonify({"ok": True, "message": "Address saved"})
+
+
+@app.route("/api/addresses/set_default", methods=["POST"])
+def adapter_address_set_default():
+    uid = get_uid() or 0
+    data = request.json or {}
+    address_id = data.get("id") or data.get("address_id")
+    if uid and address_id:
+        set_default_address(uid, address_id)
+    return jsonify({"ok": True, "message": "Default address set"})
+
+
+@app.route("/api/accounts", methods=["GET"])
+def adapter_accounts_list():
+    uid = get_uid() or 0
+    accs = get_meesho_accounts(uid) if uid else []
+    return jsonify({
+        "accounts": [{
+            "id": a.get("id"),
+            "mobile": a.get("phone", ""),
+            "source": "json",
+            "xo_exp": False,
+            "user_id": a.get("meesho_user_id") or a.get("user_id", ""),
+        } for a in (accs or [])]
+    })
+
+
+@app.route("/api/accounts/select", methods=["POST"])
+def adapter_account_select():
+    uid = get_uid() or 0
+    data = request.json or {}
+    account_id = data.get("account_id")
+    if uid and account_id:
+        from database import get_db
+        conn = get_db()
+        conn.execute("UPDATE meesho_accounts SET is_active=0 WHERE user_id=?", (uid,))
+        conn.execute("UPDATE meesho_accounts SET is_active=1 WHERE id=? AND user_id=?", (account_id, uid))
+        conn.commit()
+        conn.close()
+    return jsonify({})
+
+
+@app.route("/api/accounts/login_otp", methods=["POST"])
+def adapter_account_login_otp():
+    data = request.json or {}
+    phone = data.get("phone_number", "")
+    return api_otp_send()
+
+
+@app.route("/api/accounts/login_verify", methods=["POST"])
+def adapter_account_login_verify():
+    return api_otp_verify()
+
+
+@app.route("/api/auth/otp_send", methods=["POST"])
+def adapter_auth_otp_send():
+    return api_otp_send()
+
+
+@app.route("/api/auth/otp_verify", methods=["POST"])
+def adapter_auth_otp_verify():
+    return api_otp_verify()
+
+
+@app.route("/api/auth/json_login", methods=["POST"])
+def adapter_auth_json_login():
+    return api_json_login()
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def adapter_auth_login():
+    data = request.json or {}
+    username = data.get("username", "")
+    password = data.get("password", "")
+    uid = get_uid() or 0
+    if uid:
+        user = get_user(uid) or create_user(uid)
+        return jsonify({"ok": True, "token": "", "user": user})
+    return jsonify({"ok": False, "error": "no user id"})
+
+
+@app.route("/api/auth/import_account", methods=["POST"])
+def adapter_auth_import():
+    return api_json_login()
+
+
+@app.route("/api/search/suggest", methods=["POST"])
+def adapter_search_suggest():
+    data = request.json or {}
+    prefix = data.get("prefix", "")
+    return api_search_suggest()
+
+
+@app.route("/api/product/by_link", methods=["POST"])
+def adapter_product_by_link():
+    return api_product_by_link()
+
+
+@app.route("/api/variation", methods=["POST"])
+def adapter_variation():
+    data = request.json or {}
+    pid = data.get("product_id")
+    vid = data.get("variation_id")
+    return jsonify({"error": "not supported"})
+
+
+@app.route("/api/wallet/history", methods=["GET"])
+def adapter_wallet_history():
+    uid = get_uid() or 0
+    user = get_user(uid) if uid else None
+    return jsonify({"balance": user.get("wallet", 0) if user else 0, "txns": []})
+
+
+@app.route("/api/price/check", methods=["POST"])
+def adapter_price_check():
+    return jsonify({"product": {}, "results": []})
+
+
+@app.route("/api/referral/stats", methods=["GET"])
+def adapter_referral_stats():
+    return jsonify({"done": 0, "pending": 0, "rejected": 0, "earned": 0, "pending_amount": 0, "reward_per": 0, "has_link": False, "link": ""})
+
+
+@app.route("/api/saas/plans", methods=["GET"])
+def adapter_saas_plans():
+    return jsonify({"plans": [{"key": "free", "label": "Free", "price": 0, "devices": 99, "orders": 999, "blurb": "Unlimited"}]})
+
+
+@app.route("/api/check_registered", methods=["POST"])
+def adapter_check_registered():
+    return api_check_number()
+
+
+@app.route("/api/admin/users", methods=["GET"])
+def adapter_admin_users():
+    return jsonify({"users": []})
+
+
+@app.route("/api/fod/roll", methods=["GET"])
+def adapter_fod_roll():
+    return api_fod_roll()
+
+
+@app.route("/api/fod/continue", methods=["POST"])
+def adapter_fod_continue():
+    return jsonify({"ok": True})
+
+
+@app.route("/api/fod/bind/login_otp", methods=["POST"])
+def adapter_fod_bind_otp():
+    return api_otp_send()
+
+
+@app.route("/api/fod/bind/login_verify", methods=["POST"])
+def adapter_fod_bind_verify():
+    return api_otp_verify()
+
+
+@app.route("/api/geocode", methods=["GET"])
+def adapter_geocode():
+    return api_geocode()
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
