@@ -483,8 +483,7 @@ async function getCart(){
 async function removeFromCart(productId){
   const cartSession = localStorage.getItem("meesho_cart_session") || null;
   const body = {
-    "context": "cart",
-    "identifier": "default",
+    "context": "atc_cart_v2", "identifier": "default",
     "cart_session": cartSession,
     "items": [{ "product_id": Number(productId) }]
   };
@@ -1079,13 +1078,17 @@ async function updateQty(cid,qty){
     var r=await fetch(API+'/api/cart/update',{method:'POST',headers:headers(),body:JSON.stringify({cart_id:cid,qty:qty})});
     var d=await r.json();
     if(!r.ok || d.error){ throw new Error(d.error||'update failed'); }
-    // success - reload from server (but fast, no extra sync wait)
-    await loadCartFast();
+    // success - don't reload from server on remove (keep optimistic state)
+    if(qty===0){
+      // sync with Meesho in background, don't re-render from server
+      try{ fetch(API+'/api/cart/sync/pull',{method:'POST',headers:headers()}); }catch(e){}
+    } else {
+      await loadCartFast();
+    }
   }catch(e){
     // revert on fail
     if(origCache) { window._cartCache=origCache; renderCart(origCache); }
     toast('Failed to update');
-    // reload to sync with real Meesho on fail
     try{ await loadCart(); }catch(_){}
   }finally{
     _qtyLock=false;

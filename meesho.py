@@ -774,6 +774,9 @@ def real_cart_remove(acc, item_identifier, cart_session):
         bodies.append({"context": "cart", "identifier": "default", "cart_session": cart_session or "", "items": [{"product_id": int(pid)}], "user_id": _acc_uid(acc)})
         bodies.append({"context": "pdp", "identifier": "default", "cart_session": cart_session or "", "items": [{"product_id": int(pid)}], "user_id": _acc_uid(acc)})
         bodies.append({"context": "pdp", "identifier": "buy_now", "cart_session": cart_session or "", "items": [{"product_id": int(pid)}], "user_id": _acc_uid(acc)})
+        # Also try atc_cart_v2/default with product_id (captured folder-1 format)
+        bodies.append({"context": "atc_cart_v2", "identifier": "default", "cart_session": cart_session or "", "items": [{"product_id": int(pid)}], "user_id": _acc_uid(acc)})
+        bodies.append({"context": "atc_cart_v2", "identifier": "buy_now", "cart_session": cart_session or "", "items": [{"product_id": int(pid)}], "user_id": _acc_uid(acc)})
     if ident:
         # Captured: atc_cart_v2/default with opq ident (folder 1) - most important
         bodies.append({"context": "atc_cart_v2", "identifier": "default", "cart_session": cart_session or "", "items": [ident], "user_id": _acc_uid(acc)})
@@ -1160,17 +1163,11 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
             "payment_method_type": payment_method.upper() if payment_method.upper() != "PREPAID" else "UPI",
             "identifier": ident,
             "payment_aggregator": payment_aggregator or ("JUSPAY" if is_upi else None),
-            "is_selling_to_customer": False,
             "cart_session": cart_session,
-            "vpa": None,
             "address_id": int(address_id),
-            "direct_wallet_token": None,
             "customer_amount": int(customer_amount) if customer_amount is not None else None,
             "upi_package_name": "com.google.android.apps.nbu.paisa.user" if is_upi else None,
-            "payment_flow_type": "qr" if is_upi else None,
-            "sender_id": -1,
-            "accurate_location": json.dumps({"lat": "22.7196", "long": "75.8577"}),
-            "card_token": None,
+            "payment_flow_type": "upi_qr" if is_upi else None,
             "payment_provider": "JUSPAY" if is_upi else None,
             "processor_id": "in.juspay.hyperapi" if is_upi else None,
             "payment_method": "UPI" if is_upi else "COD",
@@ -1180,14 +1177,14 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
         # Remove None values to avoid invalid payload (Meesho strict)
         body = {k: v for k, v in body.items() if v is not None}
         try:
+            print(f"[PREORDER] body ident={ident}: {json.dumps(body)[:500]}", flush=True)
             with httpx.Client(timeout=25.0) as client:
                 resp = client.post(f"{MEESHO_API}/4.0/preorders",
                                    headers=logged_in_headers(acc), json=body)
             data = resp.json() or {}
             order_num = data.get("order_num")
-            juspay_params = data.get("juspay_transaction_params", {})
-            qr_params = data.get("qr_transaction_params", {})
             if order_num:
+                print(f"[PREORDER] success ident={ident} order_num={order_num}", flush=True)
                 result = {
                     "ok": True,
                     "order_num": order_num,
