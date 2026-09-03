@@ -639,6 +639,7 @@ function sheetQty(d){
 async function sheetAdd(buy){
   if(!cur || addBusy) return;
   addBusy = true;
+  bumpPullToken();
   try{
   let sizeEl = document.querySelector('.sizepill.on');
   let size = (sizeEl && sizeEl.textContent ? sizeEl.textContent : 'Free Size').trim() || 'Free Size';
@@ -798,10 +799,28 @@ async function syncCart(){
   if(pull && pull.imported > 0) toast('Cart synced from Meesho', 'ok');
   return pull;
 }
+// Delayed background reconcile for removals: Meesho lags behind a remove,
+// so an instant pull would re-import the item (qty jumps back / doubles).
+// The backend tombstone already blocks that, but waiting still avoids churn.
+// Superseded automatically when a newer cart op bumps the token.
+function schedulePull(ms){
+  window._pullToken = (window._pullToken || 0) + 1;
+  const t = window._pullToken;
+  setTimeout(async function(){
+    if(t !== window._pullToken) return;
+    try{
+      const pull = await pullMeeshoCart();
+      await loadCart();
+      if(pull && ((pull.imported || 0) > 0 || (pull.removed || 0) > 0 || (pull.updated || 0) > 0)) await renderCart();
+    }catch(e){}
+  }, ms || 8000);
+}
+function bumpPullToken(){ window._pullToken = (window._pullToken || 0) + 1; }
 async function chgQty(i, d){
   const c = S.cart[i];
   if(!c || cartBusy) return;
   cartBusy = true;
+  bumpPullToken();
   try{
   const qty = c.qty + d;
   const removing = qty <= 0;
@@ -811,16 +830,22 @@ async function chgQty(i, d){
     // server item in the right session.
     const r = await api('/api/cart/update', {method:'POST', body:{cart_id: c.key, product_id: c.product_id, identifier: meeshoIdent(c.product_id, c.key), cart_session: S.cartSession || '', qty: qty}});
     if(!(r && (r.ok || r.success || Array.isArray(r.items)))) return toast(apiErr(r, 'Could not update'), 'err');
-    // Confirm sync against the real Meesho cart, then re-render.
-    const pull = await syncCart();
-    await renderCart();
     if(removing){
+      // Do NOT pull immediately: Meesho lags behind the remove and an
+      // instant pull would re-import the item (qty jumps back / doubles).
+      // The local row is already deleted — paint that truth now; the
+      // backend tombstone blocks re-import meanwhile.
+      await renderCart();
       const v = r.meesho_verified;
       if(v === true) toast('Removed ✓ Meesho synced', 'ok');
       else if(v === false) toast('Removed locally — Meesho retry pending', 'err');
       else toast('Removed', 'ok');
-    } else if(pull && pull.updated){
-      toast('Cart synced', 'ok');
+      schedulePull(8000);
+    } else {
+      // Qty change: immediate confirm-sync is safe (row still exists).
+      const pull = await syncCart();
+      await renderCart();
+      if(pull && pull.updated) toast('Cart synced', 'ok');
     }
   }catch(e){ toast('Network error — try again', 'err'); }
   }finally{ cartBusy = false; }

@@ -304,15 +304,20 @@ def api_cart_update():
         if acc and prod_id:
             cs = get_cart_session(uid)
             if int(qty) <= 0:
+                # Tombstone FIRST on explicit remove-intent — regardless of
+                # how the Meesho remove below turns out. Otherwise a lagging
+                # Meesho cart gets re-imported by the next pull and the qty
+                # jumps back (or doubles). TTL expiry restores truth later.
+                try:
+                    if prod_id:
+                        _tombstone_add(uid, int(prod_id))
+                except (TypeError, ValueError):
+                    pass
                 vr = meesho_remove_verified(acc, int(prod_id), cs or "", var_id or None,
                                             fallback_identifier=req_ident)
                 if vr.get("cart_session"):
                     set_cart_session(uid, vr["cart_session"])
                 meesho_verified = bool(vr.get("verified"))
-                if meesho_verified:
-                    # Tombstone so a later pull can't re-import it during
-                    # Meesho's async lag window (the reappear glitch).
-                    _tombstone_add(uid, int(prod_id))
                 print(f"[CART_UPDATE] verified remove pid={prod_id} removed={vr.get('removed')} verified={vr.get('verified')} via={vr.get('via')} err={vr.get('error')}", flush=True)
             else:
                 # qty change: remove and re-add with new qty
@@ -2549,6 +2554,11 @@ def adapter_cart_update():
                                 set_cart_session(uid, ar["cart_session"])
                         break
         elif uid and quantity <= 0 and product_id:
+            # Tombstone FIRST on explicit remove-intent (see api_cart_update).
+            try:
+                _tombstone_add(uid, int(product_id))
+            except (TypeError, ValueError):
+                pass
             acc = get_active_meesho_account(uid)
             if acc:
                 cs = cart_session or get_cart_session(uid) or ""
@@ -2558,8 +2568,6 @@ def adapter_cart_update():
                 if vr.get("cart_session"):
                     set_cart_session(uid, vr["cart_session"])
                 meesho_verified = bool(vr.get("verified"))
-                if meesho_verified:
-                    _tombstone_add(uid, int(product_id))
                 print(f"[ADAPTER_CART_UPDATE] verified remove pid={product_id} removed={vr.get('removed')} verified={vr.get('verified')} via={vr.get('via')} err={vr.get('error')}", flush=True)
     except Exception as e:
         print(f"[ADAPTER_CART_UPDATE] sync failed: {e}", flush=True)
