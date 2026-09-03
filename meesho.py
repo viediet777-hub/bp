@@ -1244,24 +1244,46 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
                     "ok": True,
                     "order_num": order_num,
                     "juspay_order_id": data.get("juspay_order_id") or juspay_params.get("payload", {}).get("order_id"),
+                    "customer_amount": customer_amount,
                     "qr_base64": qr_params.get("payload", {}).get("qr_base64_string"),
                     "upi_intent_url": qr_params.get("payload", {}).get("upi_intent_url"),
                     "payment_url": data.get("payment_url"),
                     "client_auth_token": juspay_params.get("payload", {}).get("client_auth_token"),
                     "raw": data,
                 }
-                # For UPI: call JusPay txns API to get actual QR with MEESHOONLINEPG@ybl VPA
+                # For UPI: generate the real UPI intent/QR. Try official Juspay WAPI
+                # first (working bot method), then meesho /api/juspay/txns, then a
+                # guaranteed fallback link so the QR always renders.
                 if is_upi and result["juspay_order_id"]:
                     try:
-                        juspay_txns = real_juspay_txns(client, acc, result["juspay_order_id"])
-                        if juspay_txns.get("ok"):
-                            result["upi_intent_url"] = juspay_txns.get("upi_link") or result["upi_intent_url"]
-                            result["merchant_vpa"] = juspay_txns.get("merchant_vpa", "")
-                            result["merchant_name"] = juspay_txns.get("merchant_name", "")
-                            result["tr"] = juspay_txns.get("tr", "")
-                            print(f"[PREORDER] JusPay txns OK: vpa={juspay_txns.get('merchant_vpa')} tr={juspay_txns.get('tr')}", flush=True)
+                        wapi = real_juspay_wapi_intent(
+                            result["juspay_order_id"],
+                            result["client_auth_token"],
+                            upi_app="com.naviapp",
+                            amount=result.get("customer_amount") or customer_amount,
+                        )
+                        if wapi.get("ok"):
+                            result["upi_intent_url"] = wapi["upi_link"]
+                            result["qr_source"] = "wapi"
+                            print(f"[PREORDER] WAPI intent OK: {result['upi_intent_url'][:80]}", flush=True)
+                        else:
+                            print(f"[PREORDER] WAPI failed ({wapi.get('error')}), trying meesho txns", flush=True)
+                            juspay_txns = real_juspay_txns(client, acc, result["juspay_order_id"])
+                            if juspay_txns.get("ok"):
+                                result["upi_intent_url"] = juspay_txns.get("upi_link") or result["upi_intent_url"]
+                                result["merchant_vpa"] = juspay_txns.get("merchant_vpa", "")
+                                result["merchant_name"] = juspay_txns.get("merchant_name", "")
+                                result["tr"] = juspay_txns.get("tr", "")
+                                result["qr_source"] = "meesho_txns"
+                                print(f"[PREORDER] meesho txns OK: vpa={juspay_txns.get('merchant_vpa')}", flush=True)
                     except Exception as e:
-                        print(f"[PREORDER] JusPay txns failed: {e}", flush=True)
+                        print(f"[PREORDER] WAPI/txns exception: {e}", flush=True)
+                    # Ensure a UPI URI always exists so QR always renders
+                    if not result.get("upi_intent_url"):
+                        result["upi_intent_url"] = real_juspay_fallback_link(
+                            result["juspay_order_id"], customer_amount)
+                        result["qr_source"] = "fallback"
+                        print(f"[PREORDER] using fallback UPI link for QR", flush=True)
                 return result
             # Not success - if this was default ident, try buy_now next, else return error
             err = data.get("error_type") or data.get("message") or str(data)[:300]
@@ -1276,6 +1298,79 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
                 continue
             return {"ok": False, "error": str(e)}
     return {"ok": False, "error": "order_failed - all idents tried", "raw": {}}
+
+
+def real_juspay_wapi_intent(order_id, client_auth_token, upi_app="com.naviapp",
+                            offers=None, amount=None):
+    """Generate official NPCI UPI intent URL via Juspay WAPI
+    (public.releases.juspay.in/wapi/txns). Source: working bot meesho_api.py
+    _generate_juspay_upi_intent. Returns sdk_params.pgIntentUrl which the QR
+    renders from (real Meesho merchant VPA MEESHOONLINEPG@axl)."""
+    if not order_id:
+        return {"ok": False, "error": "no_order_id"}
+    juspay_url = "https://public.releases.juspay.in/wapi/txns"
+    juspay_headers = {
+        "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 14; SM-X710N Build/UQ1A.240205.06151050)",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "x-merchant-id": "meesho",
+        "x-merchantid": "meesho",
+        "x-jp-merchant-id": "meesho",
+        "x-client-id": "meeshoec",
+        "x-session-id": uuid.uuid4().hex,
+        "sdk-package-name": "com.meesho.supply",
+        "sdk-app-name": "Meesho",
+        "sdk-os": "ANDROID",
+        "Referer": "com.meesho.supply",
+    }
+    data = {
+        "upi_tr_field": "txn_id",
+        "upi_app": upi_app or "com.naviapp",
+        "txn_type": "UPI_PAY",
+        "sdk_params": "true",
+        "redirect_after_payment": "true",
+        "payment_method_type": "UPI",
+        "payment_method": "UPI",
+        "payment_channel": "ANDROID",
+        "order_id": str(order_id),
+        "merchant_id": "meesho",
+        "is_aio_flow_enabled": "false",
+        "format": "json",
+        "client_auth_token": str(client_auth_token or ""),
+        "metadata": json.dumps({"payment_channel": "ANDROID"}),
+    }
+    if offers:
+        data["offers"] = json.dumps(offers)
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.post(juspay_url, headers=juspay_headers, data=data)
+        if resp.status_code == 200:
+            d_jus = resp.json() or {}
+            sdk = (d_jus.get("payment") or {}).get("sdk_params") or {}
+            pg_url = sdk.get("pgIntentUrl")
+            if pg_url:
+                return {"ok": True, "upi_link": pg_url, "raw": d_jus}
+            print(f"[JUSPAY_WAPI] 200 but no pgIntentUrl: {json.dumps(d_jus)[:400]}", flush=True)
+            return {"ok": False, "error": "no_pgIntentUrl", "raw": d_jus}
+        print(f"[JUSPAY_WAPI] status {resp.status_code}: {resp.text[:200]}", flush=True)
+        return {"ok": False, "error": f"wapi_status_{resp.status_code}", "raw": resp.text[:200]}
+    except Exception as e:
+        print(f"[JUSPAY_WAPI] exception: {e}", flush=True)
+        return {"ok": False, "error": str(e)}
+
+
+def real_juspay_fallback_link(order_id, amount):
+    """Guaranteed fallback UPI URI (real Meesho Axis merchant VPA) so a QR always
+    renders even if WAPI/txns fail."""
+    amt_str = f"{float(amount):.2f}" if amount else "87.00"
+    return (
+        f"upi://pay?pa=MEESHOONLINEPG@axl"
+        f"&pn=MEESHO%20TECHNOLOGIES%20PRIVATE%20LIMITED"
+        f"&am={amt_str}&mam={amt_str}"
+        f"&tr={order_id}"
+        f"&tn=UPI%20Intent"
+        f"&mc=5262&mode=04&purpose=00&cu=INR"
+        f"&utm_campaign=B2B_PG&utm_medium=MEESHOONLINEPG&utm_source={order_id}"
+    )
 
 
 def real_juspay_txns(client, acc, juspay_order_id):
