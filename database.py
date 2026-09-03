@@ -639,4 +639,38 @@ def set_cart_session(user_id, cart_session):
     conn.close()
 
 
+# ─── REMOVAL TOMBSTONES ───
+# product_ids the user explicitly removed. A later pull must not re-import
+# them while Meesho is still lagging (otherwise qty jumps back / doubles).
+# Entries expire after TTL — a genuinely-failed remove then resurfaces
+# truthfully instead of diverging forever.
+
+TOMBSTONE_TTL = 300
+
+
+def tombstone_add(user_id, product_id):
+    try:
+        conn = get_db()
+        conn.execute("CREATE TABLE IF NOT EXISTS recently_removed (user_id INTEGER, product_id INTEGER, created_at REAL DEFAULT 0, PRIMARY KEY (user_id, product_id))")
+        conn.execute("INSERT OR REPLACE INTO recently_removed (user_id, product_id, created_at) VALUES (?,?,?)",
+                     (user_id, int(product_id), time.time()))
+        conn.execute("DELETE FROM recently_removed WHERE created_at < ?", (time.time() - TOMBSTONE_TTL,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[TOMBSTONE] add failed: {e}", flush=True)
+
+
+def tombstone_recent(user_id):
+    try:
+        conn = get_db()
+        conn.execute("CREATE TABLE IF NOT EXISTS recently_removed (user_id INTEGER, product_id INTEGER, created_at REAL DEFAULT 0, PRIMARY KEY (user_id, product_id))")
+        rows = conn.execute("SELECT product_id FROM recently_removed WHERE user_id=? AND created_at > ?",
+                            (user_id, time.time() - TOMBSTONE_TTL)).fetchall()
+        conn.close()
+        return {int(r["product_id"]) for r in rows}
+    except Exception:
+        return set()
+
+
 init_db()

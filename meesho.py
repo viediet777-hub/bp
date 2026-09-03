@@ -919,6 +919,18 @@ def meesho_remove_verified(acc, product_id, cart_session, variation_id=None, fal
     if not pid:
         out["error"] = "bad product_id"
         return out
+    # Tombstone here as well (not only in the app.py callers): whatever the
+    # outcome below — verified or not — no pull may re-import this pid while
+    # Meesho settles. acc["user_id"] is the app/flask uid (see
+    # save_meesho_account); the table lives in database.py so there is no
+    # circular import.
+    try:
+        from database import tombstone_add as _tb_add
+        _fuid = acc.get("user_id") if isinstance(acc, dict) else None
+        if _fuid:
+            _tb_add(_fuid, pid)
+    except Exception as e:
+        print(f"[REMOVE_VERIFIED] tombstone failed: {e}", flush=True)
     # 1. Fresh review so the identifier + session are current (stale stored
     #    sessions are the #1 cause of "200 but item persists").
     review = real_cart_review(acc, cart_session)

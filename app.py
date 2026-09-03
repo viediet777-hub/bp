@@ -1086,37 +1086,9 @@ def _otp_store_clear(phone):
         pass
 
 
-# ── Removal tombstones: product_ids the user explicitly removed, so a later
-# pull never re-imports them from Meesho (the "reappear glitch"). Entries
-# expire after a few minutes — if Meesho STILL lists the item then, the
-# remove genuinely failed and re-importing restores truth.
-_TOMBSTONE_TTL = 300
-
-def _tombstone_add(uid, pid):
-    try:
-        from database import get_db as _gdb
-        c = _gdb()
-        c.execute("CREATE TABLE IF NOT EXISTS recently_removed (user_id INTEGER, product_id INTEGER, created_at REAL DEFAULT 0, PRIMARY KEY (user_id, product_id))")
-        c.execute("INSERT OR REPLACE INTO recently_removed (user_id, product_id, created_at) VALUES (?,?,?)",
-                  (uid, int(pid), time.time()))
-        c.execute("DELETE FROM recently_removed WHERE created_at < ?", (time.time() - _TOMBSTONE_TTL,))
-        c.commit()
-        c.close()
-    except Exception as e:
-        print(f"[TOMBSTONE] add failed: {e}", flush=True)
-
-
-def _tombstone_recent(uid):
-    try:
-        from database import get_db as _gdb
-        c = _gdb()
-        c.execute("CREATE TABLE IF NOT EXISTS recently_removed (user_id INTEGER, product_id INTEGER, created_at REAL DEFAULT 0, PRIMARY KEY (user_id, product_id))")
-        rows = c.execute("SELECT product_id FROM recently_removed WHERE user_id=? AND created_at > ?",
-                         (uid, time.time() - _TOMBSTONE_TTL)).fetchall()
-        c.close()
-        return {int(r["product_id"]) for r in rows}
-    except Exception:
-        return set()
+# Removal tombstones live in database.py (single source) so both app.py and
+# meesho.py can use them without a circular import.
+from database import tombstone_add as _tombstone_add, tombstone_recent as _tombstone_recent
 
 
 @app.route("/api/fod/roll")
@@ -1819,8 +1791,8 @@ def api_cart_sync_pull():
         # - update price/qty/variation for rows Meesho still lists
         # - prune local rows ABSENT from a definitive NON-EMPTY Meesho list
         #   (e.g. removed directly in the Meesho app)
-        # - NEVER auto-import Meesho->local here: that re-adds items the user
-        #   just removed (Meesho remove can lag), causing the reappear glitch.
+        # - import Meesho rows missing locally, EXCEPT tombstoned pids (user
+        #   just removed them; Meesho lag must not resurrect them)
         # - NEVER prune when the Meesho list is empty: an empty/error review
         #   must not wipe a healthy local cart.
         imported=0; updated=0; removed=0
