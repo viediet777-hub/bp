@@ -2600,6 +2600,31 @@ def adapter_order_prices():
     return jsonify({"cod": cod_amount, "online": upi_amount})
 
 
+def _checkout_fail(info):
+    """Map fresh_checkout_state failure stage -> specific error code + honest
+    message, so 'Could not load Meesho cart' stops hiding the real cause."""
+    stage = (info or {}).get("stage", "")
+    if stage == "auth_expired":
+        return {"ok": False, "error": "session_expired",
+                "message": "Meesho session expired — login again (OTP), then retry"}
+    if stage == "meesho_empty":
+        return {"ok": False, "error": "meesho_cart_empty",
+                "message": "Meesho cart is empty — re-add items from the cart page, then retry"}
+    if stage == "no_address":
+        return {"ok": False, "error": "no_meesho_address",
+                "message": "No address on Meesho — add one in Account, then retry"}
+    if stage == "bind_fail":
+        return {"ok": False, "error": "bind_failed",
+                "message": f"Address bind failed ({(info or {}).get('bind_err', '')[:100]}) — retry"}
+    if stage == "zero_amount":
+        return {"ok": False, "error": "zero_amount",
+                "message": "Meesho returned zero total — retry in a bit"}
+    if stage == "review_fail":
+        return {"ok": False, "error": "review_failed",
+                "message": f"Meesho cart unreachable ({(info or {}).get('review_empty_err', '')[:100]}) — retry"}
+    return {"ok": False, "error": "checkout failed", "message": "Could not load Meesho cart"}
+
+
 @app.route("/api/order/place_cod", methods=["POST"])
 def adapter_place_cod():
     uid = get_uid() or 0
@@ -2627,9 +2652,15 @@ def adapter_place_cod():
     # the stored session; fresh_checkout_state reviews + binds it.
     cart_session = get_cart_session(uid) or ""
 
-    st = fresh_checkout_state(acc, cart_session, need_paymentinfo=True, cod=True)
+    ck_info = {}
+    # local_items: if the Meesho cart reviews empty (rotated session), recover
+    # with a ONE-WAY add (no removal -> no doubling possible).
+    st = fresh_checkout_state(acc, cart_session, need_paymentinfo=True, cod=True,
+                              info=ck_info, local_items=cart)
     if not st:
-        return jsonify({"ok": False, "error": "checkout failed", "message": "Could not load Meesho cart"}), 400
+        print(f"[PLACE_COD] uid={uid} cs_len={len(cart_session)} addr_id={address_id} "
+              f"stage={ck_info.get('stage')} info={ck_info}", flush=True)
+        return jsonify(_checkout_fail(ck_info)), 400
 
     cart_session = st["cs"]
     meesho_amount = int(st.get("cod_amount") or st.get("order_total") or subtotal)
@@ -2685,9 +2716,13 @@ def adapter_pay_online():
     # the cart. Re-adding doubled qty and expired the session mid-checkout.
     cart_session = get_cart_session(uid) or ""
 
-    st = fresh_checkout_state(acc, cart_session, need_paymentinfo=True)
+    ck_info = {}
+    st = fresh_checkout_state(acc, cart_session, need_paymentinfo=True,
+                              info=ck_info, local_items=cart)
     if not st:
-        return jsonify({"ok": False, "error": "checkout failed", "message": "Could not load Meesho cart"}), 400
+        print(f"[PAY_ONLINE] uid={uid} cs_len={len(cart_session)} addr_id={address_id} "
+              f"stage={ck_info.get('stage')} info={ck_info}", flush=True)
+        return jsonify(_checkout_fail(ck_info)), 400
 
     cart_session = st["cs"]
     # UPI (checkout_method.txt Step 3 with ["juspay"]): customer_amount MUST be
@@ -2831,6 +2866,39 @@ def adapter_order_confirm():
         except Exception:
             pass
     return jsonify({"ok": True, "message": "Order confirmed!"})
+
+
+@app.route("/api/checkout/diagnose", methods=["GET"])
+def api_checkout_diagnose():
+    """Read-only checkout diagnostic: review(stored) -> review(\"\") ->
+    fetch-addresses. Tells exactly which stage breaks checkout."""
+    uid = get_uid() or 0
+    acc = get_active_meesho_account(uid) if uid else None
+    if not acc:
+        return jsonify({"ok": False, "error": "no_account"})
+    out = {"ok": True, "stored_cs": get_cart_session(uid) or ""}
+    try:
+        r1 = real_cart_review(acc, out["stored_cs"])
+        out["review_stored"] = {"ok": r1.get("ok"), "err": str(r1.get("error"))[:150],
+                                "items": len(r1.get("items") or []),
+                                "cs": (r1.get("cart_session") or "")[:20],
+                                "has_addr": bool((r1.get("address") or {}).get("id"))}
+    except Exception as e:
+        out["review_stored"] = {"ok": False, "err": str(e)[:150]}
+    try:
+        r2 = real_cart_review(acc, "")
+        out["review_empty"] = {"ok": r2.get("ok"), "err": str(r2.get("error"))[:150],
+                               "items": len(r2.get("items") or []),
+                               "cs": (r2.get("cart_session") or "")[:20],
+                               "has_addr": bool((r2.get("address") or {}).get("id"))}
+    except Exception as e:
+        out["review_empty"] = {"ok": False, "err": str(e)[:150]}
+    try:
+        addrs = real_fetch_addresses(acc) or []
+        out["addresses"] = [{"id": a.get("id"), "pin": a.get("pin")} for a in addrs]
+    except Exception as e:
+        out["addresses"] = {"err": str(e)[:150]}
+    return jsonify(out)
 
 
 @app.route("/api/orders", methods=["GET"])

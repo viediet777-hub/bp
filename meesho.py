@@ -1342,31 +1342,86 @@ def real_cart_refresh_8(acc, cart_session):
         return {"ok": False, "error": str(e)}
 
 
-def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True, cod=False):
+def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True, cod=False, info=None,
+                         local_items=None):
     """Run review -> bind address -> 8.0/cart refresh -> paymentinfo, with fresh sessions.
     Mirrors checkout_method.txt place_order Steps 1-3.
     cod=False (default): UPI mode — paymentinfo ["juspay"] + instrument,
       returns upi_amount (with_ppd) and order_total.
     cod=True: COD mode — paymentinfo ["cod"], returns cod_amount (without_ppd).
-    Returns dict(cs, addr, amt, order_total, upi_amount, cod_amount) or None."""
+    Returns dict(cs, addr, amt, order_total, upi_amount, cod_amount) or None.
+    Pass info={} to get the exact failure stage when None is returned:
+    stages: review_fail (both sessions), auth_expired, meesho_empty,
+    no_address, bind_fail, zero_amount.
+    local_items: caller's local cart rows. Used ONLY when the Meesho cart
+    reviews empty — one-way add (no removal, so no doubling) to recover."""
+    if info is None:
+        info = {}
+    info["stage"] = ""
+    info["stored_cs"] = cart_session or ""
+
+    def _auth_err(*errs):
+        blob = " ".join(str(e or "") for e in errs).lower()
+        return any(k in blob for k in ("unauthor", "invalid session", "session expired",
+                                       "expired", "forbidden", "login", "401", "403",
+                                       "token", "auth"))
+
     review = real_cart_review(acc, cart_session)
     if not review.get("ok") or not review.get("cart_session"):
+        info["review_stored_err"] = str(review.get("error"))[:200]
         print(f"[FRESH_CHECKOUT] review_failed cs={cart_session} review={review}", flush=True)
         # Retry with empty session (stale session expired)
         if cart_session:
             print(f"[FRESH_CHECKOUT] retrying review with empty session", flush=True)
             review = real_cart_review(acc, "")
             if not review.get("ok") or not review.get("cart_session"):
+                info["review_empty_err"] = str(review.get("error"))[:200]
                 print(f"[FRESH_CHECKOUT] retry_failed: {review}", flush=True)
+                info["stage"] = ("auth_expired" if _auth_err(info["review_stored_err"],
+                                                             info["review_empty_err"])
+                                 else "review_fail")
                 return None
         else:
+            info["review_empty_err"] = str(review.get("error"))[:200]
+            info["stage"] = ("auth_expired" if _auth_err(info["review_empty_err"])
+                             else "review_fail")
             return None
+    info["new_cs"] = review.get("cart_session")
     cs = review["cart_session"]
-    # Also handle case where review succeeds but items empty (cart not synced)
+    # Also handle case where review succeeds but items empty (cart not synced).
+    # Recovery: ONE-WAY add of the caller's local items — no removal first, so
+    # doubling is impossible on an empty cart. This is the "Could not load
+    # Meesho cart" fix for sessions that rotated server-side.
     items = review.get("items") or []
     if not items:
         print(f"[FRESH_CHECKOUT] review_ok_but_empty_items: {review}", flush=True)
-        return None
+        recovered = False
+        if local_items:
+            try:
+                print(f"[FRESH_CHECKOUT] one-way sync {len(local_items)} local items to empty Meesho cart", flush=True)
+                add_r = real_cart_add_many(acc, local_items, cs or "")
+                if add_r.get("ok"):
+                    if add_r.get("cart_session"):
+                        cs = add_r["cart_session"]
+                    re2 = real_cart_review(acc, cs)
+                    if re2.get("ok") and (re2.get("items") or []):
+                        review = re2
+                        items = review.get("items") or []
+                        if review.get("cart_session"):
+                            cs = review["cart_session"]
+                        recovered = True
+                        print(f"[FRESH_CHECKOUT] recovered: {len(items)} items after one-way sync", flush=True)
+                    else:
+                        print(f"[FRESH_CHECKOUT] re-review still empty after sync: {re2}", flush=True)
+                else:
+                    print(f"[FRESH_CHECKOUT] one-way sync failed: {add_r}", flush=True)
+            except Exception as e:
+                print(f"[FRESH_CHECKOUT] one-way sync exc: {e}", flush=True)
+        if not recovered:
+            info["stage"] = "meesho_empty"
+            info["items"] = 0
+            return None
+    info["items"] = len(items)
     addr = review.get("address") or {}
     if not addr.get("id") and addr.get("address_id"):
         addr["id"] = addr["address_id"]
@@ -1377,10 +1432,13 @@ def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True, cod=Fals
             print(f"[FRESH_CHECKOUT] using fetched address id={addr.get('id')}", flush=True)
         else:
             print(f"[FRESH_CHECKOUT] no_address and no fetched addrs", flush=True)
+            info["stage"] = "no_address"
             return None
+    info["addr_id"] = addr.get("id")
     # Bind address - log but don't fail hard if already bound (some flows return ok even if same)
     bind_result = real_bind_address(acc, cs, addr["id"], addr.get("pin"))
     if not bind_result.get("ok"):
+        info["bind_err"] = str(bind_result.get("error"))[:200]
         print(f"[FRESH_CHECKOUT] bind_failed: {bind_result} - retrying review to see if already bound", flush=True)
         # Re-review to see if bind was actually not needed
         re = real_cart_review(acc, cs)
@@ -1388,6 +1446,7 @@ def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True, cod=Fals
             cs = re.get("cart_session", cs)
             print(f"[FRESH_CHECKOUT] re-review after bind fail got addr {re['address'].get('id')}", flush=True)
         else:
+            info["stage"] = "bind_fail"
             return None
     else:
         cs = bind_result.get("cart_session") or cs
@@ -1448,7 +1507,9 @@ def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True, cod=Fals
         order_total = sum(float(it.get("price", 0)) * int(it.get("quantity", 1)) for it in items) or 1
     if order_total is None or order_total <= 0:
         print(f"[FRESH_CHECKOUT] zero_amt: {order_total} review={review}", flush=True)
+        info["stage"] = "zero_amount"
         return None
+    info["stage"] = "ok"
     # Update is_first_order flag from live user_meta
     try:
         vm = review.get("user_meta") or {}
