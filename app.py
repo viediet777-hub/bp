@@ -2642,27 +2642,20 @@ def adapter_place_cod():
             if cart_session:
                 set_cart_session(uid, cart_session)
 
-    st = fresh_checkout_state(acc, cart_session, need_paymentinfo=False)
+    # COD (checkout_method.txt Steps 1-3 with ["cod"]): customer_amount MUST be
+    # the without_ppd total — a single correct amount, no guessing loop.
+    st = fresh_checkout_state(acc, cart_session, need_paymentinfo=True, cod=True)
     if not st:
         return jsonify({"ok": False, "error": "checkout failed", "message": "Could not load Meesho cart"}), 400
 
     cart_session = st["cs"]
-    meesho_amount = st.get("effective_total") or subtotal
+    meesho_amount = int(st.get("cod_amount") or st.get("order_total") or subtotal)
     meesho_addr_id = st["addr"].get("id")
     set_cart_session(uid, cart_session)
 
-    order_r = None
-    for cand in (st.get("effective_total"), st.get("order_total"), st.get("upi_amount"), subtotal):
-        try:
-            cand_int = int(cand or 0)
-        except: continue
-        if not cand_int: continue
-        order_r = real_preorder(acc, cart_session, meesho_addr_id,
-                                payment_method="COD", customer_amount=cand_int,
-                                addr_info=st.get("addr") or {})
-        if order_r.get("ok"):
-            meesho_amount = cand_int
-            break
+    order_r = real_preorder(acc, cart_session, meesho_addr_id,
+                            payment_method="COD", customer_amount=meesho_amount,
+                            addr_info=st.get("addr") or {})
 
     if not order_r or not order_r.get("ok"):
         return jsonify({"ok": False, "error": (order_r or {}).get("error", "order failed"),
@@ -2731,24 +2724,15 @@ def adapter_pay_online():
         return jsonify({"ok": False, "error": "checkout failed", "message": "Could not load Meesho cart"}), 400
 
     cart_session = st["cs"]
-    upi_amt = st.get("upi_amount") or st.get("order_total") or subtotal
-    order_tot = st.get("order_total") or st.get("effective_total") or upi_amt
+    # UPI (checkout_method.txt Step 3 with ["juspay"]): customer_amount MUST be
+    # the with_ppd total — a single correct amount, no guessing loop.
+    actual_amount = int(st.get("upi_amount") or st.get("order_total") or subtotal)
     meesho_addr_id = st["addr"].get("id")
     set_cart_session(uid, cart_session)
 
-    order_r = None
-    actual_amount = upi_amt
-    for cand in (upi_amt, order_tot, st.get("effective_total"), subtotal):
-        try:
-            cand_int = int(cand or 0)
-        except: continue
-        if not cand_int: continue
-        order_r = real_preorder(acc, cart_session, meesho_addr_id,
-                                payment_method="UPI", customer_amount=cand_int,
-                                addr_info=st.get("addr") or {})
-        if order_r.get("ok"):
-            actual_amount = cand_int
-            break
+    order_r = real_preorder(acc, cart_session, meesho_addr_id,
+                            payment_method="UPI", customer_amount=actual_amount,
+                            addr_info=st.get("addr") or {})
 
     if not order_r or not order_r.get("ok"):
         return jsonify({"ok": False, "error": (order_r or {}).get("error", "order failed"),
@@ -2762,27 +2746,35 @@ def adapter_pay_online():
     clear_cart(uid)
     set_cart_session(uid, "")
 
-    qr_base64 = order_r.get("qr_base64", "")
-    upi_intent_url = order_r.get("upi_intent_url", "")
-    juspay_id = order_r.get("juspay_order_id", "")
+    qr_base64 = order_r.get("qr_base64", "") or ""
+    upi_intent_url = order_r.get("upi_intent_url", "") or ""
+    juspay_id = order_r.get("juspay_order_id", "") or ""
 
+    # Explicit QR contract: qr_base64 (raw, no data: prefix), qr_url (renderable
+    # image URL), upi_intent_url (upi://... for "Open UPI App"). The frontend
+    # checks these three first, so the modal can never come up empty.
     qr_image = ""
     if qr_base64:
-        if qr_base64.startswith("data:"):
-            qr_image = qr_base64
-        else:
-            qr_image = "data:image/png;base64," + qr_base64
-    elif upi_intent_url:
-        import urllib.parse
-        qr_image = "https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=" + urllib.parse.quote(upi_intent_url)
+        qr_image = qr_base64 if qr_base64.startswith("data:") else "data:image/png;base64," + qr_base64
+    import urllib.parse
+    qr_url = ""
+    if upi_intent_url:
+        qr_url = ("https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data="
+                  + urllib.parse.quote(upi_intent_url))
+    if not qr_image:
+        qr_image = qr_url
 
     return jsonify({
         "ok": True,
         "order_num": str(oid),
+        "meesho_order_num": meesho_order_num,
         "juspay_order_id": juspay_id,
         "cart_session": "",
         "amount": actual_amount,
         "upi_amount": actual_amount,
+        "qr_base64": qr_base64,
+        "qr_url": qr_url,
+        "upi_intent_url": upi_intent_url,
         "qr_image": qr_image,
         "upi_uri": upi_intent_url,
         "redirect_url": upi_intent_url or order_r.get("payment_url", ""),
@@ -2826,6 +2818,10 @@ def adapter_payment_status():
 
 @app.route("/api/order/confirm", methods=["POST"])
 def adapter_order_confirm():
+    """checkout_method.txt Step 5: verify payment on Meesho
+    (POST /api/1.0/preorders/payments/status) BEFORE marking confirmed, so the
+    success sheet never lies. Network error -> benefit of doubt (confirm anyway);
+    definitive non-success -> honest pending so the user really pays first."""
     uid = get_uid() or 0
     data = request.json or {}
     order_num = data.get("order_num")
@@ -2833,10 +2829,41 @@ def adapter_order_confirm():
         return jsonify({"ok": False, "error": "order_num required", "message": "Missing order number"})
     try:
         oid = int(order_num)
-        ord_row = get_order(oid)
-        if ord_row:
+    except (TypeError, ValueError):
+        oid = None
+    meesho_num, pay_method = "", ""
+    if oid:
+        try:
+            row = get_order(oid)
+            if row:
+                meesho_num = str(row.get("meesho_order_num") or "")
+                pay_method = str(row.get("payment_method") or "")
+        except Exception:
+            pass
+    if not meesho_num:
+        meesho_num = str(data.get("meesho_order_num") or "")
+    acc = get_active_meesho_account(uid) if uid else None
+    if acc and meesho_num and pay_method.upper() == "UPI":
+        try:
+            st = real_preorder_status(acc, meesho_num, get_cart_session(uid) or "")
+            state = str(st.get("status") or "").lower()
+            print(f"[ORDER_CONFIRM] meesho status order={meesho_num} -> {state}", flush=True)
+            if state in ("ordered", "success", "charged", "confirmed", "paid"):
+                if oid:
+                    update_order_status(oid, "confirmed")
+                return jsonify({"ok": True, "message": "Order confirmed!"})
+            if state in ("pending", "created", "initiated", "unknown", ""):
+                return jsonify({"ok": False, "pending": True,
+                                "message": "Payment not detected yet — pay first, then retry"}), 202
+            return jsonify({"ok": False, "pending": True,
+                            "message": f"Payment state: {state} — retry after paying"}), 202
+        except Exception as e:
+            print(f"[ORDER_CONFIRM] status check exc (confirming anyway): {e}", flush=True)
+    if oid:
+        try:
             update_order_status(oid, "confirmed")
-    except: pass
+        except Exception:
+            pass
     return jsonify({"ok": True, "message": "Order confirmed!"})
 
 

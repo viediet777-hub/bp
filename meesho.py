@@ -1036,8 +1036,11 @@ def real_cart_sync(acc, local_items, cart_session=None):
 
 def real_bind_address(acc, cart_session, address_id, dest_pin=None):
     """Bind address to cart via /api/1.0/cart/location.
-    Captured folder-21 uses context='atc_cart_v2' + identifier='default'. Try that first, then review/buy_now fallback."""
-    for ctx, ident in (("atc_cart_v2", "default"), ("review", "buy_now"), ("atc_review", "default")):
+    checkout_method.txt (working bot place_order Step 1) uses
+    context='address_bottom_sheet_summary' + identifier='default' — try that
+    FIRST, then captured fallbacks."""
+    for ctx, ident in (("address_bottom_sheet_summary", "default"),
+                       ("atc_cart_v2", "default"), ("review", "buy_now"), ("atc_review", "default")):
         body = {
             "context": ctx, "identifier": ident,
             "cart_session": cart_session,
@@ -1079,10 +1082,33 @@ def real_bind_address(acc, cart_session, address_id, dest_pin=None):
         return {"ok": False, "error": str(e)}
 
 
-def real_paymentinfo(acc, cart_session, payment_modes=None):
+def real_paymentinfo(acc, cart_session, payment_modes=None, upi_app="com.naviapp"):
     """Get payment info via /api/1.0/cart/paymentinfo.
-    Tries both atc_payment_summary/default (real Meesho cart) and payment_summary/buy_now (buy_now flow)."""
+    Tries both atc_payment_summary/default (real Meesho cart) and payment_summary/buy_now (buy_now flow).
+    checkout_method.txt Step 3: for UPI send the FULL payment_instrument object
+    (JUSPAY/UPI_PAY with the target upi_app) — Meesho returns effective_total_with_ppd.
+    For COD send ["cod"] with no instrument -> effective_total_without_ppd."""
     tried = []
+    is_upi = (payment_modes if payment_modes is not None else ["juspay"]) == ["juspay"]
+    payment_instrument = None
+    if is_upi:
+        payment_instrument = {
+            "payment_method_type": "UPI",
+            "payment_method": "UPI",
+            "payment_aggregator": "JUSPAY",
+            "payment_provider": "JUSPAY",
+            "processor_id": "in.juspay.hyperapi",
+            "payment_card_type": "",
+            "payment_card_issuer": "",
+            "txn_type": "UPI_PAY",
+            "upi_app": upi_app or "com.naviapp",
+            "card_type": None,
+            "bank_code": None,
+            "card_bin": None,
+            "card_fingerprint": None,
+            "payment_method_fingerprint": None,
+            "issuing_card_bank": None,
+        }
     for ctx, ident in [("atc_payment_summary","default"), ("payment_summary","buy_now"), ("atc_payment_summary","buy_now")]:
         body = {
             "context": ctx, "identifier": ident,
@@ -1093,7 +1119,7 @@ def real_paymentinfo(acc, cart_session, payment_modes=None):
             "payment_modes": payment_modes if payment_modes is not None else ["juspay"],
             "replaceable": None,
             "item": None,
-            "payment_instrument": None,
+            "payment_instrument": payment_instrument,
             "bank_offers": None,
             "filter_products": None,
             "is_self_pickup": None,
@@ -1282,10 +1308,47 @@ def real_fetch_addresses(acc):
         return []
 
 
-def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True):
-    """Run review -> bind address -> (paymentinfo) with fresh sessions.
-    Returns dict(cs, addr, amt, order_total, upi_amount) or None.
-    Uses correct payment_modes per captured API: [] for COD, ["juspay"] for UPI."""
+def real_cart_refresh_8(acc, cart_session):
+    """checkout_method.txt place_order Step 2: POST /api/8.0/cart to refresh
+    review totals after address bind (context atc_payment_summary,
+    filter_products True). Returns {"ok", "cart_session"}."""
+    body = {
+        "context": "atc_payment_summary",
+        "identifier": "default",
+        "cart_session": cart_session or "",
+        "dest_pin": None,
+        "address_id": None,
+        "customerAmount": None,
+        "payment_modes": [],
+        "replaceable": False,
+        "item": None,
+        "payment_instrument": None,
+        "bank_offers": None,
+        "filter_products": True,
+        "is_self_pickup": None,
+        "self_pickup_address": None,
+        "is_emi": None,
+        "user_id": _acc_uid(acc),
+    }
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.post(f"{MEESHO_API}/8.0/cart",
+                               headers=logged_in_headers(acc), json=body)
+            data = resp.json() or {}
+            if data.get("success"):
+                return {"ok": True, "cart_session": data.get("cart_session") or cart_session}
+            return {"ok": False, "error": data.get("error_type") or data.get("message") or str(data)[:200]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True, cod=False):
+    """Run review -> bind address -> 8.0/cart refresh -> paymentinfo, with fresh sessions.
+    Mirrors checkout_method.txt place_order Steps 1-3.
+    cod=False (default): UPI mode — paymentinfo ["juspay"] + instrument,
+      returns upi_amount (with_ppd) and order_total.
+    cod=True: COD mode — paymentinfo ["cod"], returns cod_amount (without_ppd).
+    Returns dict(cs, addr, amt, order_total, upi_amount, cod_amount) or None."""
     review = real_cart_review(acc, cart_session)
     if not review.get("ok") or not review.get("cart_session"):
         print(f"[FRESH_CHECKOUT] review_failed cs={cart_session} review={review}", flush=True)
@@ -1328,13 +1391,25 @@ def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True):
             return None
     else:
         cs = bind_result.get("cart_session") or cs
-    order_total = upi_amount = None
+    # Step 2 (checkout_method.txt): refresh totals via POST /api/8.0/cart.
+    # Non-fatal: log and continue with current session if it fails.
+    try:
+        rf = real_cart_refresh_8(acc, cs)
+        if rf.get("ok"):
+            if rf.get("cart_session"):
+                cs = rf["cart_session"]
+            print(f"[FRESH_CHECKOUT] 8.0/cart refresh ok", flush=True)
+        else:
+            print(f"[FRESH_CHECKOUT] 8.0/cart refresh failed (continuing): {rf.get('error')}", flush=True)
+    except Exception as e:
+        print(f"[FRESH_CHECKOUT] 8.0/cart refresh exc (continuing): {e}", flush=True)
+    order_total = upi_amount = cod_amount = None
     # COD vs UPI amounts: review already has both (69 vs 41). Use them directly.
     # For UPI we also want with_ppd / for_upi_plugin.
     review_cod = review.get("effective_total")
     review_upi = review.get("effective_total_for_upi_plugin") or review.get("effective_total_with_ppd")
-    if need_paymentinfo:
-        # Use correct modes per capture: ["juspay"] for UPI
+    if need_paymentinfo and not cod:
+        # UPI: paymentinfo ["juspay"] + instrument -> with_ppd amount
         pi = real_paymentinfo(acc, cs, ["juspay"])
         if pi.get("ok"):
             order_total = pi.get("effective_total")
@@ -1349,11 +1424,24 @@ def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True):
             upi_amount = review_upi or order_total
         if upi_amount is None:
             upi_amount = order_total
+    elif need_paymentinfo and cod:
+        # COD (checkout_method.txt Step 3 with ["cod"]): without_ppd amount
+        pi = real_paymentinfo(acc, cs, ["cod"])
+        if pi.get("ok"):
+            cod_amount = pi.get("effective_total_without_ppd") or pi.get("effective_total")
+            order_total = cod_amount
+            new_cs = pi.get("cart_session")
+            if new_cs:
+                cs = new_cs
+            print(f"[FRESH_CHECKOUT] paymentinfo COD ok cod={cod_amount}", flush=True)
+        if cod_amount is None or cod_amount <= 0:
+            cod_amount = review_cod
+            order_total = review_cod
     else:
-        # COD: use effective_total (69) directly, no paymentinfo needed
+        # No paymentinfo: use effective_total directly
         order_total = review_cod
         upi_amount = review_upi or review_cod
-        print(f"[FRESH_CHECKOUT] COD mode using review_cod={review_cod} upi={upi_amount}", flush=True)
+        print(f"[FRESH_CHECKOUT] no-paymentinfo mode using review_cod={review_cod} upi={upi_amount}", flush=True)
     if order_total is None or order_total <= 0:
         order_total = review_cod
     if order_total is None or order_total <= 0 and items:
@@ -1371,6 +1459,7 @@ def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True):
         pass
     return {"cs": cs, "addr": addr, "amt": int(round(order_total)),
             "order_total": order_total, "upi_amount": upi_amount or order_total,
+            "cod_amount": cod_amount or review_cod or order_total,
             "items": items, "total_quantity": review.get("total_quantity"),
             "effective_total": review_cod, "effective_upi": review_upi}
 
@@ -1410,8 +1499,9 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
             "enable_price_unbundling": True,
             "user_id": uid,
         }
-        # Remove None values to avoid invalid payload (Meesho strict)
-        body = {k: v for k, v in body.items() if v is not None}
+        # checkout_method.txt sends explicit nulls (vpa/direct_wallet_token/
+        # card_token/payment_flow_type for COD etc.) — keep them, Meesho's
+        # working-bot payload has nulls present, not stripped.
         try:
             print(f"[PREORDER] body ident={ident} upi={is_upi}: {json.dumps(body)[:500]}", flush=True)
             with httpx.Client(timeout=25.0) as client:
@@ -1432,11 +1522,13 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
                     "upi_intent_url": qr_params.get("payload", {}).get("upi_intent_url"),
                     "payment_url": data.get("payment_url"),
                     "client_auth_token": juspay_params.get("payload", {}).get("client_auth_token"),
+                    "offer_ids": (juspay_params.get("payload", {}).get("offer") or {}).get("offer_ids") or [],
                     "raw": data,
                 }
                 # For UPI: generate the real UPI intent/QR. Try official Juspay WAPI
-                # first (working bot method), then meesho /api/juspay/txns, then a
-                # guaranteed fallback link so the QR always renders.
+                # first (working bot method, WITH offer_ids like checkout_method.txt),
+                # then meesho /api/juspay/txns, then a guaranteed fallback link
+                # so the QR always renders.
                 if is_upi and (result["juspay_order_id"] or result["order_num"]):
                     upi_ref = result["juspay_order_id"] or result["order_num"]
                     try:
@@ -1444,6 +1536,7 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD",
                             upi_ref,
                             result["client_auth_token"],
                             upi_app="com.naviapp",
+                            offers=result.get("offer_ids") or None,
                             amount=result.get("customer_amount") or customer_amount,
                         )
                         if wapi.get("ok"):
@@ -1519,7 +1612,7 @@ def real_juspay_wapi_intent(order_id, client_auth_token, upi_app="com.naviapp",
         "is_aio_flow_enabled": "false",
         "format": "json",
         "client_auth_token": str(client_auth_token or ""),
-        "metadata": json.dumps({"payment_channel": "ANDROID"}),
+        "metadata": json.dumps({"payment_channel": "ANDROID", "microapp": "ec"}),
     }
     if offers:
         data["offers"] = json.dumps(offers)
