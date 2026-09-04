@@ -630,11 +630,34 @@ def sync_meesho_orders_to_db(user_id, meesho_orders):
         status = str(o.get("sub_order_status") or o.get("status") or o.get("order_status") or "placed").lower()
         total = int(o.get("total_price") or o.get("amount") or o.get("total") or o.get("price") or 0)
 
-        items = o.get("product_title") or o.get("product_name") or o.get("item_title") or ""
-        if not items and o.get("sub_orders"):
-            items = ", ".join([so.get("product_title") or so.get("product_name") or "Item" for so in o["sub_orders"]])
-        if not items:
-            items = f"Meesho Order #{m_num}"
+        items_name = o.get("product_title") or o.get("product_name") or o.get("item_title") or ""
+        if not items_name and o.get("sub_orders"):
+            items_name = ", ".join([so.get("product_title") or so.get("product_name") or "Item" for so in o["sub_orders"]])
+        if not items_name:
+            items_name = f"Meesho Order #{m_num}"
+
+        # Extract image if present
+        img = o.get("product_image") or o.get("image") or o.get("image_url") or o.get("cover_image") or ""
+        if not img and isinstance(o.get("product_images"), list) and o["product_images"]:
+            first_im = o["product_images"][0]
+            img = first_im.get("url") if isinstance(first_im, dict) else str(first_im)
+        if not img and o.get("sub_orders") and isinstance(o["sub_orders"], list):
+            for so in o["sub_orders"]:
+                so_img = so.get("product_image") or so.get("image") or so.get("image_url") or ""
+                if not so_img and isinstance(so.get("product_images"), list) and so["product_images"]:
+                    f_im = so["product_images"][0]
+                    so_img = f_im.get("url") if isinstance(f_im, dict) else str(f_im)
+                if so_img:
+                    img = so_img
+                    break
+
+        import json
+        items_payload = json.dumps([{
+            "name": items_name,
+            "image": img,
+            "price": total,
+            "qty": 1
+        }])
 
         created_raw = o.get("sub_order_created") or o.get("created_at") or o.get("order_date")
         created_ts = now
@@ -648,7 +671,7 @@ def sync_meesho_orders_to_db(user_id, meesho_orders):
         if existing:
             conn.execute(
                 "UPDATE orders SET status=?, items=?, total=?, meesho_amount=? WHERE id=?",
-                (status, items, total, total, existing["id"]),
+                (status, items_payload, total, total, existing["id"]),
             )
             inserted_or_updated += 1
         else:
@@ -663,7 +686,7 @@ def sync_meesho_orders_to_db(user_id, meesho_orders):
                     o.get("payment_mode") or "COD",
                     o.get("payment_mode") or "COD",
                     status,
-                    items,
+                    items_payload,
                     "",
                     total,
                     0,

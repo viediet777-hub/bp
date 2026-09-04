@@ -1,5 +1,5 @@
 {
-  "name": "FOD Pilot – Meesho First-Order Engine",
+  "name": "VIEDDET ORDER BOT",
   "description": "Production-ready Telegram Mini App shopping assistant integrating with Meesho APIs for real-time cart, checkout, offer rolling, and orders by VIEDDETX SINGH.",
   "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

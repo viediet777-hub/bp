@@ -331,7 +331,7 @@ def api_product():
 
 
 # ============================================================
-# CART MANAGEMENT WITH TOMBSTONE DEDUPLICATION
+# CART MANAGEMENT WITH FAST OPTIMISTIC UPDATES
 # ============================================================
 @app.route("/api/cart", methods=["GET"])
 def api_cart():
@@ -339,8 +339,8 @@ def api_cart():
     cart_items = get_cart(uid)
     acc = get_active_meesho_account(uid)
 
-    # Always ensure latest Meesho cart items and prices are reconciled when an account is linked
-    if acc:
+    # Only perform full remote review when explicitly requested (e.g. ?sync=1)
+    if acc and request.args.get("sync") == "1":
         try:
             cs = get_cart_session(uid) or ""
             review = real_cart_review(acc, cs)
@@ -398,7 +398,7 @@ def api_cart_add():
             if res.get("resolved_variation_id"):
                 variation_id = int(res["resolved_variation_id"])
 
-    # Persist locally
+    # Persist locally immediately
     add_to_cart(
         user_id=uid,
         product_id=pid,
@@ -413,10 +413,7 @@ def api_cart_add():
         mrp=mrp,
     )
 
-    # Reconcile local cart with remote Meesho review
-    if acc:
-        sync_local_cart(uid, get_cart(uid), acc)
-
+    # Return updated cart immediately without waiting for redundant review
     return jsonify({"ok": True, "success": True, "cart": get_cart(uid), "cart_session": cs})
 
 
@@ -460,17 +457,15 @@ def api_cart_update():
         if target_cid:
             update_cart_qty(target_cid, 0)
 
-        # Call verified removal on Meesho
+        # Call verified removal on Meesho (fast non-blocking return)
         if acc and target_pid:
             rem_res = meesho_remove_verified(acc, target_pid, cs, variation_id=target_vid)
             if rem_res.get("cart_session"):
                 set_cart_session(uid, rem_res["cart_session"])
-            sync_local_cart(uid, get_cart(uid), acc)
 
         return jsonify({"ok": True, "success": True, "deleted": True, "cart": get_cart(uid)})
     else:
         # INCREMENT (+ button):
-        # Calculate delta to only add the difference to Meesho cart
         delta = max(1, qty - current_qty)
         if target_cid:
             update_cart_qty(target_cid, qty)
@@ -487,7 +482,6 @@ def api_cart_update():
             )
             if add_res.get("cart_session"):
                 set_cart_session(uid, add_res["cart_session"])
-            sync_local_cart(uid, get_cart(uid), acc)
 
         return jsonify({"ok": True, "success": True, "cart": get_cart(uid)})
 
@@ -701,7 +695,17 @@ def adapter_place_cod():
         return jsonify({"ok": False, "error": order_res.get("error") or "Order rejected by Meesho"}), 400
 
     order_num = order_res.get("order_num")
-    items_summary = ", ".join([f"{c.get('name', 'Item')}x{c.get('qty', 1)}" for c in cart])
+    items_snapshot = json.dumps([
+        {
+            "product_id": c.get("product_id"),
+            "name": c.get("name") or "Product",
+            "price": c.get("price") or 0,
+            "qty": c.get("qty") or 1,
+            "image": c.get("image") or "",
+            "variation_name": c.get("variation_name") or "",
+        }
+        for c in cart
+    ])
 
     # Deduct platform service fee from user's internal wallet upon order success
     fee_deducted = 0
@@ -711,7 +715,7 @@ def adapter_place_cod():
 
     oid = create_order(
         user_id=uid,
-        items=items_summary,
+        items=items_snapshot,
         total=meesho_amount,
         fee=fee_deducted,
         address=addr.get("address_line_1") or "",
@@ -803,7 +807,17 @@ def adapter_pay_online():
     qr_base64 = order_res.get("qr_base64") or ""
     qr_url = get_qr_url(upi_intent_url, size=240) if upi_intent_url else ""
 
-    items_summary = ", ".join([f"{c.get('name', 'Item')}x{c.get('qty', 1)}" for c in cart])
+    items_snapshot = json.dumps([
+        {
+            "product_id": c.get("product_id"),
+            "name": c.get("name") or "Product",
+            "price": c.get("price") or 0,
+            "qty": c.get("qty") or 1,
+            "image": c.get("image") or "",
+            "variation_name": c.get("variation_name") or "",
+        }
+        for c in cart
+    ])
 
     # Deduct platform service fee from user's internal wallet upon order success
     fee_deducted = 0
@@ -813,7 +827,7 @@ def adapter_pay_online():
 
     oid = create_order(
         user_id=uid,
-        items=items_summary,
+        items=items_snapshot,
         total=meesho_amount,
         fee=fee_deducted,
         address=addr.get("address_line_1") or "",
@@ -880,10 +894,25 @@ def api_orders():
     for o in orders:
         m_num = o.get("meesho_order_num")
         source = "Meesho" if m_num else "Bot"
+        raw_items = o.get("items") or ""
+        first_image = ""
+        items_display = raw_items
+        try:
+            parsed = json.loads(raw_items) if isinstance(raw_items, str) and (raw_items.startswith("[") or raw_items.startswith("{")) else raw_items
+            if isinstance(parsed, list) and parsed:
+                first_image = parsed[0].get("image") or ""
+                items_display = ", ".join([f"{it.get('name', 'Item')} ×{it.get('qty', 1)}" for it in parsed])
+            elif isinstance(parsed, dict):
+                first_image = parsed.get("image") or ""
+        except Exception:
+            pass
+
         out.append({
             "order_num": str(o.get("id") or o.get("order_num")),
             "meesho_order_num": m_num,
-            "items_text": o.get("items"),
+            "items": raw_items,
+            "items_text": items_display or raw_items,
+            "image": first_image or o.get("image") or "",
             "total": o.get("total"),
             "amount": o.get("total"),
             "status": o.get("status", "pending"),
@@ -915,10 +944,25 @@ def api_meesho_orders_live():
             out = []
             for o in refreshed_orders:
                 m_num = o.get("meesho_order_num")
+                raw_items = o.get("items") or ""
+                first_image = ""
+                items_display = raw_items
+                try:
+                    parsed = json.loads(raw_items) if isinstance(raw_items, str) and (raw_items.startswith("[") or raw_items.startswith("{")) else raw_items
+                    if isinstance(parsed, list) and parsed:
+                        first_image = parsed[0].get("image") or ""
+                        items_display = ", ".join([f"{it.get('name', 'Item')} ×{it.get('qty', 1)}" for it in parsed])
+                    elif isinstance(parsed, dict):
+                        first_image = parsed.get("image") or ""
+                except Exception:
+                    pass
+
                 out.append({
                     "order_num": str(o.get("id") or o.get("order_num")),
                     "meesho_order_num": m_num,
-                    "items_text": o.get("items"),
+                    "items": raw_items,
+                    "items_text": items_display or raw_items,
+                    "image": first_image or o.get("image") or "",
                     "total": o.get("total"),
                     "amount": o.get("total"),
                     "status": o.get("status", "pending"),

@@ -49,7 +49,7 @@
 <meta name="theme-color" content="#0B0C10">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>FOD Pilot – Meesho First-Order Engine</title>
+<title>VIEDDET ORDER BOT – Meesho First-Order Engine</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -336,7 +336,7 @@ textarea.fld{font-family:monospace;font-size:11px;resize:vertical}
 <header class="topbar">
   <div class="logo">
     <div class="logo__mark">⚡</div>
-    <div>FOD PILOT<small>VIEDDETX SINGH</small></div>
+    <div>VIEDDET ORDER BOT<small>VIEDDETX SINGH</small></div>
   </div>
   <div class="uidchip num" id="uidChip">ID …</div>
   <button class="cartbtn" onclick="go('cart')" aria-label="Cart">
@@ -347,7 +347,7 @@ textarea.fld{font-family:monospace;font-size:11px;resize:vertical}
 <!-- VIEW: HOME -->
 <section id="view-home" class="view active">
   <div class="hero">
-    <div class="hero__kicker">FIRST-ORDER DISCOUNT ENGINE</div>
+    <div class="hero__kicker">VIEDDET ORDER BOT</div>
     <div class="hero__amt num" id="fodAmt">Upto ₹200 OFF</div>
     <div class="hero__sub" id="fodSub">Roll for best offer bucket (180–220)</div>
     <div><span class="hero__meta num" id="fodMeta">BUCKET 200 • ACTIVE</span></div>
@@ -824,10 +824,43 @@ function pickSize(el, vid){
   curVid = vid;
 }
 
+function updateCartBadges(){
+  const count = (S.cart || []).reduce((a, c) => a + Number(c.qty || 1), 0);
+  const cartBdg = document.getElementById('cartBdg');
+  if(cartBdg) cartBdg.textContent = count;
+  const stCart = document.getElementById('stCart');
+  if(stCart) stCart.textContent = count;
+}
+
 async function addToCart(buyNow){
   if(!curProd) return;
   const sizeEl = document.querySelector('.sizepill.on');
   const sizeName = sizeEl ? sizeEl.textContent.trim() : 'Free Size';
+
+  // Instant optimistic update in local state
+  S.cart = S.cart || [];
+  const existing = S.cart.find(c => c.product_id == curProd.product_id && (c.variation_id == curVid || (!curVid && !c.variation_id)));
+  if(existing){
+    existing.qty = Number(existing.qty || 1) + 1;
+  } else {
+    S.cart.push({
+      id: 'temp_' + Date.now(),
+      product_id: curProd.product_id,
+      supplier_id: curProd.supplier_id || 0,
+      variation_id: curVid,
+      variation_name: sizeName,
+      qty: 1,
+      price: curProd.price,
+      mrp: curProd.mrp || curProd.price,
+      name: curProd.name,
+      image: curProd.image
+    });
+  }
+  updateCartBadges();
+  toast('Added to Cart ✓', 'ok');
+  closeSheet();
+  if(buyNow) go('cart');
+
   try{
     const d = await api('/api/cart/add', {
       method: 'POST',
@@ -844,14 +877,14 @@ async function addToCart(buyNow){
       }
     });
     if(d && d.ok){
-      toast('Added to Cart ✓', 'ok');
-      closeSheet();
-      await loadCart();
-      if(buyNow) go('cart');
-    } else {
-      toast(d.error || 'Could not add to cart', 'err');
+      if(d.cart) S.cart = d.cart;
+      updateCartBadges();
+      schedulePull(500);
     }
-  }catch(e){ toast('Failed to add to cart', 'err'); }
+  }catch(e){
+    toast('Failed to add to cart', 'err');
+    await loadCart();
+  }
 }
 
 /* Cart Management (Strictly + and Delete Buttons Only) */
@@ -859,21 +892,19 @@ async function loadCart(){
   try{
     const d = await api('/api/cart');
     S.cart = (d && d.items) || [];
-    const count = S.cart.reduce((a, c) => a + Number(c.qty || 1), 0);
-    const cartBdg = document.getElementById('cartBdg');
-    if(cartBdg) cartBdg.textContent = count;
-    const stCart = document.getElementById('stCart');
-    if(stCart) stCart.textContent = count;
+    updateCartBadges();
   }catch(e){ S.cart = []; }
 }
 
-async function renderCart(){
-  await loadCart();
+function paintCartItems(){
   const list = document.getElementById('cartList');
-  if(!S.cart.length){
+  if(!list) return;
+  if(!S.cart || !S.cart.length){
     list.innerHTML = '<div class="empty"><div class="art">🛒</div>Cart is empty<br><small>Discover products in Search</small></div>';
-    document.getElementById('sumCard').style.display = 'none';
-    document.getElementById('ctaBar').style.display = 'none';
+    const sc = document.getElementById('sumCard');
+    if(sc) sc.style.display = 'none';
+    const cb = document.getElementById('ctaBar');
+    if(cb) cb.style.display = 'none';
     return;
   }
 
@@ -893,22 +924,39 @@ async function renderCart(){
     </div>
   `).join('');
 
-  // Fetch live breakdown
+  const sc = document.getElementById('sumCard');
+  if(sc) sc.style.display = 'block';
+  const cb = document.getElementById('ctaBar');
+  if(cb) cb.style.display = 'flex';
+}
+
+async function refreshCartSummary(){
   try{
     const s = await api('/api/checkout/summary');
     if(s && !s.error){
       S.summary = s;
-      document.getElementById('sMrp').textContent = inr(s.product_price || s.subtotal);
-      document.getElementById('sDisc').textContent = '−' + inr(s.total_discounts || s.prepaid_discount || 0);
-      document.getElementById('sTot').textContent = inr(s.cod_amount || s.total);
-      document.getElementById('sCod').textContent = inr(s.cod_amount || s.total);
-      document.getElementById('sUpi').textContent = inr(s.upi_amount || s.total);
-      document.getElementById('sSave').textContent = s.prepaid_discount > 0 ? `Pay ${inr(s.upi_amount)} via UPI (Save ${inr(s.prepaid_discount)})` : 'UPI & COD Available';
-      document.getElementById('ctaTot').textContent = inr(s.cod_amount || s.total);
-      document.getElementById('sumCard').style.display = 'block';
-      document.getElementById('ctaBar').style.display = 'flex';
+      const sMrp = document.getElementById('sMrp');
+      if(sMrp) sMrp.textContent = inr(s.product_price || s.subtotal);
+      const sDisc = document.getElementById('sDisc');
+      if(sDisc) sDisc.textContent = '−' + inr(s.total_discounts || s.prepaid_discount || 0);
+      const sTot = document.getElementById('sTot');
+      if(sTot) sTot.textContent = inr(s.cod_amount || s.total);
+      const sCod = document.getElementById('sCod');
+      if(sCod) sCod.textContent = inr(s.cod_amount || s.total);
+      const sUpi = document.getElementById('sUpi');
+      if(sUpi) sUpi.textContent = inr(s.upi_amount || s.total);
+      const sSave = document.getElementById('sSave');
+      if(sSave) sSave.textContent = s.prepaid_discount > 0 ? `Pay ${inr(s.upi_amount)} via UPI (Save ${inr(s.prepaid_discount)})` : 'UPI & COD Available';
+      const ctaTot = document.getElementById('ctaTot');
+      if(ctaTot) ctaTot.textContent = inr(s.cod_amount || s.total);
     }
   }catch(e){}
+}
+
+async function renderCart(){
+  await loadCart();
+  paintCartItems();
+  await refreshCartSummary();
   paintCartAddr();
 }
 
@@ -916,15 +964,27 @@ async function incCartItem(i){
   const item = S.cart[i];
   if(!item) return;
   const newQty = Number(item.qty || 1) + 1;
+
+  // Optimistic UI update
+  item.qty = newQty;
+  updateCartBadges();
+  paintCartItems();
+
   try{
     const d = await api('/api/cart/update', {
       method: 'POST',
       body: {cart_id: item.id, product_id: item.product_id, qty: newQty}
     });
     if(d && d.ok){
-      await renderCart();
+      if(d.cart) S.cart = d.cart;
+      schedulePull(500);
+      refreshCartSummary();
     }
-  }catch(e){ toast('Failed to update quantity', 'err'); }
+  }catch(e){
+    toast('Failed to update quantity', 'err');
+    await loadCart();
+    paintCartItems();
+  }
 }
 
 async function deleteCartItem(i){
@@ -932,25 +992,41 @@ async function deleteCartItem(i){
   if(!item) return;
   if(!confirm(`Remove "${item.name}" from cart?`)) return;
 
+  // Optimistic UI update
+  S.cart.splice(i, 1);
+  updateCartBadges();
+  paintCartItems();
+  toast('Item removed', 'ok');
+
   try{
     const d = await api('/api/cart/update', {
       method: 'POST',
       body: {cart_id: item.id, product_id: item.product_id, qty: 0}
     });
     if(d && d.ok){
-      toast('Item removed', 'ok');
-      await renderCart();
-      // Schedule background pull after 4 seconds to prevent lag resurrection
-      schedulePull(4000);
+      if(d.cart) S.cart = d.cart;
+      schedulePull(500);
+      refreshCartSummary();
     }
-  }catch(e){ toast('Failed to remove item', 'err'); }
+  }catch(e){
+    toast('Failed to remove item', 'err');
+    await loadCart();
+    paintCartItems();
+  }
 }
 
-function schedulePull(ms){
-  setTimeout(async () => {
+let _pullTimer = null;
+function schedulePull(ms = 500){
+  if(_pullTimer) clearTimeout(_pullTimer);
+  _pullTimer = setTimeout(async () => {
     try{
       await api('/api/cart/sync/pull', {method: 'POST'});
       await loadCart();
+      const activeView = document.querySelector('.view.active');
+      if(activeView && activeView.id === 'view-cart'){
+        paintCartItems();
+        refreshCartSummary();
+      }
     }catch(e){}
   }, ms);
 }
@@ -1549,13 +1625,46 @@ async function loginJSON(){
 function normalizeOrder(o, isMeesho){
   const orderNum = o.order_num || o.meesho_order_num || o.sub_order_id || o.order_id || o.id || 'ORDER';
 
-  let itemsText = o.items_text || o.items || o.product_title || o.product_name || o.item_title || '';
-  if(Array.isArray(itemsText)){
-    itemsText = itemsText.map(it => (typeof it === 'object' ? (it.name || it.title || it.product_name || 'Item') : String(it))).join(', ');
-  } else if(!itemsText && o.sub_orders && o.sub_orders.length){
-    itemsText = o.sub_orders.map(so => so.product_title || so.product_name || 'Item').join(', ');
+  let itemsText = o.items_text || '';
+  let imageUrl = o.image || '';
+
+  // Parse items if it is a JSON snapshot string
+  const rawItems = o.items;
+  if(rawItems && typeof rawItems === 'string' && (rawItems.startsWith('[') || rawItems.startsWith('{'))){
+    try{
+      const parsed = JSON.parse(rawItems);
+      if(Array.isArray(parsed) && parsed.length){
+        if(!imageUrl && parsed[0].image) imageUrl = parsed[0].image;
+        if(!itemsText){
+          itemsText = parsed.map(it => `${it.name || 'Item'} ×${it.qty || 1}`).join(', ');
+        }
+      } else if(parsed && typeof parsed === 'object'){
+        if(!imageUrl && parsed.image) imageUrl = parsed.image;
+        if(!itemsText && parsed.name) itemsText = parsed.name;
+      }
+    }catch(e){}
   }
-  if(!itemsText) itemsText = isMeesho ? 'Meesho Live Order' : 'Shopping Order';
+
+  // Fallback check for sub_orders or product_image in remote Meesho format
+  if(!imageUrl && o.sub_orders && Array.isArray(o.sub_orders) && o.sub_orders.length){
+    const so = o.sub_orders[0];
+    imageUrl = so.product_image || so.image || so.image_url || '';
+  }
+  if(!imageUrl && o.product_image) imageUrl = o.product_image;
+  if(!imageUrl && o.product_images && Array.isArray(o.product_images) && o.product_images.length){
+    const pi = o.product_images[0];
+    imageUrl = typeof pi === 'object' ? (pi.url || pi.image) : pi;
+  }
+
+  if(!itemsText){
+    if(Array.isArray(o.items)){
+      itemsText = o.items.map(it => (typeof it === 'object' ? (it.name || it.title || it.product_name || 'Item') : String(it))).join(', ');
+    } else if(o.sub_orders && o.sub_orders.length){
+      itemsText = o.sub_orders.map(so => so.product_title || so.product_name || 'Item').join(', ');
+    } else {
+      itemsText = o.product_title || o.product_name || o.item_title || (isMeesho ? 'Meesho Live Order' : 'Shopping Order');
+    }
+  }
 
   const total = Number(o.total || o.amount || o.total_price || o.price || o.product_price || 0);
   const status = (o.status_text || o.status || o.sub_order_status || o.order_status || 'placed').toLowerCase();
@@ -1575,6 +1684,7 @@ function normalizeOrder(o, isMeesho){
     order_num: String(orderNum),
     meesho_order_num: o.meesho_order_num || (isMeesho ? String(orderNum) : null),
     items_text: itemsText,
+    image: imageUrl,
     total: total,
     status: status,
     payment_method: payMethod,
@@ -1602,21 +1712,30 @@ function renderOrders(orders){
       : 'background:rgba(61,220,151,0.15);color:var(--green);border:1px solid rgba(61,220,151,0.3)';
     const dateText = o.created_at ? `<div class="muted" style="font-size:11px;margin-top:4px">${esc(String(o.created_at).slice(0, 19))}</div>` : '';
 
+    const imgTag = o.image ? `
+      <img src="${esc(o.image)}" alt="Product" style="width:50px;height:50px;border-radius:8px;object-fit:cover;flex-shrink:0;border:1px solid var(--line);background:rgba(255,255,255,0.05)" onerror="this.src='https://via.placeholder.com/100?text=Order'">
+    ` : `
+      <div style="width:50px;height:50px;border-radius:8px;display:grid;place-items:center;background:rgba(255,255,255,0.05);border:1px solid var(--line);flex-shrink:0;font-size:20px">📦</div>
+    `;
+
     return `
-      <div class="glass fcard" style="margin-top:8px">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div style="display:flex;align-items:center;gap:6px">
-            <b class="mono">#${esc(o.order_num)}</b>
-            ${isM ? '<span style="font-size:9.5px;padding:2px 6px;border-radius:4px;background:rgba(255,0,127,0.2);color:#FF69B4;font-weight:800">MEESHO</span>' : ''}
+      <div class="glass fcard" style="margin-top:8px;display:flex;gap:12px;align-items:flex-start">
+        ${imgTag}
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="display:flex;align-items:center;gap:6px">
+              <b class="mono">#${esc(o.order_num)}</b>
+              ${isM ? '<span style="font-size:9.5px;padding:2px 6px;border-radius:4px;background:rgba(255,0,127,0.2);color:#FF69B4;font-weight:800">MEESHO</span>' : ''}
+            </div>
+            <span class="pillok" style="${badgeStyle}">${esc((o.status || 'placed').toUpperCase())}</span>
           </div>
-          <span class="pillok" style="${badgeStyle}">${esc((o.status || 'placed').toUpperCase())}</span>
+          <div style="margin-top:5px;font-size:12.5px;line-height:1.35;word-break:break-word">${esc(o.items_text || 'Shopping Order')}</div>
+          <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center">
+            <span class="muted" style="font-size:12px">${esc(o.payment_method || 'COD')}</span>
+            <b class="num" style="font-size:15px">${inr(o.total)}</b>
+          </div>
+          ${dateText}
         </div>
-        <div style="margin-top:6px;font-size:12.5px">${esc(o.items_text || 'Shopping Order')}</div>
-        <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center">
-          <span class="muted">${esc(o.payment_method || 'COD')}</span>
-          <b class="num" style="font-size:16px">${inr(o.total)}</b>
-        </div>
-        ${dateText}
       </div>
     `;
   }).join('');

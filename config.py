@@ -11,8 +11,8 @@ DATA_DIR.mkdir(exist_ok=True)
 DB_PATH = DATA_DIR / "bot.db"
 
 # Brand and project
-PROJECT_NAME = "FOD Pilot – Meesho First-Order Engine"
-BRAND_NAME = "MEESHO ORDER BOT"
+PROJECT_NAME = "VIEDDET ORDER BOT"
+BRAND_NAME = "VIEDDET ORDER BOT"
 
 # Telegram Bot configuration
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8812724251:AAFPMF3BcrF1drjCrzOL0OshDRfVWG1akU0")
