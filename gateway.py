@@ -1,89 +1,106 @@
-import hashlib
-import json
+"""
+gateway.py - Payment & UPI Helpers
+Handles wallet recharge verification via VC Gateway and dynamic UPI generation.
+
+CRITICAL SEPARATION OF CONCERNS:
+1. Wallet Recharge: User deposits funds to your personal UPI (GW_UPI_ID).
+   Verified using the VC Gateway API.
+2. Wallet Service Fee: Commission (ORDER_FEE = ₹5) deducted from internal wallet balance per order.
+3. Meesho Order Payment: The customer pays Meesho directly (COD or Juspay UPI).
+   User wallet balance is NEVER used to pay the Meesho order amount.
+"""
 import time
 import urllib.parse
-import requests
+import json
+
+try:
+    import requests
+except ImportError:
+    requests = None
+
 from config import GW_API_KEY, GW_UPI_ID, GW_UPI_NAME, GW_VERIFY_URL
 
 
 def generate_txn_id(user_id):
-    return f"ORD{user_id}{int(time.time())}"
+    """Generates unique transaction ID for wallet recharge."""
+    return f"FOD{user_id}{int(time.time())}"
 
 
-def create_upi_link(txn_id, amount):
+def create_upi_link(txn_id, amount, vpa=None, name=None, note="Wallet Recharge"):
+    """
+    Creates dynamic UPI payment intent link.
+    Defaults to your personal UPI ID (GW_UPI_ID) for wallet recharges.
+    """
+    pa = vpa or GW_UPI_ID
+    pn = name or GW_UPI_NAME
     params = {
-        "pa": GW_UPI_ID,
-        "pn": GW_UPI_NAME,
+        "pa": pa,
+        "pn": pn,
         "tid": txn_id,
         "tr": txn_id,
-        "tn": "Payment",
-        "am": str(amount),
+        "tn": note,
+        "am": f"{float(amount):.2f}",
         "cu": "INR",
     }
     return "upi://pay?" + urllib.parse.urlencode(params)
 
 
 def get_qr_url(upi_link, size=400):
+    """Generates QR code image URL for a given UPI link."""
+    if not upi_link:
+        return ""
     encoded = urllib.parse.quote(upi_link, safe="")
     return (
-        f"https://quickchart.io/qr"
-        f"?text={encoded}"
-        f"&size={size}"
-        f"&margin=2"
-        f"&ecLevel=H"
-        f"&format=png"
+        f"https://api.qrserver.com/v1/create-qr-code/"
+        f"?size={size}x{size}"
+        f"&margin=8"
+        f"&data={encoded}"
     )
 
 
-def verify_payment(txn_id):
-    """Verify payment via VC Gateway API. Returns dict with status."""
+def verify_payment(txn_id, amount=1):
+    """
+    Verifies wallet recharge payment via VC Gateway API.
+    Endpoint: https://vcgatewaypro.com/payment_api.php?api_key={API_KEY}&order_id={ORDER_ID}&amount={AMOUNT}
+
+    Returns:
+        dict: {"success": bool, "status": str, "amount": float, "txn_id": str}
+    """
     try:
-        # Try standard verify endpoint
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {GW_API_KEY}",
-        }
-        payload = {"txn_id": txn_id, "api_key": GW_API_KEY}
-        resp = requests.post(GW_VERIFY_URL, json=payload, headers=headers, timeout=10)
-        data = resp.json()
-        return {
-            "success": True,
-            "status": data.get("status", ""),
-            "amount": data.get("amount", 0),
-            "txn_id": txn_id,
-            "raw": data,
-        }
-    except Exception as e1:
-        try:
-            # Fallback: try query param style
-            url = f"{GW_VERIFY_URL}?api_key={GW_API_KEY}&txn_id={txn_id}"
+        amt = int(float(amount)) if amount else 1
+        url = f"{GW_VERIFY_URL}?api_key={GW_API_KEY}&order_id={txn_id}&amount={amt}"
+        if requests is not None:
             resp = requests.get(url, timeout=10)
             data = resp.json()
+        else:
+            import urllib.request
+            req = urllib.request.Request(url, headers={"User-Agent": "FOD-Pilot/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                data = json.loads(response.read().decode("utf-8"))
+
+        status_str = str(data.get("status", "")).lower()
+        if status_str in ("success", "completed", "paid", "true"):
+            verified_amount = float(data.get("amount") or amt)
             return {
                 "success": True,
-                "status": data.get("status", ""),
-                "amount": data.get("amount", 0),
+                "status": "completed",
+                "amount": verified_amount,
                 "txn_id": txn_id,
                 "raw": data,
             }
-        except Exception as e2:
-            return {
-                "success": False,
-                "status": "error",
-                "error": str(e2),
-                "txn_id": txn_id,
-            }
+        return {
+            "success": False,
+            "status": data.get("status", "pending"),
+            "error": data.get("message") or data.get("msg") or data.get("error") or "Payment pending or not confirmed",
+            "amount": float(data.get("amount") or amt),
+            "txn_id": txn_id,
+            "raw": data,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "status": "pending",
+            "error": str(e),
+            "txn_id": txn_id,
+        }
 
-
-def auto_verify_loop(txn_id, callback, max_wait=120, interval=5):
-    """Poll for payment confirmation. Calls callback(success, amount) when done."""
-    start = time.time()
-    while time.time() - start < max_wait:
-        result = verify_payment(txn_id)
-        status = str(result.get("status", "")).lower()
-        if result["success"] and status in ("success", "completed", "captured", "paid", "1"):
-            callback(True, result.get("amount", 0))
-            return result
-        time.sleep(interval)
-    callback(False, 0)
-    return {"success": False, "status": "timeout"}

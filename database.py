@@ -1,13 +1,21 @@
+"""
+database.py - SQLite Database with TTL Tombstone Support
+Brand: VIEDDETX SINGH
+Project: FOD Pilot – Meesho First-Order Engine
+"""
 import sqlite3
 import time
 from pathlib import Path
 from config import DB_PATH
 
+TOMBSTONE_TTL = 300  # 5 minutes TTL for deletion tombstone
+
 
 def get_db():
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 
@@ -29,53 +37,106 @@ def init_db():
 
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER DEFAULT 0,
+            supplier_id INTEGER DEFAULT 0,
             name TEXT NOT NULL,
             description TEXT DEFAULT '',
             price INTEGER DEFAULT 0,
-            stock INTEGER DEFAULT 0,
+            mrp INTEGER DEFAULT 0,
+            rating REAL DEFAULT 4.2,
+            stock INTEGER DEFAULT 100,
             image_url TEXT DEFAULT '',
+            images TEXT DEFAULT '',
+            sizes TEXT DEFAULT '',
             category TEXT DEFAULT '',
             active INTEGER DEFAULT 1
         );
 
         CREATE TABLE IF NOT EXISTS cart (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cart_id INTEGER DEFAULT 0,
             user_id INTEGER,
             product_id INTEGER,
-            name TEXT DEFAULT '',
-            price INTEGER DEFAULT 0,
-            image TEXT DEFAULT '',
-            source TEXT DEFAULT 'local',
-            qty INTEGER DEFAULT 1,
             supplier_id INTEGER DEFAULT 0,
             variation_id INTEGER DEFAULT 0,
             variation_name TEXT DEFAULT '',
+            name TEXT DEFAULT '',
+            price INTEGER DEFAULT 0,
             mrp INTEGER DEFAULT 0,
+            image TEXT DEFAULT '',
+            source TEXT DEFAULT 'meesho',
+            qty INTEGER DEFAULT 1,
+            identifier TEXT DEFAULT '',
             sellerUPI TEXT DEFAULT '',
+            created_at REAL DEFAULT 0,
+            updated_at REAL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS cart_tombstones (
+            user_id INTEGER,
+            product_id INTEGER,
+            variation_id INTEGER DEFAULT 0,
+            deleted_at REAL DEFAULT 0,
+            PRIMARY KEY (user_id, product_id, variation_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS recently_removed (
+            user_id INTEGER,
+            product_id INTEGER,
+            created_at REAL DEFAULT 0,
+            PRIMARY KEY (user_id, product_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS addresses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            meesho_account_id INTEGER DEFAULT 0,
+            meesho_address_id INTEGER DEFAULT 0,
+            name TEXT DEFAULT '',
+            mobile TEXT DEFAULT '',
+            phone TEXT DEFAULT '',
+            pin TEXT DEFAULT '',
+            city TEXT DEFAULT '',
+            state TEXT DEFAULT '',
+            line1 TEXT DEFAULT '',
+            line2 TEXT DEFAULT '',
+            address_line_1 TEXT DEFAULT '',
+            address_line_2 TEXT DEFAULT '',
+            landmark TEXT DEFAULT '',
+            address_type TEXT DEFAULT 'Home',
+            latitude TEXT DEFAULT '',
+            longitude TEXT DEFAULT '',
+            is_default INTEGER DEFAULT 0,
             created_at REAL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_num TEXT DEFAULT '',
             user_id INTEGER,
+            address_id INTEGER DEFAULT 0,
+            payment_mode TEXT DEFAULT 'COD',
+            payment_method TEXT DEFAULT 'COD',
+            status TEXT DEFAULT 'pending',
             items TEXT DEFAULT '',
+            breakdown TEXT DEFAULT '',
             total INTEGER DEFAULT 0,
             fee INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'pending',
             address TEXT DEFAULT '',
             meesho_order_num TEXT DEFAULT '',
-            payment_method TEXT DEFAULT 'COD',
             meesho_amount INTEGER DEFAULT 0,
-            created_at REAL DEFAULT 0
+            created_at REAL DEFAULT 0,
+            paid_at REAL DEFAULT 0
         );
 
-        CREATE TABLE IF NOT EXISTS wallet_tx (
+        CREATE TABLE IF NOT EXISTS otps (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
-            amount INTEGER DEFAULT 0,
-            type TEXT DEFAULT 'credit',
-            status TEXT DEFAULT 'pending',
-            txn_id TEXT DEFAULT '',
+            phone TEXT DEFAULT '',
+            code TEXT DEFAULT '',
+            session_json TEXT DEFAULT '',
+            expires_at REAL DEFAULT 0,
+            attempts INTEGER DEFAULT 0,
             created_at REAL DEFAULT 0
         );
 
@@ -91,6 +152,9 @@ def init_db():
             app_session_id TEXT DEFAULT '',
             shield_session_id TEXT DEFAULT '',
             gaid TEXT DEFAULT '',
+            anon_xo TEXT DEFAULT '',
+            identity_json TEXT DEFAULT '',
+            is_active INTEGER DEFAULT 1,
             created_at REAL DEFAULT 0
         );
 
@@ -101,22 +165,13 @@ def init_db():
             created_at REAL DEFAULT 0
         );
 
-        CREATE TABLE IF NOT EXISTS addresses (
+        CREATE TABLE IF NOT EXISTS wallet_tx (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
-            meesho_account_id INTEGER DEFAULT 0,
-            name TEXT DEFAULT '',
-            mobile TEXT DEFAULT '',
-            pin TEXT DEFAULT '',
-            city TEXT DEFAULT '',
-            state TEXT DEFAULT '',
-            address_line_1 TEXT DEFAULT '',
-            address_line_2 TEXT DEFAULT '',
-            landmark TEXT DEFAULT '',
-            address_type TEXT DEFAULT 'Home',
-            latitude TEXT DEFAULT '',
-            longitude TEXT DEFAULT '',
-            is_default INTEGER DEFAULT 0,
+            amount INTEGER DEFAULT 0,
+            type TEXT DEFAULT 'credit',
+            status TEXT DEFAULT 'pending',
+            txn_id TEXT DEFAULT '',
             created_at REAL DEFAULT 0
         );
 
@@ -126,47 +181,103 @@ def init_db():
         );
     """)
     conn.commit()
-    # Migrations for existing databases
-    try:
-        conn.execute("ALTER TABLE users ADD COLUMN mode TEXT DEFAULT 'paid'")
-    except Exception:
-        pass
-    try:
-        conn.execute("ALTER TABLE meesho_accounts ADD COLUMN instance_id TEXT DEFAULT ''")
-    except Exception:
-        pass
-    # (col, table, "<TYPE> DEFAULT <value>") -- the type is REQUIRED. It used to be
-    # missing, which made every one of these ALTERs a syntax error that the bare
-    # except silently ate, so pre-existing DBs never got the columns at all
-    # (cart adds then died with "table cart has no column named supplier_id").
-    for col, tbl, decl in [
-        ("sellerUPI", "cart", "TEXT DEFAULT ''"),
-        ("supplier_id", "cart", "INTEGER DEFAULT 0"),
-        ("variation_id", "cart", "INTEGER DEFAULT 0"),
-        ("variation_name", "cart", "TEXT DEFAULT ''"),
-        ("mrp", "cart", "INTEGER DEFAULT 0"),
-        ("meesho_order_num", "orders", "TEXT DEFAULT ''"),
-        ("payment_method", "orders", "TEXT DEFAULT 'COD'"),
-        ("meesho_amount", "orders", "INTEGER DEFAULT 0"),
-        ("cart_session", "users", "TEXT DEFAULT ''"),
-        ("meesho_address_id", "addresses", "INTEGER DEFAULT 0"),
-        ("app_session_id", "meesho_accounts", "TEXT DEFAULT ''"),
-        ("shield_session_id", "meesho_accounts", "TEXT DEFAULT ''"),
-        ("gaid", "meesho_accounts", "TEXT DEFAULT ''"),
-        ("anon_xo", "meesho_accounts", "TEXT DEFAULT ''"),
-        ("identity_json", "meesho_accounts", "TEXT DEFAULT ''"),
-    ]:
+
+    # Apply idempotent column additions for migrations
+    migration_columns = [
+        ("cart", "sellerUPI", "TEXT DEFAULT ''"),
+        ("cart", "supplier_id", "INTEGER DEFAULT 0"),
+        ("cart", "variation_id", "INTEGER DEFAULT 0"),
+        ("cart", "variation_name", "TEXT DEFAULT ''"),
+        ("cart", "mrp", "INTEGER DEFAULT 0"),
+        ("cart", "identifier", "TEXT DEFAULT ''"),
+        ("cart", "updated_at", "REAL DEFAULT 0"),
+        ("orders", "meesho_order_num", "TEXT DEFAULT ''"),
+        ("orders", "payment_method", "TEXT DEFAULT 'COD'"),
+        ("orders", "payment_mode", "TEXT DEFAULT 'COD'"),
+        ("orders", "meesho_amount", "INTEGER DEFAULT 0"),
+        ("orders", "paid_at", "REAL DEFAULT 0"),
+        ("orders", "breakdown", "TEXT DEFAULT ''"),
+        ("orders", "order_num", "TEXT DEFAULT ''"),
+        ("users", "cart_session", "TEXT DEFAULT ''"),
+        ("addresses", "meesho_address_id", "INTEGER DEFAULT 0"),
+        ("addresses", "phone", "TEXT DEFAULT ''"),
+        ("addresses", "line1", "TEXT DEFAULT ''"),
+        ("addresses", "line2", "TEXT DEFAULT ''"),
+        ("meesho_accounts", "instance_id", "TEXT DEFAULT ''"),
+        ("meesho_accounts", "app_session_id", "TEXT DEFAULT ''"),
+        ("meesho_accounts", "shield_session_id", "TEXT DEFAULT ''"),
+        ("meesho_accounts", "gaid", "TEXT DEFAULT ''"),
+        ("meesho_accounts", "anon_xo", "TEXT DEFAULT ''"),
+        ("meesho_accounts", "identity_json", "TEXT DEFAULT ''"),
+        ("meesho_accounts", "is_active", "INTEGER DEFAULT 1"),
+        ("wallet_tx", "note", "TEXT DEFAULT ''"),
+    ]
+    for tbl, col, decl in migration_columns:
         try:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {decl}")
-        except sqlite3.OperationalError as e:
-            # Already there is the normal case; anything else is a real problem.
-            if "duplicate column" not in str(e).lower():
-                print(f"[DB] migration failed: {tbl}.{col}: {e}", flush=True)
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
     conn.close()
 
 
-# ─── USER ───
+# ─── TOMBSTONE MECHANISM (Fix 1: Prevents Re-import After Removal) ───
+
+def tombstone_add(user_id, product_id, variation_id=0):
+    """
+    Adds item to tombstone table when removed (qty=0).
+    TTL: 300 seconds prevents sync/pull from re-importing stale remote cart items.
+    """
+    try:
+        conn = get_db()
+        now = time.time()
+        pid = int(product_id)
+        vid = int(variation_id or 0)
+        conn.execute(
+            """INSERT OR REPLACE INTO cart_tombstones (user_id, product_id, variation_id, deleted_at)
+               VALUES (?, ?, ?, ?)""",
+            (user_id, pid, vid, now),
+        )
+        conn.execute(
+            """INSERT OR REPLACE INTO recently_removed (user_id, product_id, created_at)
+               VALUES (?, ?, ?)""",
+            (user_id, pid, now),
+        )
+        # Purge expired entries older than 300 seconds
+        cutoff = now - TOMBSTONE_TTL
+        conn.execute("DELETE FROM cart_tombstones WHERE deleted_at < ?", (cutoff,))
+        conn.execute("DELETE FROM recently_removed WHERE created_at < ?", (cutoff,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[TOMBSTONE] add error: {e}", flush=True)
+
+
+def tombstone_recent(user_id):
+    """
+    Returns set of recently removed product_ids within 300s TTL.
+    """
+    try:
+        conn = get_db()
+        cutoff = time.time() - TOMBSTONE_TTL
+        rows = conn.execute(
+            "SELECT product_id FROM cart_tombstones WHERE user_id=? AND deleted_at > ?",
+            (user_id, cutoff),
+        ).fetchall()
+        rows2 = conn.execute(
+            "SELECT product_id FROM recently_removed WHERE user_id=? AND created_at > ?",
+            (user_id, cutoff),
+        ).fetchall()
+        conn.close()
+        t_set = {int(r["product_id"]) for r in rows}
+        t_set.update(int(r["product_id"]) for r in rows2)
+        return t_set
+    except Exception as e:
+        print(f"[TOMBSTONE] query error: {e}", flush=True)
+        return set()
+
+
+# ─── USER OPERATIONS ───
 
 def get_user(user_id):
     conn = get_db()
@@ -177,8 +288,10 @@ def get_user(user_id):
 
 def create_user(user_id, name=""):
     conn = get_db()
-    conn.execute("INSERT OR IGNORE INTO users (user_id, name, created_at) VALUES (?, ?, ?)",
-                 (user_id, name, time.time()))
+    conn.execute(
+        "INSERT OR IGNORE INTO users (user_id, name, created_at) VALUES (?, ?, ?)",
+        (user_id, name, time.time()),
+    )
     conn.commit()
     row = conn.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
     conn.close()
@@ -205,9 +318,87 @@ def delete_user(user_id):
 
 def get_all_users():
     conn = get_db()
-    rows = conn.execute("SELECT user_id, name, phone, wallet, mode, created_at FROM users ORDER BY created_at DESC").fetchall()
+    rows = conn.execute(
+        "SELECT user_id, name, phone, wallet, mode, created_at FROM users ORDER BY created_at DESC"
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_order_count(user_id):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT COUNT(*) as cnt FROM orders WHERE user_id=?", (user_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row)["cnt"] if row else 0
+
+
+def add_wallet(user_id, amount, note="", ref_id=""):
+    """
+    Credits user wallet balance and logs a completed credit transaction.
+    """
+    conn = get_db()
+    amt = int(amount)
+    conn.execute("UPDATE users SET wallet=wallet+? WHERE user_id=?", (amt, user_id))
+    conn.execute(
+        "INSERT INTO wallet_tx (user_id, amount, type, status, txn_id, note, created_at) VALUES (?,?,?,?,?,?,?)",
+        (user_id, amt, "credit", "completed", str(ref_id or ""), str(note or "Wallet recharge"), time.time()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def deduct_wallet(user_id, amount, note="", ref_id=""):
+    """
+    Atomically deducts wallet balance if sufficient funds exist.
+    Records debit transaction in wallet_tx.
+    Returns:
+        bool: True on successful deduction, False if insufficient balance.
+    """
+    conn = get_db()
+    amt = int(amount)
+    cur = conn.execute(
+        "UPDATE users SET wallet=wallet-? WHERE user_id=? AND wallet>=?",
+        (amt, user_id, amt),
+    )
+    success = cur.rowcount > 0
+    if success:
+        conn.execute(
+            "INSERT INTO wallet_tx (user_id, amount, type, status, txn_id, note, created_at) VALUES (?,?,?,?,?,?,?)",
+            (user_id, -amt, "debit", "completed", str(ref_id or ""), str(note or "Order service fee"), time.time()),
+        )
+        conn.commit()
+    conn.close()
+    return success
+
+
+def get_wallet_balance(user_id):
+    """Returns current wallet balance for user."""
+    conn = get_db()
+    row = conn.execute("SELECT wallet FROM users WHERE user_id=?", (user_id,)).fetchone()
+    conn.close()
+    if row and row["wallet"] is not None:
+        return int(row["wallet"])
+    return 0
+
+
+
+def get_global_mode():
+    conn = get_db()
+    row = conn.execute("SELECT value FROM settings WHERE key='global_mode'").fetchone()
+    conn.close()
+    return dict(row)["value"] if row else "free"
+
+
+def set_global_mode(mode):
+    conn = get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('global_mode', ?)",
+        (mode,),
+    )
+    conn.commit()
+    conn.close()
 
 
 def toggle_user_mode(user_id):
@@ -221,90 +412,13 @@ def get_user_mode(user_id):
     return get_global_mode()
 
 
-def get_global_mode():
-    conn = get_db()
-    row = conn.execute("SELECT value FROM settings WHERE key='global_mode'").fetchone()
-    conn.close()
-    return dict(row)["value"] if row else "paid"
-
-
-def set_global_mode(mode):
-    conn = get_db()
-    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('global_mode', ?)", (mode,))
-    conn.commit()
-    conn.close()
-
-
-def get_order_count(user_id):
-    conn = get_db()
-    row = conn.execute("SELECT COUNT(*) as cnt FROM orders WHERE user_id=?", (user_id,)).fetchone()
-    conn.close()
-    return dict(row)["cnt"] if row else 0
-
-
-def add_wallet(user_id, amount):
-    conn = get_db()
-    conn.execute("UPDATE users SET wallet=wallet+? WHERE user_id=?", (amount, user_id))
-    conn.commit()
-    conn.close()
-
-
-def deduct_wallet(user_id, amount):
-    conn = get_db()
-    conn.execute("UPDATE users SET wallet=wallet-? WHERE user_id=? AND wallet>=?",
-                 (amount, user_id, amount))
-    conn.commit()
-    conn.close()
-
-
-# ─── PRODUCTS ───
-
-def get_products(category=None, search=None):
-    conn = get_db()
-    q = "SELECT * FROM products WHERE active=1"
-    params = []
-    if category:
-        q += " AND category=?"
-        params.append(category)
-    if search:
-        q += " AND (name LIKE ? OR description LIKE ?)"
-        params.extend([f"%{search}%", f"%{search}%"])
-    rows = conn.execute(q, params).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-def get_product(pid):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
-def add_product(name, price, stock, desc="", category="", image=""):
-    conn = get_db()
-    conn.execute(
-        "INSERT INTO products (name, price, stock, description, category, image_url) VALUES (?,?,?,?,?,?)",
-        (name, price, stock, desc, category, image))
-    conn.commit()
-    pid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    conn.close()
-    return pid
-
-
-def update_stock(pid, qty):
-    conn = get_db()
-    conn.execute("UPDATE products SET stock=stock-? WHERE id=? AND stock>=?", (qty, pid, qty))
-    conn.commit()
-    conn.close()
-
-
-# ─── CART ───
+# ─── CART OPERATIONS ───
 
 def get_cart(user_id):
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM cart WHERE user_id=?", (user_id,)).fetchall()
+        "SELECT * FROM cart WHERE user_id=? ORDER BY created_at ASC", (user_id,)
+    ).fetchall()
     result = []
     for r in rows:
         d = dict(r)
@@ -314,30 +428,63 @@ def get_cart(user_id):
                 d["name"] = p.get("name", "")
                 d["price"] = p.get("price", 0)
                 d["image"] = p.get("image_url", "")
+        # Populate line item aliases
+        d["line1"] = d.get("variation_name") or ""
         result.append(d)
     conn.close()
     return result
 
 
-def add_to_cart(user_id, product_id, qty=1, name="", price=0, image="",
-                source="local", supplier_id=0, variation_id=0, variation_name="", mrp=0, sellerUPI=""):
+def add_to_cart(
+    user_id,
+    product_id,
+    qty=1,
+    name="",
+    price=0,
+    image="",
+    source="meesho",
+    supplier_id=0,
+    variation_id=0,
+    variation_name="",
+    mrp=0,
+    sellerUPI="",
+    identifier="",
+):
     conn = get_db()
+    now = time.time()
     existing = conn.execute(
         "SELECT id, qty FROM cart WHERE user_id=? AND product_id=?",
-        (user_id, product_id)).fetchone()
+        (user_id, product_id),
+    ).fetchone()
     if existing:
-        conn.execute("UPDATE cart SET qty=qty+? WHERE id=?", (qty, existing["id"]))
-        # keep sellerUPI if provided
-        if sellerUPI:
-            try: conn.execute("UPDATE cart SET sellerUPI=? WHERE id=?", (sellerUPI, existing["id"]))
-            except: pass
+        conn.execute(
+            """UPDATE cart SET qty=qty+?, price=?, mrp=?, variation_id=?, variation_name=?, updated_at=?
+               WHERE id=?""",
+            (qty, price, mrp or price, variation_id, variation_name, now, existing["id"]),
+        )
     else:
         conn.execute(
             """INSERT INTO cart (user_id, product_id, name, price, image, source, qty,
-               supplier_id, variation_id, variation_name, mrp, sellerUPI, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (user_id, product_id, name, price, image, source, qty,
-             supplier_id, variation_id, variation_name, mrp, sellerUPI, time.time()))
+               supplier_id, variation_id, variation_name, mrp, sellerUPI, identifier, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                user_id,
+                product_id,
+                name,
+                price,
+                image,
+                source,
+                qty,
+                supplier_id,
+                variation_id,
+                variation_name,
+                mrp or price,
+                sellerUPI,
+                identifier,
+                now,
+                now,
+            ),
+        )
     conn.commit()
     conn.close()
 
@@ -347,7 +494,7 @@ def update_cart_qty(cart_id, qty):
     if qty <= 0:
         conn.execute("DELETE FROM cart WHERE id=?", (cart_id,))
     else:
-        conn.execute("UPDATE cart SET qty=? WHERE id=?", (qty, cart_id))
+        conn.execute("UPDATE cart SET qty=?, updated_at=? WHERE id=?", (qty, time.time(), cart_id))
     conn.commit()
     conn.close()
 
@@ -359,17 +506,58 @@ def clear_cart(user_id):
     conn.close()
 
 
-# ─── ORDERS ───
-
-def create_order(user_id, items, total, fee, address="", meesho_order_num="",
-                 payment_method="COD", meesho_amount=0):
+def get_cart_session(user_id):
     conn = get_db()
+    row = conn.execute("SELECT cart_session FROM users WHERE user_id=?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row)["cart_session"] if row and row["cart_session"] else None
+
+
+def set_cart_session(user_id, cart_session):
+    conn = get_db()
+    conn.execute("UPDATE users SET cart_session=? WHERE user_id=?", (cart_session or "", user_id))
+    conn.commit()
+    conn.close()
+
+
+# ─── ORDER OPERATIONS ───
+
+def create_order(
+    user_id,
+    items,
+    total,
+    fee=0,
+    address="",
+    meesho_order_num="",
+    payment_method="COD",
+    meesho_amount=0,
+    breakdown="",
+    address_id=0,
+):
+    conn = get_db()
+    now = time.time()
+    order_num = meesho_order_num or str(int(now * 1000))[-8:]
     conn.execute(
-        """INSERT INTO orders (user_id, items, total, fee, status, address,
-           meesho_order_num, payment_method, meesho_amount, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?)""",
-        (user_id, items, total, fee, "pending", address,
-         meesho_order_num, payment_method, meesho_amount, time.time()))
+        """INSERT INTO orders (order_num, user_id, address_id, payment_mode, payment_method,
+           status, items, breakdown, total, fee, address, meesho_order_num, meesho_amount, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            order_num,
+            user_id,
+            address_id,
+            payment_method,
+            payment_method,
+            "pending",
+            items,
+            breakdown,
+            total,
+            fee,
+            address,
+            meesho_order_num,
+            meesho_amount,
+            now,
+        ),
+    )
     conn.commit()
     oid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.close()
@@ -379,7 +567,8 @@ def create_order(user_id, items, total, fee, address="", meesho_order_num="",
 def get_orders(user_id):
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC", (user_id,)).fetchall()
+        "SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC", (user_id,)
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -391,9 +580,12 @@ def get_order(oid):
     return dict(row) if row else None
 
 
-def update_order_status(oid, status):
+def update_order_status(oid, status, paid_at=None):
     conn = get_db()
-    conn.execute("UPDATE orders SET status=? WHERE id=?", (status, oid))
+    if paid_at:
+        conn.execute("UPDATE orders SET status=?, paid_at=? WHERE id=?", (status, paid_at, oid))
+    else:
+        conn.execute("UPDATE orders SET status=? WHERE id=?", (status, oid))
     conn.commit()
     conn.close()
 
@@ -405,160 +597,22 @@ def get_all_orders():
     return [dict(r) for r in rows]
 
 
-# ─── WALLET TX ───
-
-def create_wallet_tx(user_id, amount, txn_id=""):
-    conn = get_db()
-    conn.execute(
-        "INSERT INTO wallet_tx (user_id, amount, type, status, txn_id, created_at) VALUES (?,?,?,?,?,?)",
-        (user_id, amount, "credit", "pending", txn_id, time.time()))
-    conn.commit()
-    txid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    conn.close()
-    return txid
-
-
-def verify_wallet_tx(txid):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM wallet_tx WHERE id=?", (txid,)).fetchone()
-    if row:
-        conn.execute("UPDATE wallet_tx SET status='completed' WHERE id=?", (txid,))
-        conn.execute("UPDATE users SET wallet=wallet+? WHERE user_id=?", (row["amount"], row["user_id"]))
-        conn.commit()
-        conn.close()
-        return dict(row)
-    conn.close()
-    return None
-
-
-def get_pending_tx():
-    conn = get_db()
-    rows = conn.execute("SELECT * FROM wallet_tx WHERE status='pending'").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-def get_wallet_tx(user_id):
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM wallet_tx WHERE user_id=? ORDER BY created_at DESC LIMIT 20",
-        (user_id,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-# ─── MEESHO ACCOUNTS ───
-
-def save_meesho_account(user_id, phone, meesho_user_id, xo, xo_exp=0, instance_id="", is_first_order=1,
-                        app_session_id="", shield_session_id="", gaid="", anon_xo="", identity_json=""):
-    """Upsert a Meesho account. Re-logging in with the same meesho_user_id updates
-    the existing row instead of inserting a duplicate (duplicates made
-    get_active_meesho_account pick a half-populated row)."""
-    # anon_xo and identity_json may be large; ensure they are strings
-    anon_xo = anon_xo or ""
-    identity_json = identity_json or ""
-    conn = get_db()
-    meesho_user_id = str(meesho_user_id)
-    existing = None
-    if meesho_user_id:
-        existing = conn.execute(
-            "SELECT * FROM meesho_accounts WHERE user_id=? AND meesho_user_id=?",
-            (user_id, meesho_user_id)).fetchone()
-    if existing:
-        old = dict(existing)
-        # Blank incoming values must not wipe data an earlier (richer) save stored.
-        conn.execute(
-            """UPDATE meesho_accounts SET phone=?, xo=?, xo_exp=?, instance_id=?,
-               is_first_order=?, app_session_id=?, shield_session_id=?, gaid=?, anon_xo=?, identity_json=?, created_at=?
-               WHERE id=?""",
-            (phone or old.get("phone", ""),
-             xo or old.get("xo", ""),
-             xo_exp or old.get("xo_exp", 0),
-             instance_id or old.get("instance_id", ""),
-             int(is_first_order),
-             app_session_id or old.get("app_session_id", ""),
-             shield_session_id or old.get("shield_session_id", ""),
-             gaid or old.get("gaid", ""),
-             anon_xo or old.get("anon_xo", ""),
-             identity_json or old.get("identity_json", ""),
-             time.time(), old["id"]))
-    else:
-        conn.execute(
-            """INSERT INTO meesho_accounts (user_id, phone, meesho_user_id, xo, xo_exp, instance_id,
-               is_first_order, app_session_id, shield_session_id, gaid, anon_xo, identity_json, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (user_id, phone, meesho_user_id, xo, xo_exp, instance_id, int(is_first_order),
-             app_session_id, shield_session_id, gaid, anon_xo, identity_json, time.time()))
-    conn.commit()
-    conn.close()
-
-
-def get_meesho_accounts(user_id):
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM meesho_accounts WHERE user_id=? ORDER BY created_at DESC", (user_id,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-def get_active_meesho_account(user_id):
-    conn = get_db()
-    row = conn.execute(
-        "SELECT * FROM meesho_accounts WHERE user_id=? ORDER BY created_at DESC LIMIT 1",
-        (user_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
-def delete_meesho_account(user_id, acc_id):
-    conn = get_db()
-    conn.execute("DELETE FROM meesho_accounts WHERE user_id=? AND id=?", (user_id, acc_id))
-    conn.commit()
-    conn.close()
-
-
-def update_meesho_xo(acc_id, xo, xo_exp=0):
-    conn = get_db()
-    conn.execute("UPDATE meesho_accounts SET xo=?, xo_exp=? WHERE id=?", (xo, xo_exp, acc_id))
-    conn.commit()
-    conn.close()
-
-
-# ─── USER OFFERS ───
-
-def save_user_offer(user_id, offer_json):
-    conn = get_db()
-    conn.execute("INSERT OR REPLACE INTO user_offers (user_id, offer_json, created_at) VALUES (?,?,?)",
-                 (user_id, offer_json, time.time()))
-    conn.commit()
-    conn.close()
-
-
-def get_user_offer(user_id):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM user_offers WHERE user_id=?", (user_id,)).fetchone()
-    conn.close()
-    if row:
-        import json as _json
-        try:
-            return _json.loads(row["offer_json"])
-        except Exception:
-            return None
-    return None
-
-
-# ─── ADDRESSES ───
+# ─── ADDRESS OPERATIONS ───
 
 def get_addresses(user_id, meesho_account_id=None):
     conn = get_db()
     if meesho_account_id:
         rows = conn.execute(
-            "SELECT * FROM addresses WHERE user_id=? AND meesho_account_id=? ORDER BY is_default DESC, created_at DESC",
-            (user_id, meesho_account_id)).fetchall()
+            """SELECT * FROM addresses WHERE user_id=? AND meesho_account_id=?
+               ORDER BY is_default DESC, created_at DESC""",
+            (user_id, meesho_account_id),
+        ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM addresses WHERE user_id=? ORDER BY is_default DESC, created_at DESC",
-            (user_id,)).fetchall()
+            """SELECT * FROM addresses WHERE user_id=?
+               ORDER BY is_default DESC, created_at DESC""",
+            (user_id,),
+        ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -570,19 +624,53 @@ def get_address(addr_id):
     return dict(row) if row else None
 
 
-def create_address(user_id, meesho_account_id=0, name="", mobile="", pin="", city="",
-                   state="", address_line_1="", address_line_2="", landmark="",
-                   address_type="Home", latitude="", longitude="", is_default=0):
+def create_address(
+    user_id,
+    meesho_account_id=0,
+    name="",
+    mobile="",
+    pin="",
+    city="",
+    state="",
+    address_line_1="",
+    address_line_2="",
+    landmark="",
+    address_type="Home",
+    latitude="",
+    longitude="",
+    is_default=0,
+    meesho_address_id=0,
+):
     conn = get_db()
     if is_default:
         conn.execute("UPDATE addresses SET is_default=0 WHERE user_id=?", (user_id,))
     conn.execute(
-        """INSERT INTO addresses (user_id, meesho_account_id, name, mobile, pin, city, state,
-           address_line_1, address_line_2, landmark, address_type, latitude, longitude,
-           is_default, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (user_id, meesho_account_id, name, mobile, pin, city, state,
-         address_line_1, address_line_2, landmark, address_type, latitude, longitude,
-         is_default, time.time()))
+        """INSERT INTO addresses (user_id, meesho_account_id, meesho_address_id, name, mobile, phone,
+           pin, city, state, line1, line2, address_line_1, address_line_2, landmark, address_type,
+           latitude, longitude, is_default, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            user_id,
+            meesho_account_id,
+            meesho_address_id,
+            name,
+            mobile,
+            mobile,
+            pin,
+            city,
+            state,
+            address_line_1,
+            address_line_2,
+            address_line_1,
+            address_line_2,
+            landmark,
+            address_type,
+            latitude,
+            longitude,
+            is_default,
+            time.time(),
+        ),
+    )
     conn.commit()
     aid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.close()
@@ -615,62 +703,263 @@ def set_default_address(user_id, addr_id):
 def get_default_address(user_id):
     conn = get_db()
     row = conn.execute(
-        "SELECT * FROM addresses WHERE user_id=? AND is_default=1 LIMIT 1",
-        (user_id,)).fetchone()
+        "SELECT * FROM addresses WHERE user_id=? AND is_default=1 LIMIT 1", (user_id,)
+    ).fetchone()
     if not row:
         row = conn.execute(
             "SELECT * FROM addresses WHERE user_id=? ORDER BY created_at DESC LIMIT 1",
-            (user_id,)).fetchone()
+            (user_id,),
+        ).fetchone()
     conn.close()
     return dict(row) if row else None
 
 
-def get_cart_session(user_id):
-    conn = get_db()
-    row = conn.execute("SELECT cart_session FROM users WHERE user_id=?", (user_id,)).fetchone()
-    conn.close()
-    return dict(row)["cart_session"] if row and row["cart_session"] else None
+# ─── MEESHO ACCOUNTS ───
 
-
-def set_cart_session(user_id, cart_session):
+def save_meesho_account(
+    user_id,
+    phone,
+    meesho_user_id,
+    xo,
+    xo_exp=0,
+    instance_id="",
+    is_first_order=1,
+    app_session_id="",
+    shield_session_id="",
+    gaid="",
+    anon_xo="",
+    identity_json="",
+):
     conn = get_db()
-    conn.execute("UPDATE users SET cart_session=? WHERE user_id=?", (cart_session, user_id))
+    meesho_user_id = str(meesho_user_id)
+    existing = None
+    if meesho_user_id:
+        existing = conn.execute(
+            "SELECT * FROM meesho_accounts WHERE user_id=? AND meesho_user_id=?",
+            (user_id, meesho_user_id),
+        ).fetchone()
+    if existing:
+        old = dict(existing)
+        conn.execute(
+            """UPDATE meesho_accounts SET phone=?, xo=?, xo_exp=?, instance_id=?,
+               is_first_order=?, app_session_id=?, shield_session_id=?, gaid=?, anon_xo=?,
+               identity_json=?, is_active=1, created_at=?
+               WHERE id=?""",
+            (
+                phone or old.get("phone", ""),
+                xo or old.get("xo", ""),
+                xo_exp or old.get("xo_exp", 0),
+                instance_id or old.get("instance_id", ""),
+                int(is_first_order),
+                app_session_id or old.get("app_session_id", ""),
+                shield_session_id or old.get("shield_session_id", ""),
+                gaid or old.get("gaid", ""),
+                anon_xo or old.get("anon_xo", ""),
+                identity_json or old.get("identity_json", ""),
+                time.time(),
+                old["id"],
+            ),
+        )
+    else:
+        conn.execute(
+            """INSERT INTO meesho_accounts (user_id, phone, meesho_user_id, xo, xo_exp, instance_id,
+               is_first_order, app_session_id, shield_session_id, gaid, anon_xo, identity_json, is_active, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                user_id,
+                phone,
+                meesho_user_id,
+                xo,
+                xo_exp,
+                instance_id,
+                int(is_first_order),
+                app_session_id,
+                shield_session_id,
+                gaid,
+                anon_xo,
+                identity_json,
+                1,
+                time.time(),
+            ),
+        )
     conn.commit()
     conn.close()
 
 
-# ─── REMOVAL TOMBSTONES ───
-# product_ids the user explicitly removed. A later pull must not re-import
-# them while Meesho is still lagging (otherwise qty jumps back / doubles).
-# Entries expire after TTL — a genuinely-failed remove then resurfaces
-# truthfully instead of diverging forever.
+def get_meesho_accounts(user_id):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM meesho_accounts WHERE user_id=? ORDER BY created_at DESC", (user_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
-TOMBSTONE_TTL = 300
+
+def get_active_meesho_account(user_id):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM meesho_accounts WHERE user_id=? AND is_active=1 ORDER BY created_at DESC LIMIT 1",
+        (user_id,),
+    ).fetchone()
+    if not row:
+        row = conn.execute(
+            "SELECT * FROM meesho_accounts WHERE user_id=? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
-def tombstone_add(user_id, product_id):
-    try:
-        conn = get_db()
-        conn.execute("CREATE TABLE IF NOT EXISTS recently_removed (user_id INTEGER, product_id INTEGER, created_at REAL DEFAULT 0, PRIMARY KEY (user_id, product_id))")
-        conn.execute("INSERT OR REPLACE INTO recently_removed (user_id, product_id, created_at) VALUES (?,?,?)",
-                     (user_id, int(product_id), time.time()))
-        conn.execute("DELETE FROM recently_removed WHERE created_at < ?", (time.time() - TOMBSTONE_TTL,))
+def delete_meesho_account(user_id, acc_id):
+    conn = get_db()
+    conn.execute("DELETE FROM meesho_accounts WHERE user_id=? AND id=?", (user_id, acc_id))
+    conn.commit()
+    conn.close()
+
+
+def update_meesho_xo(acc_id, xo, xo_exp=0):
+    conn = get_db()
+    conn.execute("UPDATE meesho_accounts SET xo=?, xo_exp=? WHERE id=?", (xo, xo_exp, acc_id))
+    conn.commit()
+    conn.close()
+
+
+# ─── USER OFFERS ───
+
+def save_user_offer(user_id, offer_json):
+    conn = get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO user_offers (user_id, offer_json, created_at) VALUES (?,?,?)",
+        (user_id, offer_json, time.time()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_user_offer(user_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM user_offers WHERE user_id=?", (user_id,)).fetchone()
+    conn.close()
+    if row:
+        import json as _json
+        try:
+            return _json.loads(row["offer_json"])
+        except Exception:
+            return None
+    return None
+
+
+# ─── PRODUCTS ───
+
+def get_products(category=None, search=None):
+    conn = get_db()
+    q = "SELECT * FROM products WHERE active=1"
+    params = []
+    if category:
+        q += " AND category=?"
+        params.append(category)
+    if search:
+        q += " AND (name LIKE ? OR description LIKE ?)"
+        params.extend([f"%{search}%", f"%{search}%"])
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_product(pid):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM products WHERE id=? OR product_id=?", (pid, pid)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def add_product(name, price, stock=100, desc="", category="", image=""):
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO products (name, price, stock, description, category, image_url) VALUES (?,?,?,?,?,?)",
+        (name, price, stock, desc, category, image),
+    )
+    conn.commit()
+    pid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.close()
+    return pid
+
+
+def update_stock(pid, qty):
+    conn = get_db()
+    conn.execute("UPDATE products SET stock=stock-? WHERE id=? AND stock>=?", (qty, pid, qty))
+    conn.commit()
+    conn.close()
+
+
+# ─── WALLET TRANSACTIONS ───
+
+def create_wallet_tx(user_id, amount, txn_id="", note="Wallet recharge"):
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO wallet_tx (user_id, amount, type, status, txn_id, note, created_at) VALUES (?,?,?,?,?,?,?)",
+        (user_id, int(amount), "credit", "pending", txn_id, note, time.time()),
+    )
+    conn.commit()
+    txid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.close()
+    return txid
+
+
+def verify_wallet_tx(txid):
+    """
+    Marks a wallet transaction as completed by database ID and credits the user's wallet.
+    Idempotent: will not double-credit if already completed.
+    """
+    conn = get_db()
+    row = conn.execute("SELECT * FROM wallet_tx WHERE id=?", (txid,)).fetchone()
+    if row and row["status"] != "completed":
+        conn.execute("UPDATE wallet_tx SET status='completed' WHERE id=?", (txid,))
+        conn.execute(
+            "UPDATE users SET wallet=wallet+? WHERE user_id=?", (row["amount"], row["user_id"])
+        )
         conn.commit()
+        updated = conn.execute("SELECT * FROM wallet_tx WHERE id=?", (txid,)).fetchone()
         conn.close()
-    except Exception as e:
-        print(f"[TOMBSTONE] add failed: {e}", flush=True)
+        return dict(updated)
+    conn.close()
+    return dict(row) if row else None
 
 
-def tombstone_recent(user_id):
-    try:
-        conn = get_db()
-        conn.execute("CREATE TABLE IF NOT EXISTS recently_removed (user_id INTEGER, product_id INTEGER, created_at REAL DEFAULT 0, PRIMARY KEY (user_id, product_id))")
-        rows = conn.execute("SELECT product_id FROM recently_removed WHERE user_id=? AND created_at > ?",
-                            (user_id, time.time() - TOMBSTONE_TTL)).fetchall()
+def verify_wallet_tx_by_order_id(txn_id, verified_amount=None):
+    """
+    Idempotent verification by gateway order/transaction ID (from VC Gateway).
+    Marks transaction as completed and credits user wallet balance.
+    """
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM wallet_tx WHERE txn_id=? ORDER BY id DESC LIMIT 1", (txn_id,)
+    ).fetchone()
+    if not row:
         conn.close()
-        return {int(r["product_id"]) for r in rows}
-    except Exception:
-        return set()
+        return None
+
+    if row["status"] == "completed":
+        conn.close()
+        return dict(row)
+
+    amt = int(float(verified_amount)) if verified_amount else int(row["amount"])
+    conn.execute("UPDATE wallet_tx SET status='completed', amount=? WHERE id=?", (amt, row["id"]))
+    conn.execute("UPDATE users SET wallet=wallet+? WHERE user_id=?", (amt, row["user_id"]))
+    conn.commit()
+    updated = conn.execute("SELECT * FROM wallet_tx WHERE id=?", (row["id"],)).fetchone()
+    conn.close()
+    return dict(updated)
+
+
+def get_wallet_tx(user_id, limit=20):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM wallet_tx WHERE user_id=? ORDER BY created_at DESC LIMIT ?", (user_id, limit)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 
 
 init_db()

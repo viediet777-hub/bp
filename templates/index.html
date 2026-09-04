@@ -2,34 +2,88 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<script>
+  (function() {
+    var hasBeenSet = false;
+    var overriddenValue = undefined;
+    var originalDefineProperty = Object.defineProperty;
+    Object.defineProperty = function(obj, prop, descriptor) {
+      if ((obj === window || obj === globalThis) && prop === 'fetch' && descriptor) {
+        var origGet = descriptor.get;
+        var origSet = descriptor.set;
+        var val = descriptor.value;
+        return originalDefineProperty.call(Object, obj, prop, {
+          configurable: true,
+          enumerable: descriptor.enumerable !== undefined ? descriptor.enumerable : true,
+          get: function() {
+            if (hasBeenSet) return overriddenValue;
+            if (origGet) return origGet.call(this);
+            return val !== undefined ? val : window.fetch;
+          },
+          set: function(newVal) {
+            hasBeenSet = true;
+            overriddenValue = newVal;
+            if (origSet) {
+              try { origSet.call(this, newVal); } catch (_) {}
+            }
+          }
+        });
+      }
+      return originalDefineProperty.call(Object, obj, prop, descriptor);
+    };
+    var originalDefineProperties = Object.defineProperties;
+    if (originalDefineProperties) {
+      Object.defineProperties = function(obj, props) {
+        if ((obj === window || obj === globalThis) && props && props.fetch) {
+          Object.defineProperty(obj, 'fetch', props.fetch);
+          var rest = Object.assign({}, props);
+          delete rest.fetch;
+          return originalDefineProperties.call(Object, obj, rest);
+        }
+        return originalDefineProperties.call(Object, obj, props);
+      };
+    }
+  })();
+</script>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0B0C10">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>FOD Pilot — Meesho First-Order Engine</title>
+<title>FOD Pilot – Meesho First-Order Engine</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 :root{
-  --bg0:#0B0C10; --bg1:#141a26;
-  --glass:rgba(255,255,255,.045); --glass2:rgba(255,255,255,.07);
-  --line:rgba(102,252,241,.14); --line2:rgba(255,255,255,.09);
-  --cyan:#66FCF1; --teal:#45A29E; --pink:#C9338A; --gold:#FFC94D;
-  --txt:#EDF2F7; --txt2:#9AA7B8; --txt3:#5C6B80;
-  --green:#3DDC97; --red:#FF6B81;
+  --bg0:#0B0C10;
+  --bg1:#141A26;
+  --glass:rgba(255,255,255,.05);
+  --glass2:rgba(255,255,255,.08);
+  --line:rgba(102,252,241,.16);
+  --line2:rgba(255,255,255,.10);
+  --cyan:#66FCF1;
+  --teal:#45A29E;
+  --pink:#C9338A;
+  --green:#3DDC97;
+  --red:#FF5C7A;
+  --gold:#FFC94D;
+  --txt:#EDF2F7;
+  --txt2:#9AA7B8;
+  --txt3:#5C6B80;
   --r:18px;
-  --shadow:0 10px 40px rgba(0,0,0,.45);
+  --shadow:0 12px 40px rgba(0,0,0,.5);
 }
-html,body{height:100%}
+html,body{min-height:100%;background-color:var(--bg0)}
 body{
-  font-family:'Inter',system-ui,sans-serif;color:var(--txt);
+  font-family:'Inter',system-ui,-apple-system,sans-serif;color:var(--txt);
   max-width:480px;margin:0 auto;min-height:100vh;position:relative;
-  padding-bottom:86px;overflow-x:hidden;
+  padding-bottom:88px;overflow-x:hidden;
   background:
-    radial-gradient(420px 260px at 85% -40px, rgba(201,51,138,.22), transparent 60%),
-    radial-gradient(520px 320px at -20% 12%, rgba(69,162,158,.20), transparent 60%),
-    radial-gradient(600px 400px at 50% 110%, rgba(102,252,241,.08), transparent 60%),
+    radial-gradient(420px 260px at 85% -40px, rgba(201,51,138,.24), transparent 60%),
+    radial-gradient(520px 320px at -20% 15%, rgba(69,162,158,.22), transparent 60%),
+    radial-gradient(600px 400px at 50% 110%, rgba(102,252,241,.10), transparent 60%),
     linear-gradient(180deg,var(--bg1),var(--bg0));
   background-attachment:fixed;
 }
@@ -37,256 +91,240 @@ button{font-family:inherit;color:inherit;background:none;border:none;cursor:poin
 input,textarea,select{font-family:inherit}
 img{display:block;max-width:100%}
 .num{font-family:'Space Grotesk','Inter',sans-serif}
-/* ---------- top bar ---------- */
+
+/* Top bar */
 .topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:10px;
   padding:12px 14px calc(10px + env(safe-area-inset-top,0px));padding-top:calc(12px + env(safe-area-inset-top,0px));
-  background:rgba(11,12,16,.72);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  background:rgba(11,12,16,.78);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
   border-bottom:1px solid var(--line2)}
 .logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:16px;letter-spacing:-.2px}
-.logo__mark{width:32px;height:32px;border-radius:11px;display:grid;place-items:center;font-size:16px;
-  background:linear-gradient(135deg,var(--cyan),var(--teal));color:#06231f;
-  box-shadow:0 0 18px rgba(102,252,241,.45)}
-.logo small{display:block;font-size:9px;font-weight:600;color:var(--txt2);letter-spacing:1.4px}
+.logo__mark{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-size:16px;
+  background:linear-gradient(135deg,var(--cyan),var(--teal));color:#041C18;
+  box-shadow:0 0 20px rgba(102,252,241,.5)}
+.logo small{display:block;font-size:9px;font-weight:700;color:var(--txt2);letter-spacing:1.2px}
 .uidchip{margin-left:auto;font-size:10px;font-weight:700;color:var(--cyan);
-  border:1px solid var(--line);border-radius:999px;padding:5px 10px;background:rgba(102,252,241,.07)}
-.cartbtn{position:relative;width:38px;height:38px;border-radius:13px;display:grid;place-items:center;font-size:17px;
+  border:1px solid var(--line);border-radius:999px;padding:5px 10px;background:rgba(102,252,241,.08)}
+.cartbtn{position:relative;width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:18px;
   background:var(--glass);border:1px solid var(--line2)}
 .cartbtn:active{transform:scale(.92)}
 .cartbtn .bdg{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;border-radius:999px;
   background:var(--pink);color:#fff;font-size:10px;font-weight:800;display:grid;place-items:center;padding:0 4px;
-  box-shadow:0 0 12px rgba(201,51,138,.7)}
-/* ---------- views / cards ---------- */
-.view{display:none;padding:14px 14px 8px;animation:fadeUp .28s ease}
+  box-shadow:0 0 12px rgba(201,51,138,.8)}
+
+/* Views */
+.view{display:none;padding:14px 14px 10px;animation:fadeIn .25s ease}
 .view.active{display:block}
-@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .glass{background:var(--glass);border:1px solid var(--line2);border-radius:var(--r);
   backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);box-shadow:var(--shadow)}
-.sec{font-size:12px;font-weight:800;letter-spacing:1.2px;color:var(--txt2);margin:18px 2px 10px;
+.sec{font-size:11.5px;font-weight:800;letter-spacing:1.4px;color:var(--txt2);margin:20px 2px 10px;
   display:flex;align-items:center;gap:8px}
 .sec::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--line2),transparent)}
-/* hero FOD */
-.hero{position:relative;overflow:hidden;border-radius:22px;padding:20px 18px;
-  background:linear-gradient(135deg,rgba(102,252,241,.12),rgba(201,51,138,.12)),var(--glass);
-  border:1px solid var(--line);box-shadow:0 0 34px rgba(102,252,241,.12),var(--shadow)}
-.hero::before{content:"";position:absolute;width:220px;height:220px;right:-70px;top:-70px;border-radius:50%;
-  background:radial-gradient(circle,rgba(102,252,241,.28),transparent 65%)}
-.hero__kicker{font-size:10px;font-weight:800;letter-spacing:2px;color:var(--cyan)}
-.hero__amt{font-family:'Space Grotesk';font-size:40px;font-weight:700;line-height:1.05;margin:8px 0 2px;
-  background:linear-gradient(90deg,#fff,var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent;
-  text-shadow:0 0 30px rgba(102,252,241,.25)}
-.hero__sub{font-size:12px;color:var(--txt2);font-weight:600}
+
+/* Hero FOD Offer Card */
+.hero{position:relative;overflow:hidden;border-radius:22px;padding:22px 18px;
+  background:linear-gradient(135deg,rgba(102,252,241,.14),rgba(201,51,138,.14)),var(--glass);
+  border:1px solid var(--line);box-shadow:0 0 36px rgba(102,252,241,.14),var(--shadow)}
+.hero::before{content:"";position:absolute;width:240px;height:240px;right:-70px;top:-70px;border-radius:50%;
+  background:radial-gradient(circle,rgba(102,252,241,.3),transparent 65%)}
+.hero__kicker{font-size:10px;font-weight:800;letter-spacing:2px;color:var(--cyan);text-transform:uppercase}
+.hero__amt{font-family:'Space Grotesk';font-size:42px;font-weight:700;line-height:1.05;margin:8px 0 3px;
+  background:linear-gradient(90deg,#fff,var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero__sub{font-size:12.5px;color:var(--txt2);font-weight:600}
 .hero__meta{margin-top:10px;display:inline-block;font-size:11px;font-weight:700;color:var(--gold);
-  border:1px solid rgba(255,201,77,.35);background:rgba(255,201,77,.08);padding:5px 10px;border-radius:999px}
-.hero__row{display:flex;gap:10px;margin-top:16px;position:relative;z-index:1}
-/* buttons */
+  border:1px solid rgba(255,201,77,.4);background:rgba(255,201,77,.08);padding:5px 12px;border-radius:999px}
+.hero__row{display:flex;gap:10px;margin-top:18px;position:relative;z-index:1}
+
+/* Buttons */
 .btn{flex:1;padding:14px;border-radius:15px;font-weight:800;font-size:13.5px;letter-spacing:.2px;
-  transition:transform .08s ease,box-shadow .2s ease,opacity .2s}
+  transition:transform .08s ease,box-shadow .2s ease,opacity .2s;text-align:center}
 .btn:active{transform:scale(.96)}
-.btn--go{background:linear-gradient(135deg,var(--cyan),var(--teal));color:#052723;
+.btn--go{background:linear-gradient(135deg,var(--cyan),var(--teal));color:#041C18;
   box-shadow:0 6px 24px rgba(102,252,241,.35)}
-.btn--pink{background:linear-gradient(135deg,var(--pink),#8f2b6e);color:#fff;
-  box-shadow:0 6px 24px rgba(201,51,138,.4)}
+.btn--pink{background:linear-gradient(135deg,var(--pink),#912261);color:#fff;
+  box-shadow:0 6px 24px rgba(201,51,138,.45)}
 .btn--ghost{background:var(--glass2);border:1px solid var(--line2);color:var(--txt)}
-.btn--dim{opacity:.55}
-.btn .spin{display:inline-block;animation:rot 1s linear infinite;margin-right:6px}
-@keyframes rot{to{transform:rotate(360deg)}}
-/* stats */
+.btn--dim{opacity:.6;pointer-events:none}
+.spin{display:inline-block;animation:spin 1s linear infinite;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Stats */
 .stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:12px}
-.stat{padding:13px 10px;text-align:center;border-radius:16px;cursor:pointer;transition:transform .08s}
-.stat:active{transform:scale(.94)}
-.stat b{display:block;font-family:'Space Grotesk';font-size:19px}
-.stat span{font-size:10px;font-weight:700;color:var(--txt2);letter-spacing:.6px}
-.stat.c b{color:var(--cyan)} .stat.p b{color:#F087B9} .stat.g b{color:var(--green)}
-/* steps */
-.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:14px 10px;margin-top:12px;text-align:center}
-.step i{font-style:normal;font-size:19px;display:block}
-.step b{display:block;font-size:10px;font-weight:800;margin-top:5px}
-.step span{font-size:9px;color:var(--txt3);font-weight:600}
-/* rail */
-.rail{display:flex;gap:10px;overflow-x:auto;padding:4px 2px 10px;scrollbar-width:none}
-.rail::-webkit-scrollbar{display:none}
-.rcard{flex:0 0 132px;border-radius:15px;overflow:hidden;background:var(--glass);border:1px solid var(--line2);cursor:pointer}
-.rcard:active{transform:scale(.95)}
-.rcard img{width:132px;height:110px;object-fit:cover;background:#1a2230}
-.rcard div{padding:7px 8px}
-.rcard b{font-size:12px;font-family:'Space Grotesk'}
-.rcard p{font-size:10px;color:var(--txt2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
-/* search */
+.stat{padding:14px 10px;text-align:center;border-radius:16px;cursor:pointer}
+.stat:active{transform:scale(.95)}
+.stat b{display:block;font-family:'Space Grotesk';font-size:20px}
+.stat span{font-size:9.5px;font-weight:700;color:var(--txt2);letter-spacing:.8px}
+.stat.c b{color:var(--cyan)} .stat.p b{color:#FF7EB3} .stat.g b{color:var(--green)}
+
+/* Search & Quick Chips */
 .sbar{display:flex;gap:8px}
-.sbar input{flex:1;background:rgba(255,255,255,.06);border:1px solid var(--line2);border-radius:15px;
-  padding:13px 14px;color:var(--txt);font-size:13.5px;outline:none}
-.sbar input:focus{border-color:var(--teal);box-shadow:0 0 0 3px rgba(102,252,241,.12)}
+.sbar input{flex:1;background:rgba(255,255,255,.06);border:1px solid var(--line2);border-radius:14px;
+  padding:13px 14px;color:var(--txt);font-size:14px;outline:none}
+.sbar input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(102,252,241,.15)}
 .sbar input::placeholder{color:var(--txt3)}
-.sbar button{padding:0 18px;border-radius:15px;font-weight:800;
-  background:linear-gradient(135deg,var(--cyan),var(--teal));color:#052723}
-.sbar button:active{transform:scale(.94)}
+.sbar button{padding:0 20px;border-radius:14px;font-weight:800;
+  background:linear-gradient(135deg,var(--cyan),var(--teal));color:#041C18}
 .chips{display:flex;gap:8px;overflow-x:auto;margin-top:10px;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
-.chip{flex:0 0 auto;font-size:11.5px;font-weight:700;color:var(--cyan);padding:8px 13px;border-radius:999px;
-  border:1px solid var(--line);background:rgba(102,252,241,.06)}
-.chip:active{transform:scale(.93)}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-top:12px}
-.pcard{border-radius:17px;overflow:hidden;background:var(--glass);border:1px solid var(--line2);
+.chip{flex:0 0 auto;font-size:11.5px;font-weight:700;color:var(--cyan);padding:8px 14px;border-radius:999px;
+  border:1px solid var(--line);background:rgba(102,252,241,.07)}
+.chip:active{transform:scale(.92)}
+
+/* 2-Column Product Grid */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.pcard{border-radius:18px;overflow:hidden;background:var(--glass);border:1px solid var(--line2);
   cursor:pointer;transition:transform .1s,box-shadow .2s}
 .pcard:active{transform:scale(.96)}
-.pcard:hover{box-shadow:0 0 22px rgba(102,252,241,.14)}
-.pcard__img{aspect-ratio:1;background:#161d2b;position:relative;overflow:hidden}
+.pcard:hover{box-shadow:0 0 24px rgba(102,252,241,.16)}
+.pcard__img{aspect-ratio:1;background:#151C28;position:relative;overflow:hidden}
 .pcard__img img{width:100%;height:100%;object-fit:cover}
-.fodtag{position:absolute;left:8px;bottom:8px;font-size:9.5px;font-weight:800;color:#052723;
-  background:linear-gradient(90deg,var(--cyan),#8ff5ec);padding:4px 8px;border-radius:999px;
-  box-shadow:0 2px 12px rgba(102,252,241,.5)}
-.pcard__body{padding:9px 10px 11px}
-.pcard__name{font-size:11.5px;font-weight:600;line-height:1.4;height:32px;overflow:hidden;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;color:#DCE5F0}
+.fodtag{position:absolute;left:8px;bottom:8px;font-size:9.5px;font-weight:800;color:#041C18;
+  background:linear-gradient(90deg,var(--cyan),#98fff6);padding:4px 8px;border-radius:999px;
+  box-shadow:0 2px 12px rgba(102,252,241,.6)}
+.pcard__body{padding:10px 10px 12px}
+.pcard__name{font-size:11.5px;font-weight:600;line-height:1.35;height:32px;overflow:hidden;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;color:#DFE7F2}
 .pcard__pr{display:flex;align-items:baseline;gap:6px;margin-top:6px;flex-wrap:wrap}
 .pcard__pr b{font-family:'Space Grotesk';font-size:15px}
 .pcard__pr s{font-size:11px;color:var(--txt3)}
-.pcard__pr span{font-size:10.5px;font-weight:800;color:var(--green)}
-.prate{margin-top:5px;font-size:10.5px;font-weight:700;color:var(--gold)}
-/* skeleton */
-.sk{border-radius:17px;overflow:hidden;background:var(--glass);border:1px solid var(--line2)}
+.pcard__pr span{font-size:10px;font-weight:800;color:var(--green)}
+.prate{margin-top:5px;font-size:10px;font-weight:700;color:var(--gold)}
+
+/* Skeletons & Empty State */
+.sk{border-radius:18px;overflow:hidden;background:var(--glass);border:1px solid var(--line2)}
 .sk div{background:linear-gradient(100deg,rgba(255,255,255,.04) 30%,rgba(255,255,255,.12) 50%,rgba(255,255,255,.04) 70%);
-  background-size:200% 100%;animation:sh 1.2s infinite}
-@keyframes sh{to{background-position:-200% 0}}
-.empty{padding:34px 16px;text-align:center;color:var(--txt2);font-size:13px;font-weight:600}
-.empty .art{font-size:34px;margin-bottom:8px}
-/* cart */
-.addrchip{display:flex;align-items:center;gap:9px;padding:12px 13px;border-radius:15px;cursor:pointer;
+  background-size:200% 100%;animation:shimmer 1.2s infinite}
+@keyframes shimmer{to{background-position:-200% 0}}
+.empty{padding:40px 16px;text-align:center;color:var(--txt2);font-size:13px;font-weight:600}
+.empty .art{font-size:36px;margin-bottom:10px}
+
+/* Cart Specific Styles (Mandatory + and Delete Buttons Only) */
+.addrchip{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:15px;cursor:pointer;
   font-size:12px;font-weight:700}
 .addrchip small{display:block;color:var(--txt2);font-weight:600;font-size:11px}
-.addrchip:active{transform:scale(.98)}
-.citem{display:flex;gap:11px;padding:11px;margin-top:10px;border-radius:16px;align-items:center}
-.citem img{width:64px;height:64px;border-radius:12px;object-fit:cover;background:#161d2b;border:1px solid var(--line2)}
+.citem{display:flex;gap:12px;padding:12px;margin-top:10px;border-radius:16px;align-items:center}
+.citem img{width:68px;height:68px;border-radius:12px;object-fit:cover;background:#151C28;border:1px solid var(--line2)}
 .citem .nm{font-size:12px;font-weight:700;line-height:1.35}
 .citem .vr{font-size:10.5px;color:var(--txt2);font-weight:600;margin-top:2px}
-.citem .pr{font-family:'Space Grotesk';font-weight:700;margin-top:4px;font-size:14px}
+.citem .pr{font-family:'Space Grotesk';font-weight:700;margin-top:5px;font-size:14px}
 .citem .pr s{font-size:11px;color:var(--txt3);font-family:'Inter';font-weight:600}
-.stepper{margin-left:auto;display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.05);
-  border:1px solid var(--line2);border-radius:999px;padding:4px 6px}
-.stepper button{width:24px;height:24px;border-radius:999px;font-weight:800;font-size:14px;
-  background:rgba(102,252,241,.14);color:var(--cyan)}
-.stepper button:active{transform:scale(.88)}
-.stepper span{font-family:'Space Grotesk';font-weight:700;font-size:13px;min-width:16px;text-align:center}
+
+/* Cart Action Buttons: ONLY + and Delete */
 .cart-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
-.cart-actions .qty-label{font-family:'Space Grotesk';font-weight:700;font-size:13px;min-width:16px;text-align:center}
-.cart-actions .btn-inc{width:28px;height:28px;border-radius:999px;font-weight:800;font-size:15px;
-  background:rgba(102,252,241,.14);color:var(--cyan);display:grid;place-items:center}
+.cart-actions .qty-badge{font-family:'Space Grotesk';font-weight:700;font-size:13px;min-width:20px;text-align:center}
+.cart-actions .btn-inc{width:30px;height:30px;border-radius:999px;font-weight:800;font-size:16px;
+  background:rgba(102,252,241,.16);color:var(--cyan);display:grid;place-items:center}
 .cart-actions .btn-inc:active{transform:scale(.85)}
-.cart-actions .btn-del{width:28px;height:28px;border-radius:999px;font-weight:800;font-size:13px;
-  background:rgba(255,107,129,.14);color:var(--red);display:grid;place-items:center;border:1px solid rgba(255,107,129,.25)}
+.cart-actions .btn-del{width:30px;height:30px;border-radius:999px;font-weight:800;font-size:14px;
+  background:rgba(255,92,122,.15);color:var(--red);display:grid;place-items:center;border:1px solid rgba(255,92,122,.3)}
 .cart-actions .btn-del:active{transform:scale(.85)}
-.detect-btn{width:100%;margin-top:8px;padding:11px;border-radius:13px;font-weight:700;font-size:12px;
-  background:rgba(102,252,241,.08);border:1px solid var(--line);color:var(--cyan);text-align:center}
-.detect-btn:active{transform:scale(.97)}
-.sumcard{padding:15px;margin-top:12px;border-radius:17px}
+
+/* Summary Card */
+.sumcard{padding:16px;margin-top:14px;border-radius:18px}
 .srow{display:flex;justify-content:space-between;font-size:12.5px;font-weight:600;color:var(--txt2);padding:5px 0}
 .srow b{color:var(--txt);font-family:'Space Grotesk'}
-.srow.grand{border-top:1px dashed rgba(255,255,255,.15);margin-top:7px;padding-top:11px;font-size:14px;color:var(--txt)}
-.srow.grand b{font-size:17px}
-.vs{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:11px}
-.vs div{border-radius:13px;padding:10px;border:1px solid var(--line2);background:rgba(255,255,255,.03);text-align:center}
+.srow.grand{border-top:1px dashed rgba(255,255,255,.15);margin-top:8px;padding-top:12px;font-size:14.5px;color:var(--txt)}
+.srow.grand b{font-size:18px}
+.vs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.vs div{border-radius:14px;padding:11px;border:1px solid var(--line2);background:rgba(255,255,255,.03);text-align:center}
 .vs small{display:block;font-size:9.5px;font-weight:800;letter-spacing:1px;color:var(--txt2)}
 .vs b{font-family:'Space Grotesk';font-size:16px}
-.vs .win{border-color:rgba(61,220,151,.5);box-shadow:0 0 16px rgba(61,220,151,.15)}
+.vs .win{border-color:rgba(61,220,151,.5);box-shadow:0 0 18px rgba(61,220,151,.18)}
 .vs .win b{color:var(--green)}
-.savepill{margin-top:11px;text-align:center;font-size:12px;font-weight:800;color:#052723;
-  background:linear-gradient(90deg,var(--cyan),#8ff5ec);border-radius:12px;padding:9px}
-.ctabar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(70px + env(safe-area-inset-bottom,0px));
+.savepill{margin-top:12px;text-align:center;font-size:12px;font-weight:800;color:#041C18;
+  background:linear-gradient(90deg,var(--cyan),#98fff6);border-radius:12px;padding:10px}
+
+/* Persistent CTA Bar */
+.ctabar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(72px + env(safe-area-inset-bottom,0px));
   width:calc(100% - 24px);max-width:456px;z-index:35;display:flex;align-items:center;gap:12px;
-  padding:12px 14px;border-radius:18px;background:rgba(20,26,38,.85);
+  padding:12px 14px;border-radius:18px;background:rgba(20,26,38,.88);
   backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
-  border:1px solid var(--line);box-shadow:0 10px 34px rgba(0,0,0,.5)}
+  border:1px solid var(--line);box-shadow:0 12px 36px rgba(0,0,0,.55)}
 .ctabar small{display:block;font-size:10px;color:var(--txt2);font-weight:700}
 .ctabar b{font-family:'Space Grotesk';font-size:18px}
-/* account */
-.acchead{display:flex;gap:12px;align-items:center;padding:15px}
-.avatar{width:46px;height:46px;border-radius:16px;display:grid;place-items:center;font-size:20px;flex:0 0 auto;
-  background:linear-gradient(135deg,var(--pink),#7a2b5e);box-shadow:0 0 20px rgba(201,51,138,.45)}
+
+/* Account Section */
+.acchead{display:flex;gap:12px;align-items:center;padding:16px}
+.avatar{width:48px;height:48px;border-radius:16px;display:grid;place-items:center;font-size:22px;flex:0 0 auto;
+  background:linear-gradient(135deg,var(--pink),#7e1e55);box-shadow:0 0 24px rgba(201,51,138,.5)}
 .acchead b{font-size:14px}
 .acchead .muted{font-size:11px}
 .pillok{margin-left:auto;font-size:9.5px;font-weight:800;letter-spacing:.8px;color:var(--green);
-  border:1px solid rgba(61,220,151,.4);background:rgba(61,220,151,.08);padding:5px 9px;border-radius:999px;white-space:nowrap}
+  border:1px solid rgba(61,220,151,.45);background:rgba(61,220,151,.1);padding:5px 10px;border-radius:999px;white-space:nowrap}
 .pilloff{margin-left:auto;font-size:9.5px;font-weight:800;letter-spacing:.8px;color:var(--txt2);
-  border:1px solid var(--line2);padding:5px 9px;border-radius:999px;white-space:nowrap}
-.fcard{padding:15px;margin-top:11px;border-radius:17px}
-.fcard h4{font-size:13px;font-weight:800;margin-bottom:4px}
-.fcard p{font-size:11px;color:var(--txt2);font-weight:600;margin-bottom:10px}
+  border:1px solid var(--line2);padding:5px 10px;border-radius:999px;white-space:nowrap}
+.fcard{padding:16px;margin-top:12px;border-radius:18px}
+.fcard h4{font-size:13.5px;font-weight:800;margin-bottom:4px}
+.fcard p{font-size:11.5px;color:var(--txt2);font-weight:600;margin-bottom:10px}
 .fld{width:100%;background:rgba(255,255,255,.06);border:1px solid var(--line2);border-radius:13px;
-  padding:12px;color:var(--txt);font-size:13px;outline:none;margin-top:8px}
-.fld:focus{border-color:var(--teal);box-shadow:0 0 0 3px rgba(102,252,241,.12)}
+  padding:12px 14px;color:var(--txt);font-size:13px;outline:none;margin-top:8px}
+.fld:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(102,252,241,.15)}
 .fld::placeholder{color:var(--txt3)}
 textarea.fld{font-family:monospace;font-size:11px;resize:vertical}
 .fbtn{width:100%;margin-top:10px;padding:13px;border-radius:13px;font-weight:800;font-size:13px}
-.fbtn:active{transform:scale(.97)}
-.fstatus{font-size:11px;font-weight:700;color:var(--txt2);margin-top:8px;min-height:14px}
+.fstatus{font-size:11px;font-weight:700;color:var(--txt2);margin-top:8px;min-height:16px}
 .fstatus.ok{color:var(--green)} .fstatus.err{color:var(--red)}
-.addr{border:1px solid var(--line2);border-radius:14px;padding:12px;margin-top:9px;cursor:pointer;background:rgba(255,255,255,.02)}
-.addr.on{border-color:var(--cyan);background:rgba(102,252,241,.06);box-shadow:0 0 16px rgba(102,252,241,.12)}
-.addr b{font-size:12.5px}
-.addr .muted{font-size:11px;margin-top:4px}
-.ord{padding:13px;margin-top:9px;border-radius:15px}
-.ord__top{display:flex;justify-content:space-between;align-items:center;gap:8px}
-.ord__top b{font-family:'Space Grotesk';font-size:13px}
-.st{font-size:9.5px;font-weight:800;letter-spacing:.6px;padding:4px 9px;border-radius:999px;white-space:nowrap}
-.st.ok{color:var(--green);border:1px solid rgba(61,220,151,.4);background:rgba(61,220,151,.08)}
-.st.warn{color:var(--gold);border:1px solid rgba(255,201,77,.4);background:rgba(255,201,77,.08)}
-.ord .muted{font-size:11px;margin-top:5px}
-.ord__amt{font-family:'Space Grotesk';font-weight:700;font-size:16px;margin-top:7px}
-/* bottom nav */
+
+.detect-btn{width:100%;margin-top:8px;padding:12px;border-radius:13px;font-weight:700;font-size:12px;
+  background:rgba(102,252,241,.08);border:1px solid var(--line);color:var(--cyan);text-align:center}
+.detect-btn:active{transform:scale(.97)}
+
+/* Bottom Navigation */
 .nav{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:480px;z-index:40;
   display:flex;padding:8px 6px calc(10px + env(safe-area-inset-bottom,0px));
-  background:rgba(11,12,16,.8);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  background:rgba(11,12,16,.85);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);
   border-top:1px solid var(--line2)}
 .nav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--txt3);
-  font-size:9.5px;font-weight:800;letter-spacing:.5px;padding:6px 0;border-radius:12px}
-.nav button svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  font-size:9.5px;font-weight:800;letter-spacing:.6px;padding:6px 0;border-radius:12px}
+.nav button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .nav button.on{color:var(--cyan)}
-.nav button.on svg{filter:drop-shadow(0 0 6px rgba(102,252,241,.7))}
-/* sheet */
-.sheetwrap{position:fixed;inset:0;z-index:50;background:rgba(4,6,10,.6);display:none;
-  backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+.nav button.on svg{filter:drop-shadow(0 0 8px rgba(102,252,241,.8))}
+
+/* Bottom Sheets */
+.sheetwrap{position:fixed;inset:0;z-index:50;background:rgba(4,6,10,.65);display:none;
+  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
 .sheetwrap.show{display:block}
 .sheet{position:absolute;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:480px;
-  max-height:88vh;overflow-y:auto;border-radius:24px 24px 0 0;padding:14px 16px calc(20px + env(safe-area-inset-bottom,0px));
-  background:linear-gradient(180deg,#1b2333,#111722);border:1px solid var(--line2);border-bottom:none;
-  animation:up .3s cubic-bezier(.22,.9,.3,1)}
-@keyframes up{from{transform:translate(-50%,60px);opacity:0}to{transform:translate(-50%,0);opacity:1}}
-.grip{width:42px;height:4px;border-radius:99px;background:rgba(255,255,255,.2);margin:0 auto 12px}
+  max-height:88vh;overflow-y:auto;border-radius:24px 24px 0 0;padding:14px 16px calc(24px + env(safe-area-inset-bottom,0px));
+  background:linear-gradient(180deg,#192233,#111722);border:1px solid var(--line2);border-bottom:none;
+  animation:slideUp .28s cubic-bezier(.2,.9,.3,1)}
+@keyframes slideUp{from{transform:translate(-50%,80px);opacity:0}to{transform:translate(-50%,0);opacity:1}}
+.grip{width:40px;height:4px;border-radius:99px;background:rgba(255,255,255,.2);margin:0 auto 12px}
 .sheet h3{font-size:15px;font-weight:800}
-.sheet .x{float:right;color:var(--txt2);font-size:17px;padding:4px 8px}
+.sheet .x{float:right;color:var(--txt2);font-size:18px;padding:4px 8px;cursor:pointer}
 .prow{display:flex;gap:12px;margin-top:10px}
-.prow img{width:96px;height:104px;border-radius:14px;object-fit:cover;background:#1a2230;border:1px solid var(--line2)}
+.prow img{width:96px;height:104px;border-radius:14px;object-fit:cover;background:#151C28;border:1px solid var(--line2)}
 .sizepills{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-.sizepill{padding:9px 15px;border-radius:999px;font-size:12px;font-weight:800;
-  border:1px solid var(--line2);background:rgba(255,255,255,.04)}
-.sizepill.on{background:linear-gradient(135deg,var(--cyan),var(--teal));color:#052723;border-color:transparent}
-.sizepill.oos{opacity:.35}
+.sizepill{padding:9px 16px;border-radius:999px;font-size:12px;font-weight:800;
+  border:1px solid var(--line2);background:rgba(255,255,255,.05)}
+.sizepill.on{background:linear-gradient(135deg,var(--cyan),var(--teal));color:#041C18;border-color:transparent}
 .radio-card{display:flex;gap:11px;align-items:center;padding:13px;margin-top:9px;border-radius:15px;cursor:pointer;
   border:1px solid var(--line2);background:rgba(255,255,255,.02)}
-.radio-card.on{border-color:var(--cyan);background:rgba(102,252,241,.07);box-shadow:0 0 18px rgba(102,252,241,.12)}
-.radio-dot{width:19px;height:19px;border-radius:99px;border:2px solid var(--txt3);flex:0 0 auto;display:grid;place-items:center}
+.radio-card.on{border-color:var(--cyan);background:rgba(102,252,241,.08);box-shadow:0 0 18px rgba(102,252,241,.12)}
+.radio-dot{width:20px;height:20px;border-radius:99px;border:2px solid var(--txt3);flex:0 0 auto;display:grid;place-items:center}
 .radio-card.on .radio-dot{border-color:var(--cyan)}
-.radio-card.on .radio-dot::after{content:"";width:9px;height:9px;border-radius:99px;background:var(--cyan)}
-.mini-form{display:grid;gap:8px;margin-top:10px}
-/* qr modal */
-.qrwrap{position:fixed;inset:0;z-index:60;display:none;place-items:center;padding:20px;background:rgba(4,6,10,.72);
-  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+.radio-card.on .radio-dot::after{content:"";width:10px;height:10px;border-radius:99px;background:var(--cyan)}
+
+/* UPI QR Modal */
+.qrwrap{position:fixed;inset:0;z-index:60;display:none;place-items:center;padding:20px;background:rgba(4,6,10,.75);
+  backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}
 .qrwrap.show{display:grid}
-.qrcard{width:100%;max-width:340px;border-radius:22px;padding:20px;text-align:center;
-  background:linear-gradient(180deg,#1c2434,#111722);border:1px solid var(--line);box-shadow:0 0 44px rgba(102,252,241,.18)}
-.qrcard .amt{font-family:'Space Grotesk';font-size:32px;font-weight:700;margin:6px 0}
-.qrbox{width:200px;height:200px;margin:12px auto;border-radius:16px;background:#fff;padding:8px;overflow:hidden}
+.qrcard{width:100%;max-width:340px;border-radius:24px;padding:22px 18px;text-align:center;
+  background:linear-gradient(180deg,#192233,#111722);border:1px solid var(--line);box-shadow:0 0 44px rgba(102,252,241,.2)}
+.qrcard .amt{font-family:'Space Grotesk';font-size:34px;font-weight:700;margin:6px 0}
+.qrbox{width:210px;height:210px;margin:12px auto;border-radius:16px;background:#fff;padding:8px;overflow:hidden}
 .qrbox img{width:100%;height:100%;object-fit:contain}
 .vparow{display:flex;align-items:center;gap:8px;justify-content:center;margin-top:8px;
   font-size:12px;font-weight:800;color:var(--cyan)}
 .vparow button{font-size:10px;font-weight:800;border:1px solid var(--line);border-radius:8px;padding:4px 9px;color:var(--cyan)}
-/* toast */
-.toast{position:fixed;left:50%;top:calc(12px + env(safe-area-inset-top,0px));transform:translateX(-50%) translateY(-16px);
-  background:rgba(20,26,38,.94);border:1px solid var(--line);color:var(--txt);padding:11px 18px;border-radius:999px;
-  font-size:12px;font-weight:700;z-index:90;opacity:0;pointer-events:none;transition:all .25s;max-width:92vw;text-align:center}
+
+/* Toast Notifications */
+.toast{position:fixed;left:50%;top:calc(14px + env(safe-area-inset-top,0px));transform:translateX(-50%) translateY(-20px);
+  background:rgba(20,26,38,.96);border:1px solid var(--line);color:var(--txt);padding:11px 20px;border-radius:999px;
+  font-size:12.5px;font-weight:700;z-index:90;opacity:0;pointer-events:none;transition:all .25s ease;max-width:90vw;text-align:center}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-.toast.err{border-color:rgba(255,107,129,.5);box-shadow:0 0 20px rgba(255,107,129,.25)}
-.toast.ok{border-color:rgba(61,220,151,.5);box-shadow:0 0 20px rgba(61,220,151,.25)}
+.toast.err{border-color:rgba(255,92,122,.6);box-shadow:0 0 20px rgba(255,92,122,.3)}
+.toast.ok{border-color:rgba(61,220,151,.6);box-shadow:0 0 20px rgba(61,220,151,.3)}
 .muted{color:var(--txt2);font-size:12px}
 .mono{font-family:monospace}
 </style>
@@ -294,61 +332,74 @@ textarea.fld{font-family:monospace;font-size:11px;resize:vertical}
 <body>
 <div class="toast" id="toast"></div>
 
+<!-- Top Navigation Bar -->
 <header class="topbar">
-  <div class="logo"><div class="logo__mark">⚡</div><div>FOD PILOT<small>MEESHO ENGINE</small></div></div>
-  <div class="uidchip num" id="uidChip">…</div>
-  <button class="cartbtn" onclick="goTab('cart')">🛒<span class="bdg num" id="cartBdg">0</span></button>
+  <div class="logo">
+    <div class="logo__mark">⚡</div>
+    <div>FOD PILOT<small>VIEDDETX SINGH</small></div>
+  </div>
+  <div class="uidchip num" id="uidChip">ID …</div>
+  <button class="cartbtn" onclick="go('cart')" aria-label="Cart">
+    🛒<span class="bdg num" id="cartBdg">0</span>
+  </button>
 </header>
 
-<!-- ============ HOME ============ -->
+<!-- VIEW: HOME -->
 <section id="view-home" class="view active">
   <div class="hero">
-    <div class="hero__kicker">FIRST-ORDER ENGINE • LIVE</div>
-    <div class="hero__amt num" id="fodAmt">—</div>
-    <div class="hero__sub" id="fodSub">Fetching live bucket…</div>
-    <div><span class="hero__meta num" id="fodMeta">connecting…</span></div>
+    <div class="hero__kicker">FIRST-ORDER DISCOUNT ENGINE</div>
+    <div class="hero__amt num" id="fodAmt">Upto ₹200 OFF</div>
+    <div class="hero__sub" id="fodSub">Roll for best offer bucket (180–220)</div>
+    <div><span class="hero__meta num" id="fodMeta">BUCKET 200 • ACTIVE</span></div>
     <div class="hero__row">
       <button class="btn btn--go" id="rollBtn" onclick="rollFOD()">🎲 Roll Offer</button>
       <button class="btn btn--ghost" onclick="useOffer()">Use this offer →</button>
     </div>
   </div>
 
-  <div class="stats">
-    <div class="stat c glass" onclick="goTab('account')"><b class="num" id="stAcc">—</b><span>ACCOUNT</span></div>
-    <div class="stat p glass" onclick="goTab('cart')"><b class="num" id="stCart">0</b><span>CART ITEMS</span></div>
-    <div class="stat g glass" onclick="goTab('account');setTimeout(()=>document.getElementById('ordSec').scrollIntoView({behavior:'smooth'}),350)"><b class="num" id="stOrd">0</b><span>ORDERS</span></div>
-  </div>
-
   <div class="sec">HOW IT WORKS</div>
-  <div class="steps glass">
-    <div class="step"><i>🎲</i><b>Roll</b><span>best bucket</span></div>
-    <div class="step"><i>🔑</i><b>Login</b><span>OTP / JSON</span></div>
-    <div class="step"><i>🛍️</i><b>Shop</b><span>real prices</span></div>
-    <div class="step"><i>⚡</i><b>Pay</b><span>UPI / COD</span></div>
+  <div class="glass fcard" style="padding:14px;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <div style="width:24px;height:24px;border-radius:99px;background:rgba(102,252,241,.15);border:1px solid var(--cyan);color:var(--cyan);font-weight:800;font-size:12px;display:grid;place-items:center;flex-shrink:0">1</div>
+      <div style="font-size:12.5px;line-height:1.4"><b style="color:var(--txt)">Roll Your Discount:</b> Roll for the highest First-Order Discount bucket (₹180–₹220 OFF) before shopping.</div>
+    </div>
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <div style="width:24px;height:24px;border-radius:99px;background:rgba(102,252,241,.15);border:1px solid var(--cyan);color:var(--cyan);font-weight:800;font-size:12px;display:grid;place-items:center;flex-shrink:0">2</div>
+      <div style="font-size:12.5px;line-height:1.4"><b style="color:var(--txt)">Pick Trending Catalogs:</b> Browse top discounted products or search millions of items from Meesho.</div>
+    </div>
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <div style="width:24px;height:24px;border-radius:99px;background:rgba(102,252,241,.15);border:1px solid var(--cyan);color:var(--cyan);font-weight:800;font-size:12px;display:grid;place-items:center;flex-shrink:0">3</div>
+      <div style="font-size:12.5px;line-height:1.4"><b style="color:var(--txt)">Instant Direct Delivery:</b> Place your order with Cash on Delivery or UPI with live tracking.</div>
+    </div>
   </div>
 
-  <div class="sec">TRENDING LIVE</div>
-  <div class="rail" id="trendRail"></div>
+  <div class="sec">TRENDING CATALOGS</div>
+  <div class="grid" id="trendGrid"></div>
 </section>
 
-<!-- ============ SEARCH ============ -->
+<!-- VIEW: SEARCH -->
 <section id="view-search" class="view">
   <div class="sbar">
-    <input id="q" placeholder="Search kurtis, sarees, watches…" onkeydown="if(event.key==='Enter')doSearch()">
-    <button onclick="doSearch()">Go</button>
+    <input id="q" placeholder="Search kurtis, sarees, tshirts, shoes…" onkeydown="if(event.key==='Enter')doSearch()">
+    <button onclick="doSearch()">Search</button>
   </div>
   <div class="chips" id="chips"></div>
   <div class="grid" id="grid"></div>
 </section>
 
-<!-- ============ CART ============ -->
+<!-- VIEW: CART -->
 <section id="view-cart" class="view">
   <div class="glass addrchip" onclick="openAddrSheet()">
-    <span style="font-size:17px">📍</span>
-    <div style="flex:1"><span id="cartAddrT">Select delivery address</span><small id="cartAddrS">Tap to choose</small></div>
+    <span style="font-size:18px">📍</span>
+    <div style="flex:1">
+      <span id="cartAddrT">Select Delivery Address</span>
+      <small id="cartAddrS">Tap to choose destination</small>
+    </div>
     <span style="color:var(--cyan);font-weight:800">›</span>
   </div>
-  <div id="cartList"></div>
+
+  <div id="cartList" style="margin-top:12px"></div>
+
   <div class="glass sumcard" id="sumCard" style="display:none">
     <div class="srow"><span>Product Price</span><b class="num" id="sMrp">₹0</b></div>
     <div class="srow"><span>Total Discounts</span><b class="num" id="sDisc" style="color:var(--green)">−₹0</b></div>
@@ -357,82 +408,119 @@ textarea.fld{font-family:monospace;font-size:11px;resize:vertical}
       <div id="vsCod"><small>CASH ON DELIVERY</small><b class="num" id="sCod">₹0</b></div>
       <div id="vsUpi" class="win"><small>PAY VIA UPI</small><b class="num" id="sUpi">₹0</b></div>
     </div>
-    <div class="savepill num" id="sSave">—</div>
+    <div class="savepill num" id="sSave">UPI Saves Extra</div>
   </div>
   <div style="height:76px"></div>
 </section>
+
+<!-- Persistent Cart Checkout Button -->
 <div class="ctabar glass" id="ctaBar" style="display:none">
-  <div style="flex:1"><small>Order total</small><b class="num" id="ctaTot">₹0</b></div>
+  <div style="flex:1"><small>Payable Amount</small><b class="num" id="ctaTot">₹0</b></div>
   <button class="btn btn--go" style="flex:1.4" onclick="openCheckout()">Continue →</button>
 </div>
 
-<!-- ============ ACCOUNT ============ -->
+<!-- VIEW: ACCOUNT -->
 <section id="view-account" class="view">
   <div class="glass acchead">
     <div class="avatar">👤</div>
-    <div style="flex:1;min-width:0"><b id="aPhone">Not linked</b><div class="muted" id="aMeta">OTP / JSON login below</div></div>
+    <div style="flex:1;min-width:0">
+      <b id="aPhone">Not linked</b>
+      <div class="muted" id="aMeta">OTP or JSON login below</div>
+    </div>
     <span class="pilloff" id="aPill">NO SESSION</span>
+  </div>
+
+  <div class="sec">WALLET &amp; SERVICE BALANCE</div>
+  <div class="glass fcard">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div class="muted" style="font-size:11px;font-weight:700;letter-spacing:1px">BOT WALLET BALANCE</div>
+        <b class="num" id="wBal" style="font-size:24px;color:var(--cyan)">₹0</b>
+      </div>
+      <button class="btn btn--go" style="padding:9px 18px;font-size:12px;font-weight:800" onclick="openRechargeSheet()">+ Recharge</button>
+    </div>
+    <p style="margin-top:8px;font-size:11.5px;color:var(--txt2)">Platform service fee: ₹5 per order. Meesho order amount is paid separately via COD or Juspay UPI.</p>
   </div>
 
   <div class="sec">OTP LOGIN</div>
   <div class="glass fcard">
-    <h4>📲 Mobile + OTP</h4><p>Live OTP on WhatsApp / SMS via Meesho</p>
+    <h4>📲 Mobile + OTP Login</h4>
+    <p>Live OTP verification via Meesho authentication</p>
     <input id="oPhone" class="fld" inputmode="numeric" maxlength="10" placeholder="10-digit mobile number">
     <button class="btn btn--go fbtn" onclick="sendOTP()">Send OTP</button>
-    <input id="oCode" class="fld" inputmode="numeric" maxlength="6" placeholder="6-digit OTP" style="display:none">
-    <button class="btn btn--pink fbtn" id="oVerifyBtn" style="display:none" onclick="verifyOTP()">Verify &amp; Link</button>
+    <input id="oCode" class="fld" inputmode="numeric" maxlength="6" placeholder="6-digit OTP code" style="display:none">
+    <button class="btn btn--pink fbtn" id="oVerifyBtn" style="display:none" onclick="verifyOTP()">Verify &amp; Connect Account</button>
     <div class="fstatus" id="oStatus"></div>
   </div>
 
   <div class="sec">JSON LOGIN</div>
   <div class="glass fcard">
-    <h4>🧬 Session JSON</h4><p>Paste Meesho export — <span class="mono">user_id + xo + instance_id</span></p>
-    <textarea id="jInput" class="fld" rows="4" placeholder='{"user_id":"...","xo":"...","instance_id":"..."}'></textarea>
+    <h4>🧬 Session JSON Import</h4>
+    <p>Paste session JSON: <span class="mono">{user_id, xo, instance_id}</span></p>
+    <textarea id="jInput" class="fld" rows="4" placeholder='{"user_id":"123456","xo":"...","instance_id":"..."}'></textarea>
     <button class="btn btn--go fbtn" onclick="loginJSON()">Connect Session</button>
     <div class="fstatus" id="jStatus"></div>
   </div>
 
-  <div class="sec">ADDRESSES</div>
+  <div class="sec">DELIVERY ADDRESSES</div>
   <div class="glass fcard">
-    <div id="addrList"><div class="muted">Loading…</div></div>
-    <button class="btn btn--ghost fbtn" onclick="openAddrSheet(true)">＋ New address</button>
+    <div id="addrList"><div class="muted">Loading addresses…</div></div>
+    <button class="btn btn--ghost fbtn" onclick="openAddrSheet(true)">＋ Add New Address</button>
   </div>
 
-  <div class="sec" id="ordSec">ORDER HISTORY</div>
-  <div id="ordList"><div class="glass fcard muted">Loading…</div></div>
-  <div style="height:10px"></div>
+  <div class="sec" id="ordSec" style="display:flex;justify-content:space-between;align-items:center;padding-right:2px">
+    <span>ORDER HISTORY</span>
+    <button class="btn btn--ghost" id="syncOrdersBtn" style="padding:6px 12px;font-size:11.5px;font-weight:700;display:inline-flex;align-items:center;gap:4px" onclick="syncMeeshoOrders()">
+      <span>🔄</span> Sync Meesho Orders
+    </button>
+  </div>
+  <div id="ordList"><div class="glass fcard muted">No orders yet</div></div>
 </section>
 
-<!-- bottom nav -->
+<!-- Bottom Tabs Navigation -->
 <nav class="nav">
-  <button class="on" data-tab="home" onclick="goTab('home')"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a2 2 0 01-2 2h-4v-7h-6v7H5a2 2 0 01-2-2z"/></svg>HOME</button>
-  <button data-tab="search" onclick="goTab('search')"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>SEARCH</button>
-  <button data-tab="cart" onclick="goTab('cart')"><svg viewBox="0 0 24 24"><path d="M6 6h15l-1.5 9h-12z"/><path d="M6 6L5 3H2"/><circle cx="9" cy="20" r="1.6"/><circle cx="17" cy="20" r="1.6"/></svg>CART</button>
-  <button data-tab="account" onclick="goTab('account')"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>ACCOUNT</button>
+  <button class="on" data-tab="home" onclick="go('home')">
+    <svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a2 2 0 01-2 2h-4v-7h-6v7H5a2 2 0 01-2-2z"/></svg>HOME
+  </button>
+  <button data-tab="search" onclick="go('search')">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>SEARCH
+  </button>
+  <button data-tab="cart" onclick="go('cart')">
+    <svg viewBox="0 0 24 24"><path d="M6 6h15l-1.5 9h-12z"/><path d="M6 6L5 3H2"/><circle cx="9" cy="20" r="1.6"/><circle cx="17" cy="20" r="1.6"/></svg>CART
+  </button>
+  <button data-tab="account" onclick="go('account')">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>ACCOUNT
+  </button>
 </nav>
 
-<!-- generic bottom sheet -->
+<!-- Reusable Bottom Sheet Modal -->
 <div class="sheetwrap" id="sheetWrap" onclick="if(event.target===this)closeSheet()">
   <div class="sheet"><div class="grip"></div><div id="sheetBody"></div></div>
 </div>
 
-<!-- QR modal -->
+<!-- UPI QR Payment Modal -->
 <div class="qrwrap" id="qrWrap" onclick="if(event.target===this)closeQR()">
   <div class="qrcard">
-    <div style="font-size:11px;font-weight:800;letter-spacing:1.6px;color:var(--cyan)">UPI PAYMENT</div>
+    <div style="font-size:11px;font-weight:800;letter-spacing:1.8px;color:var(--cyan)" id="qrTitle">JUSPAY UPI PAYMENT</div>
     <div class="amt num" id="qrAmt">₹0</div>
-    <div class="qrbox" id="qrBox">QR</div>
-    <div class="vparow"><span class="mono" id="qrVpa">MEESHOONLINEPG@axl</span><button onclick="copyText(document.getElementById('qrVpa').textContent,'VPA copied')">COPY</button></div>
+    <div class="qrbox" id="qrBox">
+      <img id="qrImg" src="" alt="UPI QR Code" onerror="onQrImgError(this)">
+    </div>
+    <div class="vparow" id="qrVpaRow">
+      <span class="mono" id="qrVpa">MEESHOONLINEPG@axl</span>
+      <button onclick="copyText(document.getElementById('qrVpa').textContent,'Merchant VPA copied!')">COPY</button>
+    </div>
     <div class="muted mono" id="qrOrd" style="margin-top:6px;font-size:11px"></div>
-    <a class="btn btn--ghost fbtn" id="qrOpen" href="#" style="display:block;text-decoration:none;text-align:center">Open UPI App ↗</a>
-    <button class="btn btn--ghost fbtn" onclick="copyUpi()">Copy UPI Link</button>
-    <button class="btn btn--go fbtn" onclick="confirmPay()">✅ I have paid</button>
-    <button class="btn btn--ghost fbtn btn--dim" onclick="closeQR()">Cancel</button>
+    <button class="btn btn--go fbtn" onclick="openUpiDirect()" style="margin-top:12px;font-weight:800">⚡ Pay Directly via UPI App</button>
+    <a class="btn btn--ghost fbtn" id="qrOpen" href="#" style="display:none;text-decoration:none;margin-top:8px">Open UPI Intent Link ↗</a>
+    <button class="btn btn--ghost fbtn" onclick="copyUpi()" style="margin-top:8px">Copy UPI Link</button>
+    <button class="btn btn--go fbtn" id="qrConfirmBtn" onclick="confirmPay()" style="margin-top:8px">✅ I have paid</button>
+    <button class="btn btn--ghost fbtn btn--dim" onclick="closeQR()" style="margin-top:8px">Cancel</button>
   </div>
 </div>
 
 <script>
-/* ================= core ================= */
+/* --- User Identity Extraction --- */
 function getUid(){
   try{
     const tg = window.Telegram && window.Telegram.WebApp;
@@ -441,775 +529,1052 @@ function getUid(){
   }catch(e){}
   try{
     let d = localStorage.getItem('device_uid');
-    if(!d){ d = '9' + Math.random().toString().slice(2,10); localStorage.setItem('device_uid', d); }
+    if(!d){
+      d = '9' + Math.random().toString().slice(2, 10);
+      localStorage.setItem('device_uid', d);
+    }
     return d;
   }catch(e){ return '1'; }
 }
 const UID = getUid();
-try{ document.getElementById('uidChip').textContent = 'ID ' + String(UID).slice(-6); }catch(e){}
-try{ if(window.Telegram && window.Telegram.WebApp){ Telegram.WebApp.ready(); Telegram.WebApp.expand(); } }catch(e){}
+document.getElementById('uidChip').textContent = 'ID ' + String(UID).slice(-6);
 
+/* --- API Fetch Wrapper with X-User-Id --- */
 async function api(path, opts){
   opts = opts || {};
   const r = await fetch(path, {
     method: opts.method || 'GET',
-    headers: {'Content-Type':'application/json','X-User-Id': UID},
+    headers: {'Content-Type': 'application/json', 'X-User-Id': UID},
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined
   });
-  let d = null;
-  try{ d = await r.json(); }catch(e){ throw new Error('network'); }
-  return d;
+  return await r.json();
 }
-function toast(m, kind){
+
+function toast(msg, kind){
   const t = document.getElementById('toast');
-  t.textContent = m; t.className = 'toast show' + (kind ? ' ' + kind : '');
-  clearTimeout(t._h); t._h = setTimeout(()=>{ t.className = 'toast'; }, 2200);
+  t.textContent = msg;
+  t.className = 'toast show' + (kind ? ' ' + kind : '');
+  clearTimeout(t._h);
+  t._h = setTimeout(() => { t.className = 'toast'; }, 2200);
 }
-function apiErr(d, fb){
-  if(!d) return fb || 'Network error — try again';
-  return d.message || d.error || fb || 'Something went wrong';
-}
-const inr = n => '₹' + (Number(n) || 0);
+
+const inr = n => '₹' + (Math.round(Number(n) || 0));
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function fmtCount(n){
-  n = Number(n) || 0;
-  if(n >= 1000) return (n/1000).toFixed(1).replace('.0','') + 'k';
-  return String(n);
-}
 
-let S = { offer:null, products:[], trend:[], cart:[], summary:null, addresses:[], account:null, orders:[], cartSession:'' };
-let cur = null, curVid = 0, curQty = 1, payMethod = 'COD', coAddrId = null, pendPay = null, otpS = null;
-// In-flight guards: the backend add is additive, so a double-tap without a
-// guard posts twice and the qty visibly doubles (1 → 2).
-let addBusy = false, cartBusy = false;
+let S = { offer: null, products: [], cart: [], addresses: [], summary: null, account: null, orders: [] };
+let curProd = null, curVid = 0, curQty = 1, payMethod = 'COD', coAddrId = null, pendOrder = null, otpSession = null;
+let pendRecharge = null, qrMode = 'order';
 
-function goTab(t){
+/* Navigation */
+function go(tab){
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.querySelectorAll('.nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
-  document.getElementById('view-' + t).classList.add('active');
+  document.querySelectorAll('.nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  document.getElementById('view-' + tab).classList.add('active');
   window.scrollTo(0, 0);
-  if(t === 'cart') renderCart();
-  if(t === 'account'){ loadAccount(); loadOrders(); loadAddresses(); }
+  if(tab === 'cart') renderCart();
+  if(tab === 'account'){ loadAccount(); loadAddresses(); loadOrders(); loadWallet(); }
 }
 
-/* ================= offer (FOD) ================= */
-function paintOffer(o){
-  if(!o) return;
-  const b = parseInt(o.bucket) || 0;
-  const disp = o.display_text || (b ? 'Upto ₹' + b + ' OFF' : (o.text || 'Offer'));
-  document.getElementById('fodAmt').textContent = disp;
-  document.getElementById('fodSub').textContent = (o.subtitle || 'on 1st order') + (o.duration ? ' • ' + o.duration + ' days' : '') + ' • live bucket';
-  document.getElementById('fodMeta').textContent = b ? ('BUCKET ' + b + ' • REAL') : 'LIVE';
-}
+/* Offer Rolling (FOD Bucket 180-220) */
 async function loadOffer(){
   try{
-    const j = await api('/api/offers');
-    if(j && j.offer && j.offer.bucket){ S.offer = j.offer; paintOffer(j.offer); return; }
-    document.getElementById('fodSub').textContent = 'No live offer — hit Roll';
-  }catch(e){ document.getElementById('fodSub').textContent = 'Unable to reach server'; }
-}
-async function rollFOD(){
-  const btn = document.getElementById('rollBtn');
-  btn.innerHTML = '<span class="spin">🎲</span> Rolling…'; btn.classList.add('btn--dim');
-  try{
-    const j = await api('/api/fod/roll');
-    if(j && j.offer && j.offer.bucket){
-      S.offer = j.offer; paintOffer(j.offer);
-      toast('Bucket ' + j.offer.bucket + ' locked ✓', 'ok');
-    } else toast(apiErr(j, 'Roll failed'), 'err');
-  }catch(e){ toast('Failed to roll offer', 'err'); }
-  btn.innerHTML = '🎲 Roll Offer'; btn.classList.remove('btn--dim');
-}
-function useOffer(){ goTab('account'); toast('Login to bind this bucket'); }
-
-/* ================= search + grid ================= */
-const QUICK = ['kurti', 'saree', 'tshirt', 'watch', 'shoes', 'kids wear', 'kitchen', 'bedsheet'];
-function paintChips(){
-  document.getElementById('chips').innerHTML = QUICK.map(q =>
-    '<button class="chip" onclick="quickSearch(\'' + q + '\')">' + esc(q) + '</button>').join('');
-}
-function quickSearch(q){ document.getElementById('q').value = q; doSearch(); }
-function mapCard(c){
-  const price = Math.round(Number(c.price) || 0);
-  const mrp = Math.round(Number(c.original_price || c.mrp || price) || 0);
-  const ra = (c.rating && c.rating.average) || c.rating_value || '';
-  const rc = (c.rating && c.rating.count) || c.rating_count || '';
-  return {
-    id: Number(c.product_id) || 0, name: c.name || 'Product', price, mrp,
-    off: c.discount_text || (mrp > price ? Math.round((mrp - price) * 100 / mrp) + '% OFF' : ''),
-    img: c.image || '', rating: ra ? ra + ' ★' : '', reviews: rc ? fmtCount(rc) : '',
-    fod: (typeof c.fod_savings === 'string' && c.fod_savings) ? c.fod_savings : ''
-  };
-}
-function cardHTML(p){
-  return '<div class="pcard" onclick="openProduct(' + p.id + ')">' +
-    '<div class="pcard__img"><img loading="lazy" src="' + esc(p.img) + '" onerror="this.src=\'https://via.placeholder.com/300\'">' +
-    (p.fod ? '<span class="fodtag">' + esc(p.fod) + '</span>' : '') + '</div>' +
-    '<div class="pcard__body"><div class="pcard__name">' + esc(p.name) + '</div>' +
-    '<div class="pcard__pr"><b class="num">' + inr(p.price) + '</b>' +
-    (p.mrp > p.price ? '<s>' + inr(p.mrp) + '</s>' : '') +
-    (p.off ? '<span>' + esc(p.off) + '</span>' : '') + '</div>' +
-    (p.rating ? '<div class="prate">★ ' + esc(p.rating) + (p.reviews ? ' <span style="color:var(--txt3)">(' + esc(p.reviews) + ')</span>' : '') + '</div>' : '') +
-    '</div></div>';
-}
-const SKEL = '<div class="sk"><div style="aspect-ratio:1"></div><div style="height:54px;margin:8px;border-radius:10px"></div></div>'.repeat(4);
-async function doSearch(){
-  const q = (document.getElementById('q').value || '').trim() || 'fashion trending';
-  const g = document.getElementById('grid');
-  g.innerHTML = SKEL;
-  try{
-    const j = await api('/api/search', {method:'POST', body:{query:q, limit:20}});
-    const cats = (j && j.catalogs) || [];
-    S.products = cats.map(mapCard).filter(p => p.id);
-    if(!S.products.length) g.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="art">🔍</div>No products found</div>';
-    else g.innerHTML = S.products.map(cardHTML).join('');
-  }catch(e){
-    g.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="art">📡</div>Failed to fetch products</div>';
-  }
-}
-async function loadTrending(){
-  const rail = document.getElementById('trendRail');
-  rail.innerHTML = '<div class="sk" style="flex:0 0 132px"><div style="height:170px"></div></div>'.repeat(3);
-  try{
-    const j = await api('/api/search', {method:'POST', body:{query:'fashion trending', limit:8}});
-    const cats = ((j && j.catalogs) || []).map(mapCard).filter(p => p.id);
-    S.trend = cats;
-    rail.innerHTML = cats.length ? cats.map(p =>
-      '<div class="rcard" onclick="openProduct(' + p.id + ',true)">' +
-      '<img loading="lazy" src="' + esc(p.img) + '" onerror="this.src=\'https://via.placeholder.com/300\'">' +
-      '<div><b class="num">' + inr(p.price) + '</b><p>' + esc(p.name) + '</p></div></div>').join('')
-      : '<div class="empty">No trends right now</div>';
-  }catch(e){ rail.innerHTML = '<div class="empty">Offline</div>'; }
-}
-
-/* ================= product sheet ================= */
-function openSheet(html){ document.getElementById('sheetBody').innerHTML = html; document.getElementById('sheetWrap').classList.add('show'); }
-function closeSheet(){ document.getElementById('sheetWrap').classList.remove('show'); }
-async function openProduct(id, fromTrend){
-  let p = S.products.find(x => String(x.id) === String(id)) ||
-          S.trend.find(x => String(x.id) === String(id));
-  if(!p){ toast('Product not loaded yet', 'err'); return; }
-  cur = {...p}; curVid = 0; curQty = 1;
-  paintProductSheet(cur, null);
-  try{
-    const d = await api('/api/product?product_id=' + encodeURIComponent(p.id));
-    if(d && !d.error && (d.product_id || d.name)){
-      const images = (d.images && d.images.length ? d.images : (d.image ? [d.image] : (p.img ? [p.img] : [])));
-      cur = {...cur,
-        name: d.name || cur.name,
-        price: Math.round(Number(d.price ?? cur.price) || 0),
-        mrp: Math.round(Number(d.mrp ?? d.original_price ?? cur.mrp) || 0),
-        off: d.discount_text || cur.off,
-        img: images[0] || cur.img, images,
-        supplier_id: d.supplier_id ?? cur.supplier_id ?? 0,
-        sizes: Array.isArray(d.sizes) && d.sizes.length
-          ? d.sizes.map(s => ({name:String(s.name || s.size || ''), id:Number(s.id ?? s.variation_id ?? 0) || 0, in_stock: s.in_stock !== false})).filter(s => s.name)
-          : [{name:'Free Size', id:0, in_stock:true}],
-        in_stock: d.in_stock !== false,
-        fod: (typeof d.fod_savings === 'string' && d.fod_savings) ? d.fod_savings : cur.fod
-      };
-      if(document.getElementById('sheetWrap').classList.contains('show')) paintProductSheet(cur, d);
+    const d = await api('/api/offers');
+    if(d && d.offer){
+      S.offer = d.offer;
+      paintOffer(d.offer);
     }
   }catch(e){}
 }
-function paintProductSheet(p, d){
-  const sizes = (p.sizes && p.sizes.length ? p.sizes : [{name:'Free Size', id:0, in_stock:true}]);
-  let sel = sizes.findIndex(s => s.in_stock !== false); if(sel < 0) sel = 0;
-  curVid = Number(sizes[sel].id) || 0;
-  openSheet(
-    '<span class="x" onclick="closeSheet()">✕</span><h3>' + esc(p.name).slice(0, 60) + '</h3>' +
-    '<div class="prow"><img src="' + esc(p.img) + '" onerror="this.src=\'https://via.placeholder.com/300\'">' +
-    '<div style="flex:1"><div style="font-weight:800;font-size:13px;line-height:1.4">' + esc(p.name) + '</div>' +
-    '<div style="margin-top:8px;display:flex;align-items:baseline;gap:7px;flex-wrap:wrap">' +
-    '<b class="num" style="font-size:20px">' + inr(p.price) + '</b>' +
-    (p.mrp > p.price ? '<s style="color:var(--txt3);font-size:12px">' + inr(p.mrp) + '</s><span style="font-size:11px;font-weight:800;color:var(--green)">' + esc(p.off || '') + '</span>' : '') +
-    '</div>' +
-    (p.fod ? '<div style="margin-top:8px"><span class="fodtag" style="position:static">' + esc(p.fod) + ' • First Order</span></div>' : '') +
-    '</div></div>' +
-    '<div class="sec">SELECT SIZE</div>' +
-    '<div class="sizepills">' + sizes.map((s, i) =>
-      '<button class="sizepill' + (i === sel ? ' on' : '') + (s.in_stock === false ? ' oos' : '') + '" data-vid="' + (Number(s.id) || 0) + '" ' +
-      (s.in_stock === false ? '' : 'onclick="pickSize(this)"') + '>' + esc(s.name) + '</button>').join('') + '</div>' +
-    '<div style="display:flex;gap:8px;align-items:center;margin-top:14px">' +
-    '<div class="stepper" style="margin:0"><button onclick="sheetQty(-1)">−</button><span id="sheetQ">1</span><button onclick="sheetQty(1)">+</button></div>' +
-    '<div class="muted">Free delivery • COD available</div></div>' +
-    '<div style="display:flex;gap:10px;margin-top:14px">' +
-    '<button class="btn btn--ghost" onclick="sheetAdd(false)">Add to Cart</button>' +
-    '<button class="btn btn--go" onclick="sheetAdd(true)">Buy Now</button></div>'
-  );
+function paintOffer(o){
+  const b = parseInt(o.bucket || o.display_bucket || 200);
+  document.getElementById('fodAmt').textContent = o.display_text || ('Upto ₹' + b + ' OFF');
+  document.getElementById('fodSub').textContent = (o.subtitle || 'on 1st order') + ' • Auto-applied on checkout';
+  document.getElementById('fodMeta').textContent = 'BUCKET ' + b + ' • ACTIVE';
 }
-function pickSize(el){
-  el.parentElement.querySelectorAll('.sizepill').forEach(s => s.classList.remove('on'));
-  el.classList.add('on');
-  curVid = Number(el.dataset.vid) || 0;
-}
-function sheetQty(d){
-  curQty = Math.min(10, Math.max(1, curQty + d));
-  document.getElementById('sheetQ').textContent = curQty;
-}
-async function sheetAdd(buy){
-  if(!cur || addBusy) return;
-  addBusy = true;
-  bumpPullToken();
+async function rollFOD(){
+  const btn = document.getElementById('rollBtn');
+  btn.innerHTML = '<span class="spin">🎲</span> Rolling…';
+  btn.classList.add('btn--dim');
   try{
-  let sizeEl = document.querySelector('.sizepill.on');
-  let size = (sizeEl && sizeEl.textContent ? sizeEl.textContent : 'Free Size').trim() || 'Free Size';
-  // Self-heal: the backend rejects null supplier/variation ids, so if the
-  // live detail never loaded (search rows carry no supplier), fetch it now
-  // and resolve the real ids before adding.
-  if(!(Number(cur.supplier_id) && Number(curVid))){
-    toast('Loading size info…');
-    try{
-      const dd = await api('/api/product?product_id=' + encodeURIComponent(cur.id));
-      if(dd && !dd.error && (dd.product_id || dd.name)){
-        cur = mergeDetail(cur, dd);
-        paintProductSheet(cur);
-        const pills = Array.prototype.slice.call(document.querySelectorAll('.sizepill'));
-        const back = pills.filter(function(p){ return p.textContent === size; })[0];
-        if(back) pickSize(back);
-        sizeEl = document.querySelector('.sizepill.on');
-        size = (sizeEl && sizeEl.textContent ? sizeEl.textContent : 'Free Size').trim() || 'Free Size';
-      }
-    }catch(e){}
-  }
-  try{
-    const d = await api('/api/cart/add', {method:'POST', body:{
-      product_id: cur.id, supplier_id: Number(cur.supplier_id) || 0,
-      variation_id: Number(curVid) || 0, variation: size, qty: curQty, quantity: curQty,
-      price: cur.price, mrp: cur.mrp, image: cur.img, name: cur.name
-    }});
-    if(d && (d.ok || d.success || Array.isArray(d.items))){
-      toast('Added to cart', 'ok');
-      await syncCart();
-      closeSheet();
-      if(buy) goTab('cart');
-      return;
+    const d = await api('/api/fod/roll');
+    if(d && d.offer){
+      S.offer = d.offer;
+      paintOffer(d.offer);
+      toast('Rolled Bucket: ₹' + (d.offer.bucket || 200) + ' OFF!', 'ok');
     }
-    toast(apiErr(d, 'Could not add to cart'), 'err');
-  }catch(e){ toast('Network error — try again', 'err'); }
-  }finally{ addBusy = false; }
+  }catch(e){ toast('Roll failed. Please retry', 'err'); }
+  btn.innerHTML = '🎲 Roll Offer';
+  btn.classList.remove('btn--dim');
+}
+function useOffer(){
+  go('search');
+  toast('Browse products to use your first-order offer!', 'ok');
 }
 
-/* ================= cart ================= */
-function normCart(d){
-  const raw = Array.isArray(d) ? d : (d && Array.isArray(d.items) ? d.items : []);
-  return raw.map(c => ({
-    key: c.identifier ?? c.id, product_id: c.product_id ?? c.id,
-    name: c.name || 'Item', price: Math.round(Number(c.price) || 0),
-    mrp: Math.round(Number(c.mrp ?? c.price) || 0),
-    img: c.image ?? c.img ?? '', size: c.variation ?? c.variation_name ?? '',
-    qty: Number(c.quantity ?? c.qty ?? 1) || 1
-  }));
+/* Product Search & Listing */
+const CHIPS = ['kurti', 'saree', 'tshirt', 'shoes', 'watch', 'bedsheet', 'earrings'];
+function paintChips(){
+  document.getElementById('chips').innerHTML = CHIPS.map(c =>
+    `<button class="chip" onclick="quickSearch('${c}')">${c}</button>`
+  ).join('');
 }
-async function refreshCartCount(){
-  await loadCart();
-  return S.cart;
+function quickSearch(q){
+  document.getElementById('q').value = q;
+  doSearch();
 }
-function updateBadge(){
-  const n = (S.cart || []).reduce((a, c) => a + (Number(c.qty) || 0), 0);
-  document.getElementById('cartBdg').textContent = n;
-  document.getElementById('stCart').textContent = n;
+async function doSearch(){
+  const q = (document.getElementById('q').value || '').trim() || 'fashion trending';
+  const g = document.getElementById('grid');
+  g.innerHTML = '<div class="sk"><div style="aspect-ratio:1"></div><div style="height:50px"></div></div>'.repeat(4);
+  try{
+    const d = await api('/api/search', {method:'POST', body:{query: q}});
+    const cats = (d && d.catalogs) || [];
+    S.products = cats;
+    if(!cats.length){
+      g.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="art">🔍</div>No products found</div>';
+      return;
+    }
+    g.innerHTML = cats.map(p => `
+      <div class="pcard" onclick="openProduct(${p.product_id})">
+        <div class="pcard__img">
+          <img src="${esc(p.image)}" onerror="this.src='https://via.placeholder.com/300'">
+          ${p.fod_savings ? `<span class="fodtag">${esc(p.fod_savings)}</span>` : ''}
+        </div>
+        <div class="pcard__body">
+          <div class="pcard__name">${esc(p.name)}</div>
+          <div class="pcard__pr">
+            <b class="num">${inr(p.price)}</b>
+            ${p.original_price > p.price ? `<s>${inr(p.original_price)}</s>` : ''}
+            <span>${esc(p.discount_text || 'Special Price')}</span>
+          </div>
+          <div class="prate">★ ${p.rating ? (p.rating.average || '4.1') : '4.1'}</div>
+        </div>
+      </div>
+    `).join('');
+  }catch(e){
+    g.innerHTML = '<div class="empty" style="grid-column:1/-1">Failed to fetch products</div>';
+  }
 }
-// State-only refresh (no painting): cart rows + checkout summary + badge +
-// the backend cart_session used by later mutations. Never throws.
+
+async function loadTrending(){
+  try{
+    const d = await api('/api/search', {method:'POST', body:{query: 'fashion trending'}});
+    const cats = ((d && d.catalogs) || []).slice(0, 6);
+    document.getElementById('trendGrid').innerHTML = cats.map(p => `
+      <div class="pcard" onclick="openProduct(${p.product_id})">
+        <div class="pcard__img"><img src="${esc(p.image)}" onerror="this.src='https://via.placeholder.com/300'"></div>
+        <div class="pcard__body">
+          <div class="pcard__name">${esc(p.name)}</div>
+          <div class="pcard__pr"><b class="num">${inr(p.price)}</b></div>
+        </div>
+      </div>
+    `).join('');
+  }catch(e){}
+}
+
+/* Product Detail Bottom Sheet */
+function openSheet(html){
+  document.getElementById('sheetBody').innerHTML = html;
+  document.getElementById('sheetWrap').classList.add('show');
+}
+function closeSheet(){
+  document.getElementById('sheetWrap').classList.remove('show');
+}
+
+async function openProduct(pid){
+  let p = S.products.find(x => String(x.product_id) === String(pid));
+  curProd = p || {product_id: pid, name: 'Product', price: 199};
+  curVid = 0; curQty = 1;
+  paintProductSheet(curProd);
+  try{
+    const d = await api('/api/product?product_id=' + pid);
+    if(d && !d.error){
+      curProd = d;
+      paintProductSheet(d);
+    }
+  }catch(e){}
+}
+
+function paintProductSheet(p){
+  const sizes = (p.sizes && p.sizes.length ? p.sizes : [{name:'Free Size', id:0}]);
+  curVid = sizes[0].id || 0;
+  openSheet(`
+    <span class="x" onclick="closeSheet()">✕</span>
+    <h3>${esc(p.name)}</h3>
+    <div class="prow">
+      <img src="${esc(p.image)}" onerror="this.src='https://via.placeholder.com/300'">
+      <div style="flex:1">
+        <div style="font-weight:700;font-size:13px">${esc(p.name)}</div>
+        <div style="margin-top:8px;display:flex;align-items:baseline;gap:8px">
+          <b class="num" style="font-size:22px">${inr(p.price)}</b>
+          ${p.mrp > p.price ? `<s style="color:var(--txt3)">${inr(p.mrp)}</s>` : ''}
+        </div>
+        ${p.fod_savings ? `<span class="fodtag" style="position:static;display:inline-block;margin-top:8px">${esc(p.fod_savings)}</span>` : ''}
+      </div>
+    </div>
+    <div class="sec">SELECT SIZE</div>
+    <div class="sizepills">
+      ${sizes.map((s, i) => `
+        <button class="sizepill ${i===0?'on':''}" onclick="pickSize(this, ${s.id})">${esc(s.name)}</button>
+      `).join('')}
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn btn--ghost" onclick="addToCart(false)">Add to Cart</button>
+      <button class="btn btn--go" onclick="addToCart(true)">Buy Now</button>
+    </div>
+  `);
+}
+
+function pickSize(el, vid){
+  document.querySelectorAll('.sizepill').forEach(s => s.classList.remove('on'));
+  el.classList.add('on');
+  curVid = vid;
+}
+
+async function addToCart(buyNow){
+  if(!curProd) return;
+  const sizeEl = document.querySelector('.sizepill.on');
+  const sizeName = sizeEl ? sizeEl.textContent.trim() : 'Free Size';
+  try{
+    const d = await api('/api/cart/add', {
+      method: 'POST',
+      body: {
+        product_id: curProd.product_id,
+        supplier_id: curProd.supplier_id || 0,
+        variation_id: curVid,
+        variation_name: sizeName,
+        qty: 1,
+        price: curProd.price,
+        mrp: curProd.mrp || curProd.price,
+        name: curProd.name,
+        image: curProd.image
+      }
+    });
+    if(d && d.ok){
+      toast('Added to Cart ✓', 'ok');
+      closeSheet();
+      await loadCart();
+      if(buyNow) go('cart');
+    } else {
+      toast(d.error || 'Could not add to cart', 'err');
+    }
+  }catch(e){ toast('Failed to add to cart', 'err'); }
+}
+
+/* Cart Management (Strictly + and Delete Buttons Only) */
 async function loadCart(){
   try{
     const d = await api('/api/cart');
-    if(d && d.cart_session) S.cartSession = d.cart_session;
-    S.cart = normCart(d);
+    S.cart = (d && d.items) || [];
+    const count = S.cart.reduce((a, c) => a + Number(c.qty || 1), 0);
+    const cartBdg = document.getElementById('cartBdg');
+    if(cartBdg) cartBdg.textContent = count;
+    const stCart = document.getElementById('stCart');
+    if(stCart) stCart.textContent = count;
   }catch(e){ S.cart = []; }
-  try{
-    const s = await api('/api/checkout/summary');
-    S.summary = (s && !s.error) ? s : null;
-  }catch(e){ S.summary = null; }
-  updateBadge();
 }
+
 async function renderCart(){
   await loadCart();
-  const items = S.cart;
   const list = document.getElementById('cartList');
-  if(!items.length){
-    list.innerHTML = '<div class="empty"><div class="art">🛒</div>Your cart is empty<br><span style="font-size:11px">Search something you love</span></div>';
+  if(!S.cart.length){
+    list.innerHTML = '<div class="empty"><div class="art">🛒</div>Cart is empty<br><small>Discover products in Search</small></div>';
     document.getElementById('sumCard').style.display = 'none';
     document.getElementById('ctaBar').style.display = 'none';
-    paintCartAddr();
     return;
   }
-  list.innerHTML = items.map((c, i) =>
-    '<div class="glass citem"><img src="' + esc(c.img) + '" onerror="this.src=\'https://via.placeholder.com/300\'">' +
-    '<div style="flex:1;min-width:0"><div class="nm">' + esc(c.name) + '</div>' +
-    '<div class="vr">' + esc(c.size) + '</div>' +
-    '<div class="pr num">' + inr(c.price) + (c.mrp > c.price ? ' <s>' + inr(c.mrp) + '</s>' : '') + '</div></div>' +
-    '<div class="cart-actions"><button class="btn-del" onclick="deleteCartItem(' + i + ')" title="Remove">🗑</button>' +
-    '<span class="qty-label num">×' + c.qty + '</span>' +
-    '<button class="btn-inc" onclick="incCartItem(' + i + ')" title="Add one more">+</button></div></div>'
-  ).join('');
 
-  const s = S.summary;
-  if(s){
-      const mrp = Number(s.product_price || 0);
-      const disc = Math.abs(Number(s.total_discounts || 0));
-      const cod = Number(s.cod_amount ?? s.total ?? 0);
-      const upi = Number(s.upi_amount ?? cod);
-      const pre = Number(s.prepaid_discount || Math.max(0, cod - upi)) || 0;
-      document.getElementById('sMrp').textContent = inr(mrp);
-      document.getElementById('sDisc').textContent = '−' + inr(disc);
-      document.getElementById('sTot').textContent = inr(cod);
-      document.getElementById('sCod').textContent = inr(cod);
-      document.getElementById('sUpi').textContent = inr(upi);
-      document.getElementById('sSave').textContent = pre > 0
-        ? 'Pay ' + inr(upi) + ' via UPI (Save ' + inr(pre) + ')'
-        : 'UPI & COD same price';
+  list.innerHTML = S.cart.map((c, i) => `
+    <div class="glass citem">
+      <img src="${esc(c.image)}" onerror="this.src='https://via.placeholder.com/300'">
+      <div style="flex:1;min-width:0">
+        <div class="nm">${esc(c.name)}</div>
+        <div class="vr">${esc(c.variation_name || 'Free Size')}</div>
+        <div class="pr num">${inr(c.price)} ${c.mrp > c.price ? `<s>${inr(c.mrp)}</s>` : ''}</div>
+      </div>
+      <div class="cart-actions">
+        <button class="btn-del" onclick="deleteCartItem(${i})" title="Remove Item">🗑</button>
+        <span class="qty-badge num">×${c.qty || 1}</span>
+        <button class="btn-inc" onclick="incCartItem(${i})" title="Add one more">+</button>
+      </div>
+    </div>
+  `).join('');
+
+  // Fetch live breakdown
+  try{
+    const s = await api('/api/checkout/summary');
+    if(s && !s.error){
+      S.summary = s;
+      document.getElementById('sMrp').textContent = inr(s.product_price || s.subtotal);
+      document.getElementById('sDisc').textContent = '−' + inr(s.total_discounts || s.prepaid_discount || 0);
+      document.getElementById('sTot').textContent = inr(s.cod_amount || s.total);
+      document.getElementById('sCod').textContent = inr(s.cod_amount || s.total);
+      document.getElementById('sUpi').textContent = inr(s.upi_amount || s.total);
+      document.getElementById('sSave').textContent = s.prepaid_discount > 0 ? `Pay ${inr(s.upi_amount)} via UPI (Save ${inr(s.prepaid_discount)})` : 'UPI & COD Available';
+      document.getElementById('ctaTot').textContent = inr(s.cod_amount || s.total);
       document.getElementById('sumCard').style.display = 'block';
-      document.getElementById('ctaTot').textContent = inr(cod);
       document.getElementById('ctaBar').style.display = 'flex';
-    } else {
-    const mrp = items.reduce((a, c) => a + c.mrp * c.qty, 0);
-    const tot = items.reduce((a, c) => a + c.price * c.qty, 0);
-    document.getElementById('sMrp').textContent = inr(mrp);
-    document.getElementById('sDisc').textContent = '−' + inr(mrp - tot);
-    document.getElementById('sTot').textContent = inr(tot);
-    document.getElementById('sCod').textContent = inr(tot);
-    document.getElementById('sUpi').textContent = inr(tot);
-    document.getElementById('sSave').textContent = 'Live prices need login + address';
-    document.getElementById('sumCard').style.display = 'block';
-    document.getElementById('ctaTot').textContent = inr(tot);
-    document.getElementById('ctaBar').style.display = 'flex';
-  }
+    }
+  }catch(e){}
   paintCartAddr();
 }
-async function pullMeeshoCart(){
-  // Reconcile local cart with the REAL Meesho cart (prices/session, prune
-  // server-side removals). Also caches Meesho review identifiers per
-  // product_id so removals can send the exact server identifier.
-  // Never throws — returns the pull payload or null.
-  try{
-    const p = await api('/api/cart/sync/pull');
-    if(p && p.ok){
-      try{
-        const map = {};
-        (p.meesho_items || []).forEach(function(m){
-          if(m && m.product_id && m.identifier) map[String(m.product_id)] = m.identifier;
-        });
-        window._meeshoIdents = map;
-      }catch(e){}
-      return p;
-    }
-    return null;
-  }catch(e){ return null; }
-}
-function meeshoIdent(pid, fallback){
-  try{
-    const m = window._meeshoIdents || {};
-    return m[String(pid)] || fallback;
-  }catch(e){ return fallback; }
-}
-// Spec: after EVERY cart mutation, pull the real Meesho cart, reconcile
-// local rows, then reload UI state — the mini app can never drift.
-async function syncCart(){
-  const pull = await pullMeeshoCart();
-  await loadCart();
-  if(pull && pull.imported > 0) toast('Cart synced from Meesho', 'ok');
-  return pull;
-}
-// Delayed background reconcile for removals: Meesho lags behind a remove,
-// so an instant pull would re-import the item (qty jumps back / doubles).
-// The backend tombstone already blocks that, but waiting still avoids churn.
-// Superseded automatically when a newer cart op bumps the token.
-function schedulePull(ms){
-  window._pullToken = (window._pullToken || 0) + 1;
-  const t = window._pullToken;
-  setTimeout(async function(){
-    if(t !== window._pullToken) return;
-    try{
-      const pull = await pullMeeshoCart();
-      await loadCart();
-      if(pull && ((pull.imported || 0) > 0 || (pull.removed || 0) > 0 || (pull.updated || 0) > 0)) await renderCart();
-    }catch(e){}
-  }, ms || 8000);
-}
-function bumpPullToken(){ window._pullToken = (window._pullToken || 0) + 1; }
+
 async function incCartItem(i){
-  const c = S.cart[i];
-  if(!c || cartBusy) return;
-  cartBusy = true;
-  bumpPullToken();
+  const item = S.cart[i];
+  if(!item) return;
+  const newQty = Number(item.qty || 1) + 1;
   try{
-    const qty = c.qty + 1;
-    const r = await api('/api/cart/update', {method:'POST', body:{cart_id: c.key, product_id: c.product_id, identifier: meeshoIdent(c.product_id, c.key), cart_session: S.cartSession || '', qty: qty}});
-    if(!(r && (r.ok || r.success || Array.isArray(r.items)))) return toast(apiErr(r, 'Could not update'), 'err');
-    const pull = await syncCart();
-    await renderCart();
-    if(pull && pull.updated) toast('Cart synced', 'ok');
-  }catch(e){ toast('Network error — try again', 'err'); }
-  finally{ cartBusy = false; }
-}
-async function deleteCartItem(i){
-  const c = S.cart[i];
-  if(!c || cartBusy) return;
-  if(!confirm('Remove "' + c.name + '" from cart?')) return;
-  cartBusy = true;
-  bumpPullToken();
-  try{
-    const r = await api('/api/cart/update', {method:'POST', body:{cart_id: c.key, product_id: c.product_id, identifier: meeshoIdent(c.product_id, c.key), cart_session: S.cartSession || '', qty: 0}});
-    if(!(r && (r.ok || r.success || Array.isArray(r.items)))) return toast(apiErr(r, 'Could not remove'), 'err');
-    // Do NOT pull immediately: Meesho lags behind the remove and an
-    // instant pull would re-import the item. Paint local truth now;
-    // the backend tombstone blocks re-import meanwhile.
-    await renderCart();
-    const v = r.meesho_verified;
-    if(v === true) toast('Removed ✓ Meesho synced', 'ok');
-    else if(v === false) toast('Removed locally — Meesho retry pending', 'ok');
-    else toast('Removed', 'ok');
-    schedulePull(4000);
-  }catch(e){ toast('Network error — try again', 'err'); }
-  finally{ cartBusy = false; }
-}
-function paintCartAddr(){
-  const a = S.addresses.find(x => x.active) || S.addresses[0];
-  document.getElementById('cartAddrT').textContent = a ? (a.name + ' • ' + a.pin) : 'Select delivery address';
-  document.getElementById('cartAddrS').textContent = a ? [a.line1, a.city].filter(Boolean).join(', ') : 'Tap to choose';
+    const d = await api('/api/cart/update', {
+      method: 'POST',
+      body: {cart_id: item.id, product_id: item.product_id, qty: newQty}
+    });
+    if(d && d.ok){
+      await renderCart();
+    }
+  }catch(e){ toast('Failed to update quantity', 'err'); }
 }
 
-/* ================= checkout ================= */
-function normAddr(a){
-  return {id:a.id, name:a.name || '', phone:a.mobile || a.phone || '', pin:String(a.pin || ''),
-    city:a.city || '', state:a.state || '', line1:a.address_line_1 || a.line1 || '',
-    line2:a.address_line_2 || a.line2 || '', type:a.address_type || a.type || 'Home',
-    active:!!(a.is_default || a.active)};
+async function deleteCartItem(i){
+  const item = S.cart[i];
+  if(!item) return;
+  if(!confirm(`Remove "${item.name}" from cart?`)) return;
+
+  try{
+    const d = await api('/api/cart/update', {
+      method: 'POST',
+      body: {cart_id: item.id, product_id: item.product_id, qty: 0}
+    });
+    if(d && d.ok){
+      toast('Item removed', 'ok');
+      await renderCart();
+      // Schedule background pull after 4 seconds to prevent lag resurrection
+      schedulePull(4000);
+    }
+  }catch(e){ toast('Failed to remove item', 'err'); }
 }
+
+function schedulePull(ms){
+  setTimeout(async () => {
+    try{
+      await api('/api/cart/sync/pull', {method: 'POST'});
+      await loadCart();
+    }catch(e){}
+  }, ms);
+}
+
+/* Address Management & Geolocation */
 async function loadAddresses(){
   try{
-    const j = await api('/api/addresses');
-    const list = (j && j.addresses) || [];
-    S.addresses = list.map(normAddr);
-    const dflt = j && j.default;
-    if(dflt) S.addresses.forEach(a => { a.active = String(a.id) === String(dflt.id ?? dflt); });
-    if(S.addresses.length && !S.addresses.some(a => a.active)) S.addresses[0].active = true;
+    const d = await api('/api/addresses');
+    S.addresses = (d && d.addresses) || [];
   }catch(e){ S.addresses = []; }
   paintCartAddr();
 }
-function openAddrSheet(newMode){
-  const list = S.addresses.length ? S.addresses.map(a =>
-    '<div class="radio-card' + (a.active ? ' on' : '') + '" onclick="pickAddr(' + a.id + ')">' +
-    '<div class="radio-dot"></div><div style="flex:1"><b style="font-size:12.5px">' + esc(a.name) + ' • ' + esc(a.type) + '</b>' +
-    '<div class="muted" style="margin-top:3px">' + esc([a.line1, a.city].filter(Boolean).join(', ')) + ' — ' + esc(a.pin) + '<br>' + esc(a.phone) + '</div></div></div>'
-  ).join('') : '<div class="empty"><div class="art">📍</div>No addresses yet</div>';
-  openSheet('<span class="x" onclick="closeSheet()">✕</span><h3>Delivery address</h3>' + list +
-    '<div class="sec">NEW ADDRESS</div>' +
-    '<div class="mini-form">' +
-    '<input id="fName" class="fld" placeholder="Full name">' +
-    '<input id="fPhone" class="fld" inputmode="numeric" maxlength="10" placeholder="10-digit mobile">' +
-    '<button class="detect-btn" onclick="detectLocation()">📍 Detect Location (auto-fill city/pin)</button>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><input id="fPin" class="fld" inputmode="numeric" placeholder="Pincode"><input id="fCity" class="fld" placeholder="City"></div>' +
-    '<input id="fState" class="fld" placeholder="State" style="display:none">' +
-    '<input id="fLine" class="fld" placeholder="House no, street, area">' +
-    '<button class="btn btn--go fbtn" onclick="saveAddr()">Save & use this address</button></div>');
-  if(newMode) setTimeout(() => { try{ document.getElementById('fName').focus(); }catch(e){} }, 300);
+
+function paintCartAddr(){
+  const a = S.addresses.find(x => x.is_default) || S.addresses[0];
+  if(a){
+    document.getElementById('cartAddrT').textContent = `${a.name} • ${a.pin}`;
+    document.getElementById('cartAddrS').textContent = `${a.address_line_1}, ${a.city}`;
+  } else {
+    document.getElementById('cartAddrT').textContent = 'Select Delivery Address';
+    document.getElementById('cartAddrS').textContent = 'Tap to select or add new';
+  }
 }
-async function pickAddr(id){
-  try{
-    const d = await api('/api/addresses/set_default', {method:'POST', body:{id}});
-    if(d && d.ok){
-      S.addresses.forEach(a => { a.active = String(a.id) === String(id); });
-      paintCartAddr(); closeSheet(); toast('Address selected', 'ok');
-    } else toast(apiErr(d, 'Could not select'), 'err');
-  }catch(e){ toast('Network error — try again', 'err'); }
+
+function openAddrSheet(forceNew){
+  const list = S.addresses.map(a => `
+    <div class="radio-card ${a.is_default?'on':''}" onclick="pickAddr(${a.id})">
+      <div class="radio-dot"></div>
+      <div style="flex:1">
+        <b>${esc(a.name)} • ${esc(a.pin)}</b>
+        <div class="muted">${esc(a.address_line_1)}, ${esc(a.city)}</div>
+      </div>
+    </div>
+  `).join('');
+
+  openSheet(`
+    <span class="x" onclick="closeSheet()">✕</span>
+    <h3>Delivery Address</h3>
+    ${list || '<div class="muted" style="margin:10px 0">No address saved yet</div>'}
+    <div class="sec">ADD NEW ADDRESS</div>
+    <input id="fName" class="fld" placeholder="Full Name">
+    <input id="fMobile" class="fld" inputmode="numeric" maxlength="10" placeholder="10-digit Mobile Number">
+    <button class="detect-btn" onclick="detectLocation()">📍 Detect Location (Auto-fill city/pin)</button>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <input id="fPin" class="fld" inputmode="numeric" placeholder="Pincode">
+      <input id="fCity" class="fld" placeholder="City">
+    </div>
+    <input id="fState" class="fld" placeholder="State">
+    <input id="fLine" class="fld" placeholder="House No., Street Name, Colony">
+    <div id="mapWrap" style="display:none;margin:12px 0 8px;border-radius:12px;overflow:hidden;border:1px solid var(--line2);background:#131a26">
+      <div id="mapBox" style="width:100%;height:140px;position:relative;background:#101620"></div>
+      <div style="padding:6px 12px;background:rgba(0,0,0,0.5);display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line2)">
+        <div style="font-size:11px;color:var(--cyan);font-family:monospace;display:flex;align-items:center;gap:5px">
+          <span>📍</span>
+          <span id="mapCoordText">Lat: --, Lng: --</span>
+        </div>
+        <span style="font-size:10px;color:var(--green);font-weight:700">✓ GPS DETECTED</span>
+      </div>
+    </div>
+    <button class="btn btn--go fbtn" onclick="saveAddress()" style="margin-top:6px">Save &amp; Select Address</button>
+  `);
+  if(window._lastDetectedCoords){
+    renderMiniMap(window._lastDetectedCoords.lat, window._lastDetectedCoords.lng);
+  }
 }
+
 function detectLocation(){
-  if(!navigator.geolocation){ toast('Geolocation not supported', 'err'); return; }
-  toast('Detecting location…');
-  navigator.geolocation.getCurrentPosition(async function(pos){
+  if(!navigator.geolocation){
+    toast('Geolocation not supported by browser', 'err');
+    return;
+  }
+  toast('Detecting GPS location…');
+  navigator.geolocation.getCurrentPosition(async (pos) => {
     try{
-      const lat = pos.coords.latitude, lng = pos.coords.longitude;
-      const d = await api('/api/geocode?lat=' + lat + '&lng=' + lng);
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      window._lastDetectedCoords = {lat, lng};
+      renderMiniMap(lat, lng);
+      const d = await api(`/api/geocode?lat=${lat}&lng=${lng}`);
       const r = d && d.results && d.results[0];
       if(r){
         if(document.getElementById('fPin')) document.getElementById('fPin').value = r.pin || '';
         if(document.getElementById('fCity')) document.getElementById('fCity').value = r.city || '';
-        if(document.getElementById('fState')){ document.getElementById('fState').value = r.state || ''; document.getElementById('fState').style.display = 'block'; }
-        toast('Location detected: ' + (r.city || ''), 'ok');
-      } else { toast('Could not detect — enter manually', 'err'); }
-    }catch(e){ toast('Geocode failed — enter manually', 'err'); }
-  }, function(err){
-    toast('Location access denied — enter manually', 'err');
-  }, {timeout:10000, maximumAge:60000});
+        if(document.getElementById('fState')) document.getElementById('fState').value = r.state || '';
+        toast('Location detected: ' + r.city, 'ok');
+      }
+    }catch(e){ toast('Geocoding failed. Please type manually', 'err'); }
+  }, () => {
+    toast('Location access permission denied', 'err');
+  }, {timeout: 8000});
 }
-async function saveAddr(){
-  const v = id => (document.getElementById(id).value || '').trim();
-  const body = {name:v('fName'), mobile:v('fPhone').replace(/\D/g, '').slice(-10), pin:v('fPin'),
-    city:v('fCity'), state:v('fState'), address_line_1:v('fLine'), address_line_2:'', landmark:'',
-    address_type:'Home', is_default:1};
-  if(!(body.name && body.mobile && body.pin && body.address_line_1)) return toast('Name, mobile, pin, address required', 'err');
-  try{
-    const d = await api('/api/addresses/create', {method:'POST', body});
-    if(d && d.ok){ await loadAddresses(); closeSheet(); toast('Address saved', 'ok'); }
-    else toast(apiErr(d, 'Could not save'), 'err');
-  }catch(e){ toast('Network error — try again', 'err'); }
+
+function renderMiniMap(lat, lng){
+  const wrap = document.getElementById('mapWrap');
+  const box = document.getElementById('mapBox');
+  const coordEl = document.getElementById('mapCoordText');
+  if(!wrap || !box) return;
+
+  wrap.style.display = 'block';
+  if(coordEl){
+    coordEl.textContent = `${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E`;
+  }
+
+  // OpenStreetMap embed with pinpoint marker (free, no API key required)
+  const delta = 0.005;
+  const bbox = `${(lng - delta).toFixed(5)}%2C${(lat - delta).toFixed(5)}%2C${(lng + delta).toFixed(5)}%2C${(lat + delta).toFixed(5)}`;
+  const embedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat}%2C${lng}`;
+
+  box.innerHTML = `
+    <iframe id="mapFrame" src="${embedUrl}" style="width:100%;height:100%;border:none;pointer-events:none;background:#151c28" loading="lazy"></iframe>
+    <div style="position:absolute;top:6px;left:6px;background:rgba(19,26,38,0.88);backdrop-filter:blur(4px);padding:2px 8px;border-radius:4px;font-size:10px;color:var(--cyan);font-weight:700;display:flex;align-items:center;gap:4px;border:1px solid rgba(102,252,241,0.3)">
+      <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--cyan)"></span>
+      Delivery Pin (${lat.toFixed(3)}, ${lng.toFixed(3)})
+    </div>
+  `;
 }
-function openCheckout(){
-  if(!S.cart.length) return toast('Cart is empty', 'err');
-  const s = S.summary;
-  const cod = s ? Number(s.cod_amount ?? s.total ?? 0) : 0;
-  const upi = s ? Number(s.upi_amount ?? cod) : 0;
-  const pre = Math.max(0, cod - upi);
-  payMethod = 'COD';
-  const a = S.addresses.find(x => x.active) || S.addresses[0];
-  coAddrId = a ? a.id : null;
-  const addrHtml = S.addresses.length ? S.addresses.map(x =>
-    '<div class="radio-card' + (coAddrId && String(x.id) === String(coAddrId) ? ' on' : '') + '" data-aid="' + x.id + '" onclick="coPickAddr(this)">' +
-    '<div class="radio-dot"></div><div style="flex:1"><b style="font-size:12.5px">' + esc(x.name) + ' — ' + esc(x.pin) + '</b>' +
-    '<div class="muted" style="margin-top:3px">' + esc([x.line1, x.city].filter(Boolean).join(', ')) + '</div></div></div>'
-  ).join('') : '<div class="empty"><div class="art">📍</div>No address — add one from Account tab</div>';
-  openSheet('<span class="x" onclick="closeSheet()">✕</span><h3>Checkout</h3>' +
-    '<div class="sec">DELIVER TO</div>' + addrHtml +
-    '<div class="sec">PAYMENT</div>' +
-    '<div class="radio-card on" id="payCod" onclick="coPay(\'COD\')"><div class="radio-dot"></div>' +
-    '<div style="flex:1"><b>💵 Cash on Delivery</b><div class="muted">Pay at doorstep</div></div><b class="num">' + inr(cod) + '</b></div>' +
-    '<div class="radio-card" id="payUpi" onclick="coPay(\'UPI\')"><div class="radio-dot"></div>' +
-    '<div style="flex:1"><b>⚡ Pay Online (UPI)</b><div class="muted">' + (pre > 0 ? 'Save ' + inr(pre) + ' vs COD' : 'Instant + extra offers') + '</div></div><b class="num" style="color:var(--green)">' + inr(upi) + '</b></div>' +
-    '<button class="btn btn--go fbtn" id="coBtn" onclick="placeOrder()">Place Order • <span class="num">' + inr(cod) + '</span></button>');
-}
-function coPickAddr(el){
-  document.querySelectorAll('#sheetBody [data-aid]').forEach(x => x.classList.remove('on'));
-  el.classList.add('on');
-  coAddrId = el.dataset.aid;
-}
-function coPay(m){
-  payMethod = m;
-  document.getElementById('payCod').classList.toggle('on', m === 'COD');
-  document.getElementById('payUpi').classList.toggle('on', m === 'UPI');
-  const s = S.summary || {};
-  const amt = m === 'COD' ? Number(s.cod_amount ?? s.total ?? 0) : Number(s.upi_amount ?? s.cod_amount ?? 0);
-  document.getElementById('coBtn').innerHTML = 'Place Order • <span class="num">' + inr(amt) + '</span>';
-}
-async function placeOrder(){
-  if(!coAddrId) return toast('Select a delivery address', 'err');
-  const btn = document.getElementById('coBtn');
-  btn.innerHTML = 'Placing…'; btn.classList.add('btn--dim');
-  if(payMethod === 'COD'){
-    try{
-      const d = await api('/api/order/place_cod', {method:'POST', body:{address_id: coAddrId}});
-      if(d && d.ok){ closeSheet(); showSuccess(d.order_num, d.total ?? d.amount, 'COD'); await afterOrder(); return; }
-      toast(apiErr(d, 'Could not place order'), 'err');
-    }catch(e){ toast('Network error — try again', 'err'); }
-    const s = S.summary || {};
-    btn.innerHTML = 'Place Order • <span class="num">' + inr(s.cod_amount ?? 0) + '</span>';
-    btn.classList.remove('btn--dim');
+
+async function saveAddress(){
+  const name = (document.getElementById('fName').value || '').trim();
+  const mobile = (document.getElementById('fMobile').value || '').trim();
+  const pin = (document.getElementById('fPin').value || '').trim();
+  const city = (document.getElementById('fCity').value || '').trim();
+  const state = (document.getElementById('fState').value || '').trim();
+  const line = (document.getElementById('fLine').value || '').trim();
+
+  if(!name || !mobile || !pin || !line){
+    toast('Please fill all required address fields', 'err');
     return;
   }
   try{
-    const d = await api('/api/order/pay_online', {method:'POST', body:{address_id: coAddrId}});
-    const s = S.summary || {};
-    btn.innerHTML = 'Place Order • <span class="num">' + inr(s.upi_amount ?? 0) + '</span>';
-    btn.classList.remove('btn--dim');
-    if(!(d && d.ok)) return toast(apiErr(d, 'Could not start payment'), 'err');
-    if(d.order_num == null || d.order_num === '') return toast('No order reference from server', 'err');
-    const amt = d.upi_amount ?? d.amount ?? 0;
-    pendPay = {id: d.order_num, amount: amt, juspay: d.juspay_order_id || ''};
-    // Tolerant QR/intent extraction: backend may send qr_image (data: or
-    // URL), qr_base64, qr_url, upi_uri, upi_intent_url, upi_link, intent,
-    // or a upi: payment_url. Accept every known shape.
-    const b64 = d.qr_base64 || d.qr || d.qrCode || '';
-    let qr = d.qr_image || d.qr_url || '';
-    if(!qr && b64) qr = b64.indexOf('data:') === 0 ? b64 : 'data:image/png;base64,' + b64;
-    let uri = d.upi_uri || d.upi_intent_url || d.upi_link || d.upiLink || d.intent || '';
-    if(!uri){
-      const pu = d.redirect_url || d.payment_url || '';
-      if(pu && pu.indexOf('upi:') === 0) uri = pu;
+    const d = await api('/api/addresses/create', {
+      method: 'POST',
+      body: {name, mobile, pin, city, state, address_line_1: line}
+    });
+    if(d && d.ok){
+      toast('Address saved ✓', 'ok');
+      closeSheet();
+      await loadAddresses();
     }
-    if(!qr && uri) qr = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=' + encodeURIComponent(uri);
-    closeSheet();
-    document.getElementById('qrAmt').textContent = inr(amt);
-    document.getElementById('qrBox').innerHTML = qr ? '<img src="' + qr + '" style="width:100%;height:100%;object-fit:contain">' : 'QR';
-    document.getElementById('qrOrd').textContent = 'Order ' + d.order_num;
-    const qo = document.getElementById('qrOpen');
-    if(uri){ qo.href = uri; qo.style.display = 'block'; } else qo.style.display = 'none';
-    window._upiUri = uri;
-    // Show the modal FIRST. Never use window.location.href for upi:// links:
-    // on desktop / handler-less webviews it unloads the mini app and the QR
-    // screen never appears. Telegram.openLink opens externally instead.
-    document.getElementById('qrWrap').classList.add('show');
-    if(uri){
-      try{
-        const tg = window.Telegram && window.Telegram.WebApp;
-        if(tg && tg.openLink) tg.openLink(uri);
-      }catch(e){}
-    }
-    if(!qr && !uri) toast('Pay ' + inr(amt) + ' in your UPI app, then tap I have paid', 'ok');
-  }catch(e){
-    toast('Network error — try again', 'err');
-    const s = S.summary || {};
-    btn.innerHTML = 'Place Order • <span class="num">' + inr(s.upi_amount ?? 0) + '</span>';
-    btn.classList.remove('btn--dim');
-  }
+  }catch(e){ toast('Failed to save address', 'err'); }
 }
-function closeQR(){ document.getElementById('qrWrap').classList.remove('show'); }
+
+async function pickAddr(id){
+  try{
+    await api('/api/addresses/set_default', {method: 'POST', body: {id}});
+    await loadAddresses();
+    closeSheet();
+    toast('Address selected', 'ok');
+  }catch(e){}
+}
+
+/* Checkout Sheet Flow (checkout_method.txt exact chain) */
+function openCheckout(){
+  if(!S.cart.length) return toast('Cart is empty', 'err');
+  const s = S.summary || {};
+  const cod = s.cod_amount || s.total || 0;
+  const upi = s.upi_amount || cod;
+  const addr = S.addresses.find(x => x.is_default) || S.addresses[0];
+  coAddrId = addr ? addr.id : null;
+  payMethod = 'COD';
+
+  openSheet(`
+    <span class="x" onclick="closeSheet()">✕</span>
+    <h3>Checkout Summary</h3>
+    <div class="sec">DELIVERY ADDRESS</div>
+    <div class="radio-card on">
+      <div class="radio-dot"></div>
+      <div style="flex:1">
+        <b>${esc(addr ? addr.name : 'No Address')} • ${esc(addr ? addr.pin : '')}</b>
+        <div class="muted">${esc(addr ? addr.address_line_1 : 'Please add an address')}</div>
+      </div>
+    </div>
+    <div class="sec">PAYMENT METHOD</div>
+    <div class="radio-card on" id="payCodCard" onclick="setPayMethod('COD')">
+      <div class="radio-dot"></div>
+      <div style="flex:1">
+        <b>💵 Cash on Delivery</b>
+        <div class="muted">Pay upon delivery</div>
+      </div>
+      <b class="num">${inr(cod)}</b>
+    </div>
+    <div class="radio-card" id="payUpiCard" onclick="setPayMethod('UPI')">
+      <div class="radio-dot"></div>
+      <div style="flex:1">
+        <b>⚡ Pay Online via UPI</b>
+        <div class="muted" style="color:var(--green)">Instant confirmation + Extra discount</div>
+      </div>
+      <b class="num" style="color:var(--green)">${inr(upi)}</b>
+    </div>
+    <button class="btn btn--go fbtn" id="placeBtn" onclick="placeOrder()">Place Order • <span class="num">${inr(cod)}</span></button>
+  `);
+}
+
+function setPayMethod(m){
+  payMethod = m;
+  document.getElementById('payCodCard').classList.toggle('on', m === 'COD');
+  document.getElementById('payUpiCard').classList.toggle('on', m === 'UPI');
+  const s = S.summary || {};
+  const amt = m === 'COD' ? (s.cod_amount || s.total || 0) : (s.upi_amount || s.cod_amount || 0);
+  document.getElementById('placeBtn').innerHTML = `Place Order • <span class="num">${inr(amt)}</span>`;
+}
+
+async function placeOrder(){
+  if(!coAddrId) return toast('Please select a delivery address', 'err');
+  const btn = document.getElementById('placeBtn');
+  btn.innerHTML = 'Placing Order…';
+  btn.classList.add('btn--dim');
+
+  if(payMethod === 'COD'){
+    try{
+      const d = await api('/api/order/place_cod', {method: 'POST', body: {address_id: coAddrId}});
+      if(d && d.ok){
+        closeSheet();
+        showSuccess(d.order_num || d.meesho_order_num, d.total, 'COD');
+        await renderCart();
+        await loadWallet();
+        return;
+      }
+      if(d && d.code === 'INSUFFICIENT_WALLET'){
+        closeSheet();
+        toast(d.error || 'Wallet balance insufficient for service fee', 'err');
+        openRechargeSheet();
+        return;
+      }
+      toast(d.error || 'COD placement failed', 'err');
+    }catch(e){ toast('Order placement failed', 'err'); }
+    btn.innerHTML = 'Place Order';
+    btn.classList.remove('btn--dim');
+    return;
+  }
+
+  // UPI Online Payment Flow
+  try{
+    const d = await api('/api/order/pay_online', {method: 'POST', body: {address_id: coAddrId}});
+    if(d && d.ok){
+      closeSheet();
+      qrMode = 'order';
+      pendOrder = d;
+      const amt = d.upi_amount || d.total;
+
+      const titleEl = document.getElementById('qrTitle');
+      if(titleEl) titleEl.textContent = 'JUSPAY UPI PAYMENT';
+      document.getElementById('qrAmt').textContent = inr(amt);
+      document.getElementById('qrOrd').textContent = 'Order #' + (d.order_num || d.meesho_order_num);
+
+      // Setup UPI Intent
+      const intentUrl = d.upi_intent_url || d.redirect_url || '';
+      window._upiUri = intentUrl;
+
+      // Render QR image with Google Charts fallback
+      let qrSrc = d.qr_base64 ? (d.qr_base64.startsWith('data:') ? d.qr_base64 : 'data:image/png;base64,' + d.qr_base64) : d.qr_url;
+      if(!qrSrc && intentUrl){
+        qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(intentUrl)}`;
+      }
+      document.getElementById('qrBox').innerHTML = qrSrc ? `<img id="qrImg" src="${qrSrc}" alt="UPI QR" onerror="onQrImgError(this)">` : 'QR Generated';
+
+      const qo = document.getElementById('qrOpen');
+      if(intentUrl){
+        qo.href = intentUrl;
+        qo.style.display = 'block';
+      } else {
+        qo.style.display = 'none';
+      }
+
+      document.getElementById('qrWrap').classList.add('show');
+      await renderCart();
+      await loadWallet();
+      return;
+    }
+    if(d && d.code === 'INSUFFICIENT_WALLET'){
+      closeSheet();
+      toast(d.error || 'Wallet balance insufficient for service fee', 'err');
+      openRechargeSheet();
+      return;
+    }
+    toast(d.error || 'UPI initiation failed', 'err');
+  }catch(e){ toast('UPI request failed', 'err'); }
+  btn.innerHTML = 'Place Order';
+  btn.classList.remove('btn--dim');
+}
+
+function closeQR(){
+  document.getElementById('qrWrap').classList.remove('show');
+}
 function copyText(t, msg){
   try{
-    if(navigator.clipboard) navigator.clipboard.writeText(t);
-    else { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-    toast(msg || 'Copied', 'ok');
-  }catch(e){ toast('Copy failed', 'err'); }
+    navigator.clipboard.writeText(t);
+    toast(msg || 'Copied ✓', 'ok');
+  }catch(e){ toast('Failed to copy', 'err'); }
 }
-function copyUpi(){ if(window._upiUri) copyText(window._upiUri, 'UPI link copied'); else toast('No UPI link', 'err'); }
-async function confirmPay(){
-  if(!pendPay) return;
+function copyUpi(){
+  if(window._upiUri) copyText(window._upiUri, 'UPI Intent URL copied!');
+  else toast('No UPI URL available', 'err');
+}
+function openUpiDirect(){
+  if(!window._upiUri) return toast('No UPI app URL available', 'err');
   try{
-    const d = await api('/api/order/confirm', {method:'POST', body:{order_num: pendPay.id}});
-    if(d && d.ok){
-      closeQR();
-      showSuccess(pendPay.id, pendPay.amount, 'UPI');
-      await afterOrder();
-    } else toast(apiErr(d, 'Not confirmed yet — pay first'), 'err');
-  }catch(e){ toast('Network error — try again', 'err'); }
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if(tg && typeof tg.openLink === 'function' && window._upiUri.startsWith('https://')){
+      tg.openLink(window._upiUri);
+      return;
+    }
+  }catch(e){}
+  window.location.href = window._upiUri;
 }
-function showSuccess(id, amt, method){
-  openSheet('<div style="text-align:center;padding:18px 6px">' +
-    '<div style="width:66px;height:66px;border-radius:99px;margin:0 auto;display:grid;place-items:center;font-size:28px;background:rgba(61,220,151,.12);border:1px solid rgba(61,220,151,.45);box-shadow:0 0 30px rgba(61,220,151,.3)">✓</div>' +
-    '<h3 style="margin-top:12px">Order placed!</h3>' +
-    '<div class="muted mono" style="margin-top:6px">#' + esc(id ?? '—') + '</div>' +
-    '<div class="num" style="font-size:24px;font-weight:700;margin-top:8px">' + inr(amt) + ' <span style="font-size:12px;color:var(--txt2)">• ' + esc(method) + '</span></div>' +
-    '<button class="btn btn--go fbtn" onclick="closeSheet();goTab(\'account\')">View my orders 📦</button>' +
-    '<button class="btn btn--ghost fbtn" onclick="closeSheet();goTab(\'home\')">Continue shopping</button></div>');
-}
-async function afterOrder(){ pendPay = null; await renderCart(); await loadOrders(); }
-
-/* ================= account ================= */
-async function loadAccount(){
-  try{
-    const j = await api('/api/accounts');
-    const accs = (j && j.accounts) || [];
-    S.account = accs[0] || null;
-  }catch(e){ S.account = null; }
-  const a = S.account;
-  if(a){
-    document.getElementById('aPhone').textContent = '+91 ' + (a.phone_display || a.phone || '').toString().slice(-10);
-    document.getElementById('aMeta').textContent = 'UID ' + (a.meesho_user_id || '—') + ' • ' + ((a.is_first_order ?? 1) ? 'NEW — FOD eligible' : 'Existing user');
-    const pill = document.getElementById('aPill');
-    pill.textContent = 'SESSION ACTIVE'; pill.className = 'pillok';
-    document.getElementById('stAcc').textContent = '+' + String(a.phone_display || a.phone || '').toString().slice(-5);
-  } else {
-    document.getElementById('aPhone').textContent = 'Not linked';
-    document.getElementById('aMeta').textContent = 'OTP / JSON login below';
-    const pill = document.getElementById('aPill');
-    pill.textContent = 'NO SESSION'; pill.className = 'pilloff';
-    document.getElementById('stAcc').textContent = '—';
+function onQrImgError(img){
+  if(!img) return;
+  if(!img.dataset.fallback && window._upiUri){
+    img.dataset.fallback = '1';
+    img.src = 'https://chart.googleapis.com/chart?chs=220x220&cht=qr&chl=' + encodeURIComponent(window._upiUri);
   }
 }
+async function confirmPay(){
+  if(qrMode === 'recharge'){
+    if(!pendRecharge) return;
+    try{
+      const d = await api('/api/wallet/verify', {
+        method: 'POST',
+        body: {txn_id: pendRecharge.txn_id || pendRecharge.order_id, amount: pendRecharge.amount}
+      });
+      if(d && d.ok){
+        closeQR();
+        toast('Wallet recharged successfully! ✓', 'ok');
+        await loadWallet();
+      } else {
+        toast(d.error || 'Payment not detected yet. Tap again after completing UPI transfer.', 'err');
+      }
+    }catch(e){ toast('Verification request failed', 'err'); }
+    return;
+  }
+
+  if(!pendOrder) return;
+  try{
+    const d = await api('/api/order/confirm', {
+      method: 'POST',
+      body: {order_num: pendOrder.order_num || pendOrder.meesho_order_num}
+    });
+    if(d && d.ok){
+      closeQR();
+      showSuccess(pendOrder.order_num, pendOrder.upi_amount || pendOrder.total, 'UPI');
+      await loadOrders();
+      await loadWallet();
+    } else {
+      toast('Payment not confirmed yet. Please tap again once paid.', 'err');
+    }
+  }catch(e){ toast('Confirmation request failed', 'err'); }
+}
+
+/* Wallet Recharge Support */
+async function loadWallet(){
+  try{
+    const d = await api('/api/wallet/balance');
+    if(d && d.ok){
+      const el = document.getElementById('wBal');
+      if(el) el.textContent = inr(d.balance || 0);
+    }
+  }catch(e){}
+}
+
+function openRechargeSheet(){
+  openSheet(`
+    <span class="x" onclick="closeSheet()">✕</span>
+    <h3 style="margin-bottom:6px">Recharge Bot Wallet</h3>
+    <p class="muted" style="font-size:12px;margin-bottom:14px">Used exclusively for platform service fees (₹5 per order). Meesho order amount is paid separately via COD or UPI.</p>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn btn--ghost" style="flex:1" onclick="setRechargeAmt(10)">₹10</button>
+      <button class="btn btn--ghost" style="flex:1" onclick="setRechargeAmt(25)">₹25</button>
+      <button class="btn btn--ghost" style="flex:1" onclick="setRechargeAmt(50)">₹50</button>
+    </div>
+    <input id="rAmt" class="fld" type="number" min="5" max="500" value="10" placeholder="Enter Amount (₹)" style="margin-bottom:14px">
+    <button class="btn btn--go fbtn" onclick="startRecharge()">Proceed to Recharge</button>
+  `);
+}
+
+function setRechargeAmt(val){
+  const el = document.getElementById('rAmt');
+  if(el) el.value = val;
+}
+
+async function startRecharge(){
+  const el = document.getElementById('rAmt');
+  const amt = Number(el ? el.value : 10) || 10;
+  if(amt < 5){
+    return toast('Minimum recharge is ₹5', 'err');
+  }
+  try{
+    const d = await api('/api/wallet/create', {method: 'POST', body: {amount: amt}});
+    if(d && d.ok){
+      closeSheet();
+      qrMode = 'recharge';
+      pendRecharge = d;
+
+      const upiUrl = d.upi_url || d.upi_link || '';
+      window._upiUri = upiUrl;
+
+      const titleEl = document.getElementById('qrTitle');
+      if(titleEl) titleEl.textContent = 'WALLET RECHARGE (₹' + amt + ')';
+      document.getElementById('qrAmt').textContent = inr(amt);
+      document.getElementById('qrOrd').textContent = 'Txn Ref: ' + (d.txn_id || '');
+
+      let qrSrc = d.qr_url;
+      if(!qrSrc && upiUrl){
+        qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(upiUrl)}`;
+      }
+      document.getElementById('qrBox').innerHTML = `<img id="qrImg" src="${qrSrc}" alt="UPI QR" onerror="onQrImgError(this)">`;
+
+      const qo = document.getElementById('qrOpen');
+      if(upiUrl){
+        qo.href = upiUrl;
+        qo.style.display = 'block';
+      } else {
+        qo.style.display = 'none';
+      }
+
+      document.getElementById('qrWrap').classList.add('show');
+    } else {
+      toast(d.error || 'Failed to initiate recharge', 'err');
+    }
+  }catch(e){
+    toast('Recharge initiation failed', 'err');
+  }
+}
+
+function showSuccess(oid, amt, method){
+  openSheet(`
+    <div style="text-align:center;padding:20px 8px">
+      <div style="width:68px;height:68px;border-radius:99px;margin:0 auto;display:grid;place-items:center;font-size:30px;background:rgba(61,220,151,.15);border:1px solid rgba(61,220,151,.5)">✓</div>
+      <h3 style="margin-top:14px">Order Placed Successfully!</h3>
+      <div class="muted mono" style="margin-top:6px">Order ID: #${esc(oid)}</div>
+      <div class="num" style="font-size:24px;font-weight:700;margin-top:8px">${inr(amt)} <span style="font-size:12px;color:var(--txt2)">• ${esc(method)}</span></div>
+      <button class="btn btn--go fbtn" onclick="closeSheet();go('account')">View Order in History 📦</button>
+      <button class="btn btn--ghost fbtn" onclick="closeSheet();go('home')">Continue Shopping</button>
+    </div>
+  `);
+}
+
+/* Account Login (OTP & JSON) */
+async function loadAccount(){
+  try{
+    const d = await api('/api/accounts');
+    const acc = (d && d.accounts && d.accounts[0]);
+    S.account = acc || null;
+    const stAcc = document.getElementById('stAcc');
+    if(acc){
+      document.getElementById('aPhone').textContent = '+91 ' + (acc.phone || '').slice(-10);
+      document.getElementById('aMeta').textContent = 'UID: ' + (acc.meesho_user_id || '—') + (acc.is_first_order ? ' • FIRST ORDER ELIGIBLE' : ' • ACTIVE');
+      document.getElementById('aPill').textContent = 'SESSION ACTIVE';
+      document.getElementById('aPill').className = 'pillok';
+      if(stAcc) stAcc.textContent = '+' + (acc.phone || '').slice(-4);
+    } else {
+      document.getElementById('aPhone').textContent = 'Not linked';
+      document.getElementById('aMeta').textContent = 'Connect via OTP or JSON below';
+      document.getElementById('aPill').textContent = 'NO SESSION';
+      document.getElementById('aPill').className = 'pilloff';
+      if(stAcc) stAcc.textContent = '—';
+    }
+  }catch(e){}
+}
+
 async function sendOTP(){
   const p = (document.getElementById('oPhone').value || '').replace(/\D/g, '').slice(-10);
   const st = document.getElementById('oStatus');
-  if(p.length !== 10){ st.textContent = 'Enter a valid 10-digit number'; st.className = 'fstatus err'; return; }
-  st.textContent = 'Sending…'; st.className = 'fstatus';
+  if(p.length !== 10){
+    st.textContent = 'Enter valid 10-digit mobile number';
+    st.className = 'fstatus err';
+    return;
+  }
+  st.textContent = 'Sending OTP via Meesho…';
+  st.className = 'fstatus';
   try{
-    const d = await api('/api/auth/otp_send', {method:'POST', body:{phone_number: p}});
+    const d = await api('/api/auth/otp_send', {method: 'POST', body: {phone_number: p}});
     if(d && d.ok){
-      otpS = {phone: p, request_id: d.request_id, instance_id: d.instance_id};
+      otpSession = {phone: p};
       document.getElementById('oCode').style.display = 'block';
       document.getElementById('oVerifyBtn').style.display = 'block';
-      st.textContent = 'OTP sent — check WhatsApp/SMS'; st.className = 'fstatus ok';
-      toast('OTP sent', 'ok');
-    } else { st.textContent = apiErr(d, 'Could not send OTP'); st.className = 'fstatus err'; }
-  }catch(e){ st.textContent = 'Network error — try again'; st.className = 'fstatus err'; }
+      st.textContent = 'OTP sent! Please check your WhatsApp/SMS';
+      st.className = 'fstatus ok';
+      toast('OTP sent successfully', 'ok');
+    } else {
+      st.textContent = d.error || 'Failed to send OTP';
+      st.className = 'fstatus err';
+    }
+  }catch(e){
+    st.textContent = 'Network error while sending OTP';
+    st.className = 'fstatus err';
+  }
 }
+
 async function verifyOTP(){
-  const c = (document.getElementById('oCode').value || '').replace(/\D/g, '');
+  const otp = (document.getElementById('oCode').value || '').trim();
   const st = document.getElementById('oStatus');
-  if(c.length < 4){ st.textContent = 'Enter the OTP you received'; st.className = 'fstatus err'; return; }
-  const phone = (otpS && otpS.phone) || (document.getElementById('oPhone').value || '').replace(/\D/g, '').slice(-10);
-  st.textContent = 'Verifying…'; st.className = 'fstatus';
+  const p = (otpSession && otpSession.phone) || (document.getElementById('oPhone').value || '').slice(-10);
+  if(!otp){
+    st.textContent = 'Enter the 6-digit OTP';
+    st.className = 'fstatus err';
+    return;
+  }
+  st.textContent = 'Verifying with Meesho…';
+  st.className = 'fstatus';
   try{
-    const d = await api('/api/auth/otp_verify', {method:'POST', body:{
-      phone_number: phone, otp: c,
-      request_id: otpS && otpS.request_id, instance_id: otpS && otpS.instance_id}});
+    const d = await api('/api/auth/otp_verify', {method: 'POST', body: {phone_number: p, otp}});
     if(d && d.ok){
-      otpS = null;
+      st.textContent = 'Account Linked Successfully!';
+      st.className = 'fstatus ok';
       document.getElementById('oCode').style.display = 'none';
       document.getElementById('oVerifyBtn').style.display = 'none';
-      document.getElementById('oCode').value = '';
-      st.textContent = 'Linked ✓'; st.className = 'fstatus ok';
-      await loadAccount(); await loadAddresses(); await loadOffer(); await refreshCartCount();
-      toast('Account linked', 'ok');
-    } else { st.textContent = apiErr(d, 'Verification failed'); st.className = 'fstatus err'; }
-  }catch(e){ st.textContent = 'Network error — try again'; st.className = 'fstatus err'; }
+      await loadAccount();
+      toast('Account linked ✓', 'ok');
+    } else {
+      st.textContent = d.error || 'Invalid OTP';
+      st.className = 'fstatus err';
+    }
+  }catch(e){
+    st.textContent = 'Verification error';
+    st.className = 'fstatus err';
+  }
 }
+
 async function loginJSON(){
   const raw = (document.getElementById('jInput').value || '').trim();
   const st = document.getElementById('jStatus');
-  if(!raw){ st.textContent = 'Paste your session JSON first'; st.className = 'fstatus err'; return; }
-  let body;
-  try{ body = JSON.parse(raw); }
-  catch(e){ st.textContent = 'Invalid JSON — check the braces'; st.className = 'fstatus err'; return; }
-  st.textContent = 'Connecting…'; st.className = 'fstatus';
+  if(!raw){
+    st.textContent = 'Please paste your session JSON';
+    st.className = 'fstatus err';
+    return;
+  }
+  let parsed;
+  try{ parsed = JSON.parse(raw); }
+  catch(e){
+    st.textContent = 'Invalid JSON format. Check quotation marks and brackets.';
+    st.className = 'fstatus err';
+    return;
+  }
+  st.textContent = 'Connecting session…';
+  st.className = 'fstatus';
   try{
-    const d = await api('/api/auth/json_login', {method:'POST', body});
+    const d = await api('/api/auth/json_login', {method: 'POST', body: parsed});
     if(d && d.ok){
-      st.textContent = 'Connected ✓'; st.className = 'fstatus ok';
+      st.textContent = 'Session Connected!';
+      st.className = 'fstatus ok';
       document.getElementById('jInput').value = '';
-      await loadAccount(); await loadAddresses(); await loadOffer(); await refreshCartCount();
-      toast('Session connected', 'ok');
-    } else { st.textContent = apiErr(d, 'Could not import session'); st.className = 'fstatus err'; }
-  }catch(e){ st.textContent = 'Network error — try again'; st.className = 'fstatus err'; }
-}
-async function loadAddresses(){
-  try{
-    const j = await api('/api/addresses');
-    const list = (j && j.addresses) || [];
-    S.addresses = list.map(normAddr);
-    const dflt = j && j.default;
-    if(dflt) S.addresses.forEach(a => { a.active = String(a.id) === String(dflt.id ?? dflt); });
-    if(S.addresses.length && !S.addresses.some(a => a.active)) S.addresses[0].active = true;
-  }catch(e){ S.addresses = []; }
-  paintCartAddr();
-  const box = document.getElementById('addrList');
-  box.innerHTML = S.addresses.length ? S.addresses.map(a =>
-    '<div class="addr' + (a.active ? ' on' : '') + '" onclick="pickAddr(' + a.id + ')">' +
-    '<b>' + esc(a.name) + ' • ' + esc(a.type) + '</b>' +
-    '<div class="muted">' + esc([a.line1, a.city].filter(Boolean).join(', ')) + ' — ' + esc(a.pin) + '<br>' + esc(a.phone) + '</div></div>'
-  ).join('') : '<div class="muted">No addresses yet — add one above.</div>';
+      await loadAccount();
+      toast('Session connected ✓', 'ok');
+    } else {
+      st.textContent = d.error || 'Failed to connect session';
+      st.className = 'fstatus err';
+    }
+  }catch(e){
+    st.textContent = 'Connection error';
+    st.className = 'fstatus err';
+  }
 }
 
-/* ================= orders ================= */
-function normOrders(d){
-  const raw = Array.isArray(d) ? d : (d && Array.isArray(d.orders) ? d.orders : []);
-  return raw.map(o => {
-    let date = o.updated_date || o.date || '';
-    if(!date && o.created_at){ const t = Number(o.created_at); date = new Date(t > 1e12 ? t : t * 1000).toLocaleDateString(); }
-    return {
-      id: o.order_num ?? o.id, amount: o.amount ?? o.total ?? 0,
-      method: o.payment_method || o.method || '',
-      status: o.status_text || o.status || 'Placed', date,
-      addr: o.items_text || o.addr || o.address || ''
-    };
-  });
+/* Order History & Sync */
+function normalizeOrder(o, isMeesho){
+  const orderNum = o.order_num || o.meesho_order_num || o.sub_order_id || o.order_id || o.id || 'ORDER';
+
+  let itemsText = o.items_text || o.items || o.product_title || o.product_name || o.item_title || '';
+  if(Array.isArray(itemsText)){
+    itemsText = itemsText.map(it => (typeof it === 'object' ? (it.name || it.title || it.product_name || 'Item') : String(it))).join(', ');
+  } else if(!itemsText && o.sub_orders && o.sub_orders.length){
+    itemsText = o.sub_orders.map(so => so.product_title || so.product_name || 'Item').join(', ');
+  }
+  if(!itemsText) itemsText = isMeesho ? 'Meesho Live Order' : 'Shopping Order';
+
+  const total = Number(o.total || o.amount || o.total_price || o.price || o.product_price || 0);
+  const status = (o.status_text || o.status || o.sub_order_status || o.order_status || 'placed').toLowerCase();
+  const payMethod = o.payment_method || o.payment_mode || o.payment_type || 'COD';
+
+  const rawDate = o.created_at || o.order_date || o.created_date || o.sub_order_created || o.order_created_time || '';
+  let dateTs = 0;
+  if(rawDate){
+    if(typeof rawDate === 'number'){
+      dateTs = rawDate > 1e11 ? rawDate : rawDate * 1000;
+    } else {
+      dateTs = new Date(rawDate).getTime() || 0;
+    }
+  }
+
+  return {
+    order_num: String(orderNum),
+    meesho_order_num: o.meesho_order_num || (isMeesho ? String(orderNum) : null),
+    items_text: itemsText,
+    total: total,
+    status: status,
+    payment_method: payMethod,
+    created_at: rawDate,
+    timestamp: dateTs,
+    is_meesho: Boolean(isMeesho || o.meesho_order_num)
+  };
 }
-async function loadOrders(){
-  try{
-    const d = await api('/api/orders');
-    S.orders = normOrders(d);
-  }catch(e){ S.orders = []; }
-  document.getElementById('stOrd').textContent = S.orders.length;
-  const box = document.getElementById('ordList');
-  if(!S.orders.length){ box.innerHTML = '<div class="glass fcard muted">No orders yet — your live Meesho orders land here.</div>'; return; }
-  box.innerHTML = S.orders.map(o => {
-    const good = /confirm|success|paid|deliver/i.test(o.status);
-    return '<div class="glass ord"><div class="ord__top"><b class="num">#' + esc(o.id) + '</b>' +
-      '<span class="st ' + (good ? 'ok' : 'warn') + '">' + esc(String(o.status).toUpperCase()) + '</span></div>' +
-      '<div class="muted">' + esc([o.date, o.method, o.addr].filter(Boolean).join(' • ')) + '</div>' +
-      '<div class="ord__amt num">' + inr(o.amount) + '</div></div>';
+
+function renderOrders(orders){
+  const list = document.getElementById('ordList');
+  if(!list) return;
+  const stOrd = document.getElementById('stOrd');
+  if(stOrd) stOrd.textContent = orders.length;
+
+  if(!orders || !orders.length){
+    list.innerHTML = '<div class="glass fcard muted" style="text-align:center;padding:18px 12px">No orders placed yet</div>';
+    return;
+  }
+
+  list.innerHTML = orders.map(o => {
+    const isM = o.is_meesho;
+    const badgeStyle = isM 
+      ? 'background:rgba(255,0,127,0.16);color:#FF69B4;border:1px solid rgba(255,0,127,0.3)' 
+      : 'background:rgba(61,220,151,0.15);color:var(--green);border:1px solid rgba(61,220,151,0.3)';
+    const dateText = o.created_at ? `<div class="muted" style="font-size:11px;margin-top:4px">${esc(String(o.created_at).slice(0, 19))}</div>` : '';
+
+    return `
+      <div class="glass fcard" style="margin-top:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="display:flex;align-items:center;gap:6px">
+            <b class="mono">#${esc(o.order_num)}</b>
+            ${isM ? '<span style="font-size:9.5px;padding:2px 6px;border-radius:4px;background:rgba(255,0,127,0.2);color:#FF69B4;font-weight:800">MEESHO</span>' : ''}
+          </div>
+          <span class="pillok" style="${badgeStyle}">${esc((o.status || 'placed').toUpperCase())}</span>
+        </div>
+        <div style="margin-top:6px;font-size:12.5px">${esc(o.items_text || 'Shopping Order')}</div>
+        <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center">
+          <span class="muted">${esc(o.payment_method || 'COD')}</span>
+          <b class="num" style="font-size:16px">${inr(o.total)}</b>
+        </div>
+        ${dateText}
+      </div>
+    `;
   }).join('');
 }
 
-/* ================= init ================= */
+async function loadOrders(){
+  const list = document.getElementById('ordList');
+  try{
+    const d = await api('/api/orders');
+    const rawOrders = (d && d.orders) || [];
+    const normalized = rawOrders.map(o => normalizeOrder(o, false));
+    normalized.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    S.orders = normalized;
+    renderOrders(normalized);
+  }catch(e){
+    if(list) list.innerHTML = '<div class="glass fcard muted">Failed to load orders</div>';
+  }
+}
+
+async function syncMeeshoOrders(){
+  if(!S.account || !S.account.phone){
+    toast('Please link your Meesho account first.', 'err');
+    return;
+  }
+
+  const btn = document.getElementById('syncOrdersBtn');
+  const origHtml = btn ? btn.innerHTML : '<span>🔄</span> Sync Meesho Orders';
+  if(btn){
+    btn.innerHTML = '<span class="spin">⏳</span> Syncing…';
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+  }
+
+  try{
+    const d = await api('/api/meesho/orders/live');
+    if(!d || !d.ok){
+      const errMsg = (d && d.error) ? d.error.toLowerCase() : '';
+      if(errMsg.includes('account') || errMsg.includes('link') || errMsg.includes('login') || errMsg.includes('auth')){
+        toast('Please link your Meesho account first.', 'err');
+        return;
+      }
+      toast(d && d.error ? d.error : 'Failed to sync Meesho orders', 'err');
+      return;
+    }
+
+    const meeshoRaw = (d && (d.orders || d.sub_order_list || d.order_list)) || [];
+    const normalizedMeesho = meeshoRaw.map(o => normalizeOrder(o, true));
+
+    // Current local orders in state
+    const currentList = S.orders || [];
+    const mergedMap = new Map();
+
+    for(const ord of currentList){
+      const k = ord.meesho_order_num || ord.order_num;
+      mergedMap.set(String(k), ord);
+    }
+    for(const ord of normalizedMeesho){
+      const k = ord.meesho_order_num || ord.order_num;
+      mergedMap.set(String(k), ord);
+    }
+
+    const merged = Array.from(mergedMap.values());
+    merged.sort((a, b) => {
+      const ta = a.timestamp || (a.created_at ? new Date(a.created_at).getTime() : 0);
+      const tb = b.timestamp || (b.created_at ? new Date(b.created_at).getTime() : 0);
+      return tb - ta;
+    });
+
+    S.orders = merged;
+    renderOrders(merged);
+    toast(`Synced ${normalizedMeesho.length} Meesho orders ✓`, 'ok');
+  }catch(err){
+    toast('Failed to sync Meesho orders', 'err');
+  }finally{
+    if(btn){
+      btn.innerHTML = origHtml;
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    }
+  }
+}
+
+/* Initialization */
 paintChips();
 loadOffer();
 loadTrending();
 doSearch();
-refreshCartCount();
+loadCart();
 loadAccount();
-loadOrders();
 loadAddresses();
+loadOrders();
+loadWallet();
 </script>
 </body>
 </html>

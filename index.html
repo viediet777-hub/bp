@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      (function() {
+        var hasBeenSet = false;
+        var overriddenValue = undefined;
+        var originalDefineProperty = Object.defineProperty;
+        Object.defineProperty = function(obj, prop, descriptor) {
+          if ((obj === window || obj === globalThis) && prop === 'fetch' && descriptor) {
+            var origGet = descriptor.get;
+            var origSet = descriptor.set;
+            var val = descriptor.value;
+            return originalDefineProperty.call(Object, obj, prop, {
+              configurable: true,
+              enumerable: descriptor.enumerable !== undefined ? descriptor.enumerable : true,
+              get: function() {
+                if (hasBeenSet) return overriddenValue;
+                if (origGet) return origGet.call(this);
+                return val !== undefined ? val : window.fetch;
+              },
+              set: function(newVal) {
+                hasBeenSet = true;
+                overriddenValue = newVal;
+                if (origSet) {
+                  try { origSet.call(this, newVal); } catch (_) {}
+                }
+              }
+            });
+          }
+          return originalDefineProperty.call(Object, obj, prop, descriptor);
+        };
+        var originalDefineProperties = Object.defineProperties;
+        if (originalDefineProperties) {
+          Object.defineProperties = function(obj, props) {
+            if ((obj === window || obj === globalThis) && props && props.fetch) {
+              Object.defineProperty(obj, 'fetch', props.fetch);
+              var rest = Object.assign({}, props);
+              delete rest.fetch;
+              return originalDefineProperties.call(Object, obj, rest);
+            }
+            return originalDefineProperties.call(Object, obj, props);
+          };
+        }
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B0C10" />
+    <title>FOD Pilot – Meesho First-Order Engine</title>
+    <meta name="description" content="Production-ready Telegram Mini App shopping assistant integrating with Meesho APIs for real-time cart, checkout, offer rolling, and orders by VIEDDETX SINGH." />
+    <meta property="og:title" content="FOD Pilot – Meesho First-Order Engine" />
+    <meta property="og:description" content="Production-ready Telegram Mini App shopping assistant integrating with Meesho APIs for real-time cart, checkout, offer rolling, and orders by VIEDDETX SINGH." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  </head>
+  <body class="bg-[#0B0C10] text-[#EDF2F7] antialiased selection:bg-[#66FCF1]/30">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
