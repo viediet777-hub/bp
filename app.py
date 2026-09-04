@@ -4,13 +4,14 @@ Brand: VIEDDETX SINGH
 Project: FOD Pilot – Meesho First-Order Engine
 """
 import json
+import logging
 import os
 import time
 import math
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 
-from config import ORDER_FEE, WALLET_MIN, WALLET_MAX, GW_UPI_ID, GW_UPI_NAME, GW_VERIFY_URL
+from config import WALLET_MIN, WALLET_MAX, GW_UPI_ID, GW_UPI_NAME, GW_VERIFY_URL
 from database import (
     get_user, create_user, update_user,
     get_cart, add_to_cart, update_cart_qty, clear_cart,
@@ -23,6 +24,8 @@ from database import (
     save_user_offer, get_user_offer,
     get_wallet_balance, add_wallet, deduct_wallet,
     create_wallet_tx, verify_wallet_tx, verify_wallet_tx_by_order_id, get_wallet_tx,
+    get_global_mode, set_global_mode, get_order_fee as db_get_order_fee,
+    sync_meesho_orders_to_db,
 )
 from meesho import (
     get_meesho_offer, search_meesho, get_meesho_product,
@@ -36,11 +39,26 @@ from meesho import (
 )
 from gateway import get_qr_url, generate_txn_id, create_upi_link, verify_payment
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("meesho_app")
+
 app = Flask(__name__, template_folder="templates")
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 _active_offer = None
 _otp_sessions = {}
+
+
+def get_order_fee():
+    """
+    Returns platform fee dynamically from database settings.
+    Free mode: 0, Paid mode: 5.
+    """
+    try:
+        return db_get_order_fee()
+    except Exception:
+        mode = get_global_mode()
+        return 0 if mode == "free" else 5
 
 
 # ============================================================
@@ -97,11 +115,13 @@ def sync_local_cart(uid, cart, acc):
     """
     if not cart or not acc:
         return {"ok": False}
+    logger.info(f"[CartSync] User {uid}: Syncing local cart ({len(cart)} items) with remote Meesho account.")
     cs = get_cart_session(uid) or ""
     review = real_cart_review(acc, cs)
     if not review.get("ok"):
         review = real_cart_review(acc, "")
     if not review.get("ok"):
+        logger.warning(f"[CartSync] real_cart_review returned error for user {uid}: {review.get('error')}")
         return {"ok": False, "error": str(review.get("error"))}
     if review.get("cart_session"):
         set_cart_session(uid, review["cart_session"])
@@ -119,6 +139,7 @@ def sync_local_cart(uid, cart, acc):
     for c in cart:
         pid = int(c.get("product_id") or 0)
         if pid and pid not in mmap:
+            logger.info(f"[CartSync] User {uid}: Pushing local product {pid} ('{c.get('name')}', qty={c.get('qty', 1)}) to Meesho remote cart.")
             add_res = real_cart_add(
                 acc,
                 pid,
@@ -163,10 +184,12 @@ def sync_local_cart(uid, cart, acc):
                         pid,
                     ),
                 )
+                logger.info(f"[CartSync] User {uid}: Reconciled product {pid} price=₹{m.get('price')} qty={m.get('quantity')}")
         conn.commit()
         conn.close()
         return {"ok": True, "cart_session": review.get("cart_session") or cs}
     except Exception as e:
+        logger.error(f"[CartSync] User {uid}: Database update error: {e}")
         return {"ok": False, "error": str(e)}
 
 
@@ -185,8 +208,24 @@ def index():
 def api_offers():
     global _active_offer
     uid = get_uid()
+    acc = get_active_meesho_account(uid)
+
+    # Offer detection: If logged in as existing user, return ineligible
+    if acc and not int(acc.get("is_first_order", 1)):
+        return jsonify({
+            "offer": None,
+            "reason": "existing_user",
+            "message": "No offer available for this account (existing user)",
+        })
+
+    # If user has a saved offer, prioritize it
+    saved = get_user_offer(uid)
+    if saved:
+        _active_offer = saved
+        return jsonify({"offer": _active_offer, "saved": True})
+
     if not _active_offer:
-        res = roll_fod_sync()
+        res = roll_fod_sync(for_acc=acc)
         if res.get("ok") and res.get("offer"):
             _active_offer = res["offer"]
     return jsonify({"offer": _active_offer})
@@ -197,12 +236,67 @@ def api_fod_roll():
     global _active_offer
     uid = get_uid()
     acc = get_active_meesho_account(uid)
+
+    if acc and not int(acc.get("is_first_order", 1)):
+        return jsonify({
+            "ok": False,
+            "error": "No first-order discount available for existing accounts.",
+            "reason": "existing_user",
+        }), 400
+
     res = roll_fod_sync(for_acc=acc)
     if res.get("ok") and res.get("offer"):
         _active_offer = res["offer"]
         if uid:
             save_user_offer(uid, json.dumps(_active_offer))
     return jsonify(res)
+
+
+@app.route("/api/offer/apply", methods=["POST"])
+def api_offer_apply():
+    """
+    Applies the First-Order Discount offer to the connected account.
+    Validates eligibility (is_first_order == 1).
+    """
+    global _active_offer
+    uid = get_uid()
+    acc = get_active_meesho_account(uid)
+
+    if not acc:
+        return jsonify({
+            "ok": False,
+            "error": "Please connect your Meesho account first",
+            "requires_login": True,
+        }), 401
+
+    if not int(acc.get("is_first_order", 1)):
+        return jsonify({
+            "ok": False,
+            "error": "No first-order discount available for existing accounts.",
+            "reason": "existing_user",
+        }), 400
+
+    data = request.get_json(silent=True) or {}
+    target_offer = data.get("offer") or _active_offer
+    if not target_offer:
+        res = roll_fod_sync(for_acc=acc)
+        target_offer = res.get("offer")
+
+    if target_offer:
+        _active_offer = target_offer
+        save_user_offer(uid, json.dumps(target_offer))
+        bucket = target_offer.get("bucket") or target_offer.get("display_bucket") or 200
+        return jsonify({
+            "ok": True,
+            "message": f"Offer ₹{bucket} OFF applied to your account!",
+            "offer": target_offer,
+        })
+    return jsonify({"ok": False, "error": "Failed to apply offer"}), 400
+
+
+@app.route("/api/fod/continue", methods=["GET", "POST"])
+def api_fod_continue():
+    return api_offer_apply()
 
 
 # ============================================================
@@ -244,8 +338,23 @@ def api_cart():
     uid = get_uid()
     cart_items = get_cart(uid)
     acc = get_active_meesho_account(uid)
-    addr = get_default_address(uid)
 
+    # Always ensure latest Meesho cart items and prices are reconciled when an account is linked
+    if acc:
+        try:
+            cs = get_cart_session(uid) or ""
+            review = real_cart_review(acc, cs)
+            if not review.get("ok"):
+                review = real_cart_review(acc, "")
+            if review.get("ok"):
+                if review.get("cart_session"):
+                    set_cart_session(uid, review["cart_session"])
+                sync_local_cart(uid, cart_items, acc)
+                cart_items = get_cart(uid)
+        except Exception as e:
+            logger.warning(f"[Cart] real_cart_review error in api_cart: {e}")
+
+    addr = get_default_address(uid)
     total_qty = sum(int(c.get("qty") or 1) for c in cart_items)
     subtotal = sum(int(c.get("price") or 0) * int(c.get("qty") or 1) for c in cart_items)
 
@@ -304,6 +413,10 @@ def api_cart_add():
         mrp=mrp,
     )
 
+    # Reconcile local cart with remote Meesho review
+    if acc:
+        sync_local_cart(uid, get_cart(uid), acc)
+
     return jsonify({"ok": True, "success": True, "cart": get_cart(uid), "cart_session": cs})
 
 
@@ -352,6 +465,7 @@ def api_cart_update():
             rem_res = meesho_remove_verified(acc, target_pid, cs, variation_id=target_vid)
             if rem_res.get("cart_session"):
                 set_cart_session(uid, rem_res["cart_session"])
+            sync_local_cart(uid, get_cart(uid), acc)
 
         return jsonify({"ok": True, "success": True, "deleted": True, "cart": get_cart(uid)})
     else:
@@ -373,6 +487,7 @@ def api_cart_update():
             )
             if add_res.get("cart_session"):
                 set_cart_session(uid, add_res["cart_session"])
+            sync_local_cart(uid, get_cart(uid), acc)
 
         return jsonify({"ok": True, "success": True, "cart": get_cart(uid)})
 
@@ -545,20 +660,21 @@ def adapter_place_cod():
         return jsonify({"ok": False, "error": "Select a delivery address."}), 400
 
     # ----------------------------------------------------
-    # Wallet Service Fee Check (₹5 Platform Commission)
+    # Wallet Service Fee Check (Dynamic Free vs Paid Mode)
     # The user's internal wallet balance is checked.
-    # Note: Wallet balance is ONLY used for this service fee.
-    # The actual Meesho order total is paid separately (COD).
+    # In FREE mode: fee is ₹0.
+    # In PAID mode: fee is ₹5 (or db setting).
     # ----------------------------------------------------
-    if ORDER_FEE > 0:
+    current_fee = get_order_fee()
+    if current_fee > 0:
         bal = get_wallet_balance(uid)
-        if bal < ORDER_FEE:
+        if bal < current_fee:
             return jsonify({
                 "ok": False,
-                "error": f"Insufficient wallet balance (₹{bal}). A service fee of ₹{ORDER_FEE} is required to place an order. Please recharge your wallet.",
+                "error": f"Insufficient wallet balance (₹{bal}). A service fee of ₹{current_fee} is required to place an order in PAID mode. Please recharge your wallet.",
                 "code": "INSUFFICIENT_WALLET",
                 "wallet_balance": bal,
-                "fee_required": ORDER_FEE,
+                "fee_required": current_fee,
             }), 400
 
     cs = get_cart_session(uid) or ""
@@ -589,9 +705,9 @@ def adapter_place_cod():
 
     # Deduct platform service fee from user's internal wallet upon order success
     fee_deducted = 0
-    if ORDER_FEE > 0:
-        if deduct_wallet(uid, ORDER_FEE, note=f"Service fee for order #{order_num}", ref_id=str(order_num)):
-            fee_deducted = ORDER_FEE
+    if current_fee > 0:
+        if deduct_wallet(uid, current_fee, note=f"Service fee for order #{order_num}", ref_id=str(order_num)):
+            fee_deducted = current_fee
 
     oid = create_order(
         user_id=uid,
@@ -642,20 +758,21 @@ def adapter_pay_online():
         return jsonify({"ok": False, "error": "Select a delivery address."}), 400
 
     # ----------------------------------------------------
-    # Wallet Service Fee Check (₹5 Platform Commission)
+    # Wallet Service Fee Check (Dynamic Free vs Paid Mode)
     # The user's internal wallet balance is checked.
-    # Note: Wallet balance is ONLY used for this service fee.
-    # The actual Meesho order total is paid separately via Juspay UPI.
+    # In FREE mode: fee is ₹0.
+    # In PAID mode: fee is ₹5 (or db setting).
     # ----------------------------------------------------
-    if ORDER_FEE > 0:
+    current_fee = get_order_fee()
+    if current_fee > 0:
         bal = get_wallet_balance(uid)
-        if bal < ORDER_FEE:
+        if bal < current_fee:
             return jsonify({
                 "ok": False,
-                "error": f"Insufficient wallet balance (₹{bal}). A service fee of ₹{ORDER_FEE} is required to place an order. Please recharge your wallet.",
+                "error": f"Insufficient wallet balance (₹{bal}). A service fee of ₹{current_fee} is required to place an order in PAID mode. Please recharge your wallet.",
                 "code": "INSUFFICIENT_WALLET",
                 "wallet_balance": bal,
-                "fee_required": ORDER_FEE,
+                "fee_required": current_fee,
             }), 400
 
     cs = get_cart_session(uid) or ""
@@ -690,9 +807,9 @@ def adapter_pay_online():
 
     # Deduct platform service fee from user's internal wallet upon order success
     fee_deducted = 0
-    if ORDER_FEE > 0:
-        if deduct_wallet(uid, ORDER_FEE, note=f"Service fee for order #{order_num}", ref_id=str(order_num)):
-            fee_deducted = ORDER_FEE
+    if current_fee > 0:
+        if deduct_wallet(uid, current_fee, note=f"Service fee for order #{order_num}", ref_id=str(order_num)):
+            fee_deducted = current_fee
 
     oid = create_order(
         user_id=uid,
@@ -744,6 +861,7 @@ def api_order_confirm():
 
 @app.route("/api/orders", methods=["GET"])
 def api_orders():
+    """Returns all orders (both local bot orders and synced Meesho orders)."""
     uid = get_uid()
     orders = get_orders(uid)
     acc = get_active_meesho_account(uid)
@@ -751,16 +869,20 @@ def api_orders():
     # Reconcile live orders from Meesho if active
     if acc:
         try:
-            live = real_user_orders(acc, limit=5)
-            # Live items can complement history
-        except Exception:
-            pass
+            live = real_user_orders(acc, limit=15)
+            if live.get("ok"):
+                sync_meesho_orders_to_db(uid, live.get("orders", []))
+                orders = get_orders(uid)
+        except Exception as e:
+            logger.warning(f"Error fetching live orders in api_orders: {e}")
 
     out = []
     for o in orders:
+        m_num = o.get("meesho_order_num")
+        source = "Meesho" if m_num else "Bot"
         out.append({
             "order_num": str(o.get("id") or o.get("order_num")),
-            "meesho_order_num": o.get("meesho_order_num"),
+            "meesho_order_num": m_num,
             "items_text": o.get("items"),
             "total": o.get("total"),
             "amount": o.get("total"),
@@ -769,8 +891,47 @@ def api_orders():
             "payment_method": o.get("payment_method", "COD"),
             "created_at": o.get("created_at"),
             "address": o.get("address"),
+            "source": source,
         })
     return jsonify({"orders": out})
+
+
+@app.route("/api/meesho/orders/live", methods=["GET"])
+def api_meesho_orders_live():
+    """
+    Live endpoint called by the '🔄 Sync Meesho Orders' button.
+    Fetches orders from Meesho API, updates local database, and returns fresh orders.
+    """
+    uid = get_uid()
+    acc = get_active_meesho_account(uid)
+    if not acc:
+        return jsonify({"ok": False, "error": "Please link your Meesho account first."}), 400
+    try:
+        res = real_user_orders(acc, limit=15)
+        if res.get("ok"):
+            orders = res.get("orders", [])
+            sync_meesho_orders_to_db(uid, orders)
+            refreshed_orders = get_orders(uid)
+            out = []
+            for o in refreshed_orders:
+                m_num = o.get("meesho_order_num")
+                out.append({
+                    "order_num": str(o.get("id") or o.get("order_num")),
+                    "meesho_order_num": m_num,
+                    "items_text": o.get("items"),
+                    "total": o.get("total"),
+                    "amount": o.get("total"),
+                    "status": o.get("status", "pending"),
+                    "status_text": str(o.get("status", "pending")).title(),
+                    "payment_method": o.get("payment_method", "COD"),
+                    "created_at": o.get("created_at"),
+                    "address": o.get("address"),
+                    "source": "Meesho" if m_num else "Bot",
+                })
+            return jsonify({"ok": True, "orders": out, "synced_count": len(orders)})
+        return jsonify({"ok": False, "error": res.get("error") or "Failed to fetch Meesho orders"}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # ============================================================
@@ -920,6 +1081,7 @@ def api_auth_otp_verify():
         return jsonify({"ok": False, "error": res.get("error") or "Invalid OTP"}), 400
 
     _otp_sessions.pop(phone, None)
+    is_new = bool(res.get("is_new"))
     save_meesho_account(
         user_id=uid,
         phone=phone,
@@ -927,14 +1089,24 @@ def api_auth_otp_verify():
         xo=res.get("xo"),
         xo_exp=res.get("xo_exp") or 0,
         instance_id=res.get("instance_id", ""),
-        is_first_order=1 if res.get("is_new") else 0,
+        is_first_order=1 if is_new else 0,
     )
+
+    acc = get_active_meesho_account(uid)
+    if acc:
+        try:
+            live = real_user_orders(acc, limit=15)
+            if live.get("ok"):
+                sync_meesho_orders_to_db(uid, live.get("orders", []))
+        except Exception as e:
+            logger.warning(f"Failed to auto-sync Meesho orders on OTP login: {e}")
 
     return jsonify({
         "ok": True,
         "message": "Account linked successfully",
         "user_id": res.get("user_id"),
         "phone": phone,
+        "is_first_order": 1 if is_new else 0,
     })
 
 
@@ -954,6 +1126,7 @@ def api_auth_json_login():
     if not user_id or not xo:
         return jsonify({"ok": False, "error": "JSON must include user_id and xo"}), 400
 
+    is_first = int(data.get("is_first_order", 1))
     save_meesho_account(
         user_id=uid,
         phone=phone,
@@ -961,17 +1134,27 @@ def api_auth_json_login():
         xo=xo,
         xo_exp=0,
         instance_id=instance_id,
-        is_first_order=int(data.get("is_first_order", 1)),
+        is_first_order=is_first,
         app_session_id=data.get("app_session_id", ""),
         shield_session_id=data.get("shield_session_id", ""),
         gaid=data.get("gaid", ""),
     )
+
+    acc = get_active_meesho_account(uid)
+    if acc:
+        try:
+            live = real_user_orders(acc, limit=15)
+            if live.get("ok"):
+                sync_meesho_orders_to_db(uid, live.get("orders", []))
+        except Exception as e:
+            logger.warning(f"Failed to auto-sync Meesho orders on JSON login: {e}")
 
     return jsonify({
         "ok": True,
         "message": "Session linked successfully",
         "user_id": user_id,
         "phone": phone,
+        "is_first_order": is_first,
     })
 
 
@@ -991,7 +1174,7 @@ def api_accounts():
 #    - Verified through the third-party VC Gateway API (GW_VERIFY_URL).
 #    - Credits the user's bot wallet balance (users.wallet).
 #
-# 2. Platform Service Fee (ORDER_FEE = ₹5):
+# 2. Platform Service Fee (ORDER_FEE = ₹5 in paid mode, ₹0 in free mode):
 #    - Deducted from user's internal wallet balance when an order is placed.
 #    - Stored in the wallet_tx table and orders.fee column for your withdrawal.
 #    - NEVER added to or subtracted from the Meesho order total.
@@ -1010,10 +1193,13 @@ def api_wallet_balance():
     uid = get_uid()
     balance = get_wallet_balance(uid)
     transactions = get_wallet_tx(uid, limit=20)
+    current_fee = get_order_fee()
+    current_mode = get_global_mode()
     return jsonify({
         "ok": True,
         "balance": balance,
-        "order_fee": ORDER_FEE,
+        "order_fee": current_fee,
+        "global_mode": current_mode,
         "min_recharge": WALLET_MIN,
         "max_recharge": WALLET_MAX,
         "transactions": transactions,

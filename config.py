@@ -22,10 +22,22 @@ WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
 # ---------------------------------------------------------------------------
 # WALLET SERVICE FEE & COMMISSION
 # Note: This is your personal platform fee (₹5 per order) deducted from the
-# user's bot wallet. It accumulates in the backend ledger and is NOT added
-# to or deducted from the Meesho order total.
+# user's bot wallet in paid mode (₹0 in free mode). Controlled dynamically
+# via Telegram Bot /mode command and database settings.
 # ---------------------------------------------------------------------------
-ORDER_FEE = int(os.environ.get("ORDER_FEE", 5))
+def get_order_fee():
+    try:
+        from database import get_order_fee as _db_fee
+        return _db_fee()
+    except Exception:
+        return int(os.environ.get("ORDER_FEE", 5))
+
+try:
+    from database import get_order_fee as _init_fee
+    ORDER_FEE = _init_fee()
+except Exception:
+    ORDER_FEE = int(os.environ.get("ORDER_FEE", 5))
+
 WALLET_MIN = int(os.environ.get("WALLET_MIN", 1))
 WALLET_MAX = int(os.environ.get("WALLET_MAX", 500))
 

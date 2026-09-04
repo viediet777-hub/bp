@@ -353,7 +353,7 @@ textarea.fld{font-family:monospace;font-size:11px;resize:vertical}
     <div><span class="hero__meta num" id="fodMeta">BUCKET 200 • ACTIVE</span></div>
     <div class="hero__row">
       <button class="btn btn--go" id="rollBtn" onclick="rollFOD()">🎲 Roll Offer</button>
-      <button class="btn btn--ghost" onclick="useOffer()">Use this offer →</button>
+      <button class="btn btn--ghost" id="useOfferBtn" onclick="useOffer()">Use this offer →</button>
     </div>
   </div>
 
@@ -575,40 +575,133 @@ function go(tab){
   if(tab === 'account'){ loadAccount(); loadAddresses(); loadOrders(); loadWallet(); }
 }
 
-/* Offer Rolling (FOD Bucket 180-220) */
+/* Offer Rolling (FOD Bucket 180-220) & Account Eligibility */
 async function loadOffer(){
   try{
     const d = await api('/api/offers');
+    if(d && d.reason === 'existing_user'){
+      paintIneligibleOffer(d.message || 'No offer available for this account (existing user)');
+      return;
+    }
     if(d && d.offer){
       S.offer = d.offer;
       paintOffer(d.offer);
     }
   }catch(e){}
 }
+
+function paintIneligibleOffer(msg){
+  document.getElementById('fodAmt').textContent = 'No Offer Available';
+  document.getElementById('fodSub').textContent = msg || 'First-order discounts are reserved for new Meesho accounts.';
+  document.getElementById('fodMeta').textContent = 'EXISTING USER • INELIGIBLE';
+  const rollBtn = document.getElementById('rollBtn');
+  const useBtn = document.getElementById('useOfferBtn');
+  if(rollBtn){ rollBtn.classList.add('btn--dim'); rollBtn.disabled = true; }
+  if(useBtn){ useBtn.classList.add('btn--dim'); useBtn.disabled = true; useBtn.textContent = 'Ineligible (Existing User)'; }
+}
+
 function paintOffer(o){
   const b = parseInt(o.bucket || o.display_bucket || 200);
   document.getElementById('fodAmt').textContent = o.display_text || ('Upto ₹' + b + ' OFF');
   document.getElementById('fodSub').textContent = (o.subtitle || 'on 1st order') + ' • Auto-applied on checkout';
   document.getElementById('fodMeta').textContent = 'BUCKET ' + b + ' • ACTIVE';
+  const rollBtn = document.getElementById('rollBtn');
+  const useBtn = document.getElementById('useOfferBtn');
+  if(rollBtn){ rollBtn.classList.remove('btn--dim'); rollBtn.disabled = false; }
+  if(useBtn){ useBtn.classList.remove('btn--dim'); useBtn.disabled = false; useBtn.textContent = 'Use this offer →'; }
 }
+
 async function rollFOD(){
+  if(S.account && S.account.is_first_order === 0){
+    toast('No first-order discount for existing accounts', 'err');
+    return;
+  }
   const btn = document.getElementById('rollBtn');
   btn.innerHTML = '<span class="spin">🎲</span> Rolling…';
   btn.classList.add('btn--dim');
   try{
     const d = await api('/api/fod/roll');
-    if(d && d.offer){
+    if(d && d.ok && d.offer){
       S.offer = d.offer;
       paintOffer(d.offer);
       toast('Rolled Bucket: ₹' + (d.offer.bucket || 200) + ' OFF!', 'ok');
+    } else if(d && d.reason === 'existing_user'){
+      paintIneligibleOffer(d.error);
+      toast(d.error || 'Existing user ineligible', 'err');
+    } else {
+      toast((d && d.error) || 'Roll failed. Please retry', 'err');
     }
   }catch(e){ toast('Roll failed. Please retry', 'err'); }
   btn.innerHTML = '🎲 Roll Offer';
   btn.classList.remove('btn--dim');
 }
-function useOffer(){
-  go('search');
-  toast('Browse products to use your first-order offer!', 'ok');
+
+async function useOffer(){
+  // Check if account is connected
+  if(!S.account || !S.account.phone){
+    window._pendingApplyOffer = true;
+    toast('Please log in to your Meesho account to apply this offer');
+    openLoginPromptSheet();
+    return;
+  }
+
+  // If logged in, check if existing account
+  if(S.account.is_first_order === 0){
+    toast('No offer available for this account (existing user)', 'err');
+    paintIneligibleOffer('No offer available for this account (existing user)');
+    return;
+  }
+
+  // Eligible new account: apply offer to account
+  const btn = document.getElementById('useOfferBtn');
+  if(btn){
+    btn.innerHTML = '<span class="spin">⏳</span> Applying…';
+    btn.classList.add('btn--dim');
+  }
+
+  try{
+    const d = await api('/api/offer/apply', {
+      method: 'POST',
+      body: {offer: S.offer}
+    });
+    if(d && d.ok){
+      const b = (d.offer && (d.offer.bucket || d.offer.display_bucket)) || 200;
+      toast(`✅ Offer ₹${b} OFF applied to your account!`, 'ok');
+      go('search');
+    } else {
+      if(d && d.reason === 'existing_user'){
+        toast('No offer available for this account (existing user)', 'err');
+        paintIneligibleOffer(d.error);
+      } else if(d && d.requires_login){
+        window._pendingApplyOffer = true;
+        toast('Please log in to your Meesho account to apply this offer');
+        openLoginPromptSheet();
+      } else {
+        toast((d && d.error) || 'Failed to apply offer', 'err');
+      }
+    }
+  }catch(e){
+    toast('Error applying offer. Please retry', 'err');
+  }finally{
+    if(btn){
+      btn.innerHTML = 'Use this offer →';
+      btn.classList.remove('btn--dim');
+    }
+  }
+}
+
+function openLoginPromptSheet(){
+  openSheet(`
+    <span class="x" onclick="closeSheet()">✕</span>
+    <h3>Connect Meesho Account</h3>
+    <p class="muted" style="margin:8px 0 16px;font-size:12.5px;line-height:1.4">
+      Log in or link your Meesho account to apply your First-Order Discount and enable 1-click checkout.
+    </p>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button class="btn btn--go fbtn" onclick="closeSheet();go('account')">Go to Login / Connect Sheet 🔑</button>
+      <button class="btn btn--ghost fbtn" onclick="closeSheet()">Cancel</button>
+    </div>
+  `);
 }
 
 /* Product Search & Listing */
@@ -1302,11 +1395,16 @@ async function loadAccount(){
     S.account = acc || null;
     const stAcc = document.getElementById('stAcc');
     if(acc){
+      const isFirst = Boolean(acc.is_first_order);
       document.getElementById('aPhone').textContent = '+91 ' + (acc.phone || '').slice(-10);
-      document.getElementById('aMeta').textContent = 'UID: ' + (acc.meesho_user_id || '—') + (acc.is_first_order ? ' • FIRST ORDER ELIGIBLE' : ' • ACTIVE');
+      document.getElementById('aMeta').textContent = 'UID: ' + (acc.meesho_user_id || '—') + (isFirst ? ' • FIRST ORDER ELIGIBLE' : ' • EXISTING ACCOUNT');
       document.getElementById('aPill').textContent = 'SESSION ACTIVE';
       document.getElementById('aPill').className = 'pillok';
       if(stAcc) stAcc.textContent = '+' + (acc.phone || '').slice(-4);
+
+      if(!isFirst){
+        paintIneligibleOffer('No offer available for this account (existing user)');
+      }
     } else {
       document.getElementById('aPhone').textContent = 'Not linked';
       document.getElementById('aMeta').textContent = 'Connect via OTP or JSON below';
@@ -1365,7 +1463,25 @@ async function verifyOTP(){
       document.getElementById('oCode').style.display = 'none';
       document.getElementById('oVerifyBtn').style.display = 'none';
       await loadAccount();
+      await loadOrders();
       toast('Account linked ✓', 'ok');
+
+      if(window._pendingApplyOffer){
+        window._pendingApplyOffer = false;
+        if(d.is_first_order === 0){
+          toast('No offer available for this account (existing user)', 'err');
+          paintIneligibleOffer('No offer available for this account (existing user)');
+        } else {
+          try{
+            const appRes = await api('/api/offer/apply', {method: 'POST', body: {offer: S.offer}});
+            const b = (appRes && appRes.offer && (appRes.offer.bucket || appRes.offer.display_bucket)) || 200;
+            toast(`✅ Offer ₹${b} OFF applied to your account!`, 'ok');
+            go('search');
+          }catch(e){
+            go('search');
+          }
+        }
+      }
     } else {
       st.textContent = d.error || 'Invalid OTP';
       st.className = 'fstatus err';
@@ -1400,7 +1516,25 @@ async function loginJSON(){
       st.className = 'fstatus ok';
       document.getElementById('jInput').value = '';
       await loadAccount();
+      await loadOrders();
       toast('Session connected ✓', 'ok');
+
+      if(window._pendingApplyOffer){
+        window._pendingApplyOffer = false;
+        if(d.is_first_order === 0){
+          toast('No offer available for this account (existing user)', 'err');
+          paintIneligibleOffer('No offer available for this account (existing user)');
+        } else {
+          try{
+            const appRes = await api('/api/offer/apply', {method: 'POST', body: {offer: S.offer}});
+            const b = (appRes && appRes.offer && (appRes.offer.bucket || appRes.offer.display_bucket)) || 200;
+            toast(`✅ Offer ₹${b} OFF applied to your account!`, 'ok');
+            go('search');
+          }catch(e){
+            go('search');
+          }
+        }
+      }
     } else {
       st.textContent = d.error || 'Failed to connect session';
       st.className = 'fstatus err';

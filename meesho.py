@@ -274,10 +274,18 @@ def _prod_headers(xo="", instance_id=""):
 # ============================================================
 # FOD (FIRST ORDER DISCOUNT) ROLLING (BUCKET 180 - 220)
 # ============================================================
+_active_offer = None
+
+
+def get_active_offer():
+    global _active_offer
+    return _active_offer
+
+
 def _random_device():
     dev = dict(random.choice(DEVICE_POOL))
     dev["gaid"] = str(uuid.uuid4())
-    dev["session_count"] = random.randint(1, 6)
+    dev["session_count"] = random.randint(1, 8)
     dev["offer_bucket"] = random.choice(BUCKET_POOL)
     dev["apps_installed"] = [APP_POOL[0]] + random.sample(APP_POOL[1:], random.randint(4, 7))
     return dev
@@ -328,10 +336,11 @@ def _map_fod(resp):
 
 
 def fetch_fod_sync(device=None):
+    global _active_offer
     dev = device or _random_device()
     ua = f"Dalvik/2.1.0 (Linux; U; Android {dev['os_version']}; {dev['model']} Build/) Cronet/137.0.7100.61"
     try:
-        with httpx.Client(timeout=12.0) as client:
+        with httpx.Client(timeout=10.0) as client:
             resp = client.post(
                 f"{MEESHO_API}/1.0/anonymous/fod-personalisation",
                 headers=_api_headers(uuid.uuid4().hex, ANON_XO, "anonymous", gaid=dev["gaid"], session_count=dev["session_count"], ua=ua),
@@ -341,9 +350,13 @@ def fetch_fod_sync(device=None):
                 mapped = _map_fod(resp.json())
                 if mapped["ok"]:
                     mapped["offer"]["device"] = dev["model"]
+                    b = int(mapped["offer"].get("bucket") or 0)
+                    if b >= 180:
+                        _active_offer = mapped["offer"]
                     return mapped
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch_fod_sync HTTP attempt failed: {e}")
+
     # Guaranteed high bucket fallback within 180-220
     b = random.choice([220, 200, 190, 180])
     fb = dict(FOD_FALLBACK)
@@ -351,47 +364,79 @@ def fetch_fod_sync(device=None):
     fb["offer_text"] = f"\u20b9{b} OFF"
     fallback = _map_fod({"surgical_first_order_discount_v3": {"enabled": True, "offer": fb}})
     fallback["offer"]["device"] = dev["model"]
+    _active_offer = fallback["offer"]
     return fallback
 
 
 def roll_fod_sync(for_acc=None):
-    """Rolls for the highest bucket in 180-220 range.
-    Automatically applies to first-order purchases."""
+    """
+    Rolls for the highest bucket in 180-220 range with 20+ retry attempts.
+    Rotates fresh device fingerprint (gaid, session_count, offer_bucket) on every attempt.
+    Implements minimum threshold (bucket >= 180) and caches result in _active_offer.
+    """
+    global _active_offer
     best = None
     target_buckets = ["220", "200", "190", "180"]
-    for i in range(5):
+    attempts = 20
+    min_threshold = 180
+
+    for i in range(attempts):
         try:
+            # Generate completely fresh device fingerprint
             dev = _random_device()
+            dev["gaid"] = str(uuid.uuid4())
+            dev["session_count"] = random.randint(1, 8)
             dev["offer_bucket"] = target_buckets[i % len(target_buckets)]
+
             res = fetch_fod_sync(device=dev)
             if res.get("ok") and res.get("offer"):
                 offer = dict(res["offer"])
-                b = int(offer.get("bucket") or 200)
+                b = int(offer.get("bucket") or 0)
                 offer["display_bucket"] = b
                 offer["display_text"] = f"Upto \u20b9{b} OFF"
-                if b >= 200:
-                    return {"ok": True, "offer": offer}
+
+                # Track best bucket found so far
                 if not best or b > int(best.get("bucket") or 0):
                     best = offer
-        except Exception:
+
+                # If optimal high bucket >= 200 is found, immediately accept
+                if b >= 200:
+                    _active_offer = offer
+                    return {"ok": True, "offer": offer}
+
+                # If meets minimum threshold (>= 180) after a couple of rolls, accept
+                if b >= min_threshold and i >= 2:
+                    _active_offer = offer
+                    return {"ok": True, "offer": offer}
+
+            # Small 1-2s delay between attempts to avoid rate limiting
+            time.sleep(1.0)
+        except Exception as err:
+            logger.warning(f"roll_fod_sync attempt {i+1} exception: {err}")
+            time.sleep(1.0)
             continue
+
     if best:
+        b = int(best.get("bucket") or 0)
+        if b < min_threshold:
+            logger.warning(f"[FOD Roll] Best bucket found ({b}) is below threshold {min_threshold} after {attempts} attempts.")
+        _active_offer = best
         return {"ok": True, "offer": best}
-    # Clean high default
+
+    logger.warning(f"[FOD Roll] All {attempts} attempts finished without offer. Returning guaranteed high bucket 200.")
     b = 200
-    return {
-        "ok": True,
-        "offer": {
-            "title": "Upto",
-            "text": f"\u20b9{b} OFF",
-            "subtitle": "on 1st order",
-            "bucket": b,
-            "display_bucket": b,
-            "display_text": f"Upto \u20b9{b} OFF",
-            "duration": 3,
-            "live": True,
-        },
+    fallback_offer = {
+        "title": "Upto",
+        "text": f"\u20b9{b} OFF",
+        "subtitle": "on 1st order",
+        "bucket": b,
+        "display_bucket": b,
+        "display_text": f"Upto \u20b9{b} OFF",
+        "duration": 3,
+        "live": True,
     }
+    _active_offer = fallback_offer
+    return {"ok": True, "offer": fallback_offer}
 
 
 def _apply_fod(price, offer=None):

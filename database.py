@@ -388,27 +388,61 @@ def get_global_mode():
     conn = get_db()
     row = conn.execute("SELECT value FROM settings WHERE key='global_mode'").fetchone()
     conn.close()
-    return dict(row)["value"] if row else "free"
+    if row and row["value"]:
+        return str(row["value"]).strip().lower()
+    return "free"
 
 
 def set_global_mode(mode):
+    clean_mode = "paid" if str(mode).strip().lower() == "paid" else "free"
     conn = get_db()
     conn.execute(
-        "INSERT OR REPLACE INTO settings (key, value) VALUES ('global_mode', ?)",
-        (mode,),
+        "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('global_mode', ?, ?)",
+        (clean_mode, time.time()),
+    )
+    conn.commit()
+    conn.close()
+    return clean_mode
+
+
+def get_order_fee():
+    """
+    Returns platform service fee based on active global_mode in settings table.
+    In 'free' mode, fee is 0.
+    In 'paid' mode, reads 'order_fee' from settings (defaults to 5).
+    """
+    mode = get_global_mode()
+    if mode == "free":
+        return 0
+    conn = get_db()
+    row = conn.execute("SELECT value FROM settings WHERE key='order_fee'").fetchone()
+    conn.close()
+    if row and row["value"] is not None:
+        try:
+            return int(row["value"])
+        except (ValueError, TypeError):
+            pass
+    return 5
+
+
+def set_order_fee(fee):
+    conn = get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('order_fee', ?, ?)",
+        (str(int(fee)), time.time()),
     )
     conn.commit()
     conn.close()
 
 
-def toggle_user_mode(user_id):
+def toggle_user_mode(user_id=None):
     current = get_global_mode()
     new_mode = "free" if current == "paid" else "paid"
     set_global_mode(new_mode)
     return new_mode
 
 
-def get_user_mode(user_id):
+def get_user_mode(user_id=None):
     return get_global_mode()
 
 
@@ -571,6 +605,79 @@ def get_orders(user_id):
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def sync_meesho_orders_to_db(user_id, meesho_orders):
+    """
+    Stores or updates real Meesho orders into the database orders table,
+    preventing duplicate inserts based on meesho_order_num or order_num.
+    """
+    if not meesho_orders:
+        return 0
+    conn = get_db()
+    inserted_or_updated = 0
+    now = time.time()
+    for o in meesho_orders:
+        m_num = str(o.get("sub_order_id") or o.get("order_id") or o.get("id") or "").strip()
+        if not m_num:
+            continue
+
+        existing = conn.execute(
+            "SELECT id FROM orders WHERE user_id=? AND (meesho_order_num=? OR order_num=?)",
+            (user_id, m_num, m_num),
+        ).fetchone()
+
+        status = str(o.get("sub_order_status") or o.get("status") or o.get("order_status") or "placed").lower()
+        total = int(o.get("total_price") or o.get("amount") or o.get("total") or o.get("price") or 0)
+
+        items = o.get("product_title") or o.get("product_name") or o.get("item_title") or ""
+        if not items and o.get("sub_orders"):
+            items = ", ".join([so.get("product_title") or so.get("product_name") or "Item" for so in o["sub_orders"]])
+        if not items:
+            items = f"Meesho Order #{m_num}"
+
+        created_raw = o.get("sub_order_created") or o.get("created_at") or o.get("order_date")
+        created_ts = now
+        if created_raw:
+            try:
+                if isinstance(created_raw, (int, float)):
+                    created_ts = created_raw / 1000.0 if created_raw > 1e11 else float(created_raw)
+            except Exception:
+                pass
+
+        if existing:
+            conn.execute(
+                "UPDATE orders SET status=?, items=?, total=?, meesho_amount=? WHERE id=?",
+                (status, items, total, total, existing["id"]),
+            )
+            inserted_or_updated += 1
+        else:
+            conn.execute(
+                """INSERT INTO orders (order_num, user_id, address_id, payment_mode, payment_method,
+                   status, items, breakdown, total, fee, address, meesho_order_num, meesho_amount, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    m_num,
+                    user_id,
+                    0,
+                    o.get("payment_mode") or "COD",
+                    o.get("payment_mode") or "COD",
+                    status,
+                    items,
+                    "",
+                    total,
+                    0,
+                    o.get("delivery_address") or "",
+                    m_num,
+                    total,
+                    created_ts,
+                ),
+            )
+            inserted_or_updated += 1
+
+    conn.commit()
+    conn.close()
+    return inserted_or_updated
 
 
 def get_order(oid):
