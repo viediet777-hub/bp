@@ -37,7 +37,7 @@ from meesho import (
     fresh_checkout_state, roll_fod_sync,
     real_user_orders,
 )
-from gateway import get_qr_url, generate_txn_id, create_upi_link, verify_payment
+from gateway import get_qr_url, get_qr_base64, generate_txn_id, create_upi_link, verify_payment
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("meesho_app")
@@ -277,12 +277,21 @@ def api_offer_apply():
         }), 400
 
     data = request.get_json(silent=True) or {}
+    req_bucket = data.get("bucket") or request.args.get("bucket")
     target_offer = data.get("offer") or _active_offer
     if not target_offer:
         res = roll_fod_sync(for_acc=acc)
         target_offer = res.get("offer")
 
     if target_offer:
+        if req_bucket:
+            try:
+                b_int = int(req_bucket)
+                target_offer["bucket"] = b_int
+                target_offer["display_bucket"] = b_int
+                target_offer["display_text"] = f"Upto ₹{b_int} OFF"
+            except Exception:
+                pass
         _active_offer = target_offer
         save_user_offer(uid, json.dumps(target_offer))
         bucket = target_offer.get("bucket") or target_offer.get("display_bucket") or 200
@@ -290,6 +299,7 @@ def api_offer_apply():
             "ok": True,
             "message": f"Offer ₹{bucket} OFF applied to your account!",
             "offer": target_offer,
+            "bucket": bucket,
         })
     return jsonify({"ok": False, "error": "Failed to apply offer"}), 400
 
@@ -804,7 +814,7 @@ def adapter_pay_online():
 
     order_num = order_res.get("order_num")
     upi_intent_url = order_res.get("upi_intent_url") or ""
-    qr_base64 = order_res.get("qr_base64") or ""
+    qr_base64 = order_res.get("qr_base64") or (get_qr_base64(upi_intent_url, size=240) if upi_intent_url else "")
     qr_url = get_qr_url(upi_intent_url, size=240) if upi_intent_url else ""
 
     items_snapshot = json.dumps([

@@ -596,8 +596,8 @@ function paintIneligibleOffer(msg){
   document.getElementById('fodMeta').textContent = 'EXISTING USER • INELIGIBLE';
   const rollBtn = document.getElementById('rollBtn');
   const useBtn = document.getElementById('useOfferBtn');
-  if(rollBtn){ rollBtn.classList.add('btn--dim'); rollBtn.disabled = true; }
-  if(useBtn){ useBtn.classList.add('btn--dim'); useBtn.disabled = true; useBtn.textContent = 'Ineligible (Existing User)'; }
+  if(rollBtn){ rollBtn.style.display = 'none'; }
+  if(useBtn){ useBtn.style.display = 'none'; }
 }
 
 function paintOffer(o){
@@ -607,8 +607,8 @@ function paintOffer(o){
   document.getElementById('fodMeta').textContent = 'BUCKET ' + b + ' • ACTIVE';
   const rollBtn = document.getElementById('rollBtn');
   const useBtn = document.getElementById('useOfferBtn');
-  if(rollBtn){ rollBtn.classList.remove('btn--dim'); rollBtn.disabled = false; }
-  if(useBtn){ useBtn.classList.remove('btn--dim'); useBtn.disabled = false; useBtn.textContent = 'Use this offer →'; }
+  if(rollBtn){ rollBtn.style.display = 'inline-block'; rollBtn.classList.remove('btn--dim'); rollBtn.disabled = false; }
+  if(useBtn){ useBtn.style.display = 'inline-block'; useBtn.classList.remove('btn--dim'); useBtn.disabled = false; useBtn.textContent = 'Use this offer →'; }
 }
 
 async function rollFOD(){

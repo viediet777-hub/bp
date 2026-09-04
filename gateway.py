@@ -58,6 +58,22 @@ def get_qr_url(upi_link, size=400):
     )
 
 
+def get_qr_base64(upi_link, size=240):
+    """Generates a base64 encoded data URI for the QR code if possible."""
+    if not upi_link:
+        return ""
+    try:
+        import urllib.request
+        import base64
+        url = get_qr_url(upi_link, size=size)
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            data = resp.read()
+            return f"data:image/png;base64,{base64.b64encode(data).decode('ascii')}"
+    except Exception:
+        return ""
+
+
 def verify_payment(txn_id, amount=1):
     """
     Verifies wallet recharge payment via VC Gateway API.

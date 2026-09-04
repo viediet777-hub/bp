@@ -1366,13 +1366,137 @@ def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True, cod=Fals
 
 def real_preorder(acc, cart_session, address_id, payment_method="COD", customer_amount=None, addr_info=None, upi_package_name="com.naviapp"):
     """
-    Step 4 of checkout_method.txt: POST /api/4.0/preorders
-    Places real order with Cash on Delivery or generates Juspay UPI intent.
+    Executes full checkout chain strictly following checkout_method.txt:
+    1. /api/1.0/cart/location (bind destination address to cart session)
+    2. /api/8.0/cart (refresh review totals)
+    3. /api/1.0/cart/paymentinfo (apply payment instrument & get final effective amount)
+    4. /api/4.0/preorders (place order / create preorder with Juspay intent)
+    5. Juspay WAPI (generate live NPCI UPI intent URL with fallback to MEESHOONLINEPG@axl)
     """
     is_upi = (payment_method.upper() == "UPI")
     target_upi_pkg = upi_package_name or "com.naviapp"
     uid = _acc_uid(acc)
+    h = logged_in_headers(acc)
 
+    # Step 1: Bind address via /api/1.0/cart/location
+    dest_pin = "313001"
+    if addr_info:
+        dest_pin = str(addr_info.get("pin") or addr_info.get("pincode") or dest_pin)
+    
+    body_loc = {
+        "context": "address_bottom_sheet_summary",
+        "identifier": "default",
+        "cart_session": cart_session or "",
+        "dest_pin": dest_pin,
+        "address_id": int(address_id),
+        "customerAmount": None,
+        "payment_modes": None,
+        "replaceable": None,
+        "item": None,
+        "payment_instrument": None,
+        "bank_offers": None,
+        "filter_products": None,
+        "is_self_pickup": None,
+        "self_pickup_address": None,
+        "is_emi": None,
+        "user_id": uid,
+    }
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            r_loc = client.post(f"{MEESHO_API}/1.0/cart/location", headers=h, json=body_loc)
+            if r_loc.status_code == 200:
+                d_loc = r_loc.json() or {}
+                cart_session = d_loc.get("cart_session") or cart_session
+    except Exception as e:
+        print(f"[PREORDER_BIND_LOC] {e}", flush=True)
+
+    # Step 2: Refresh cart via /api/8.0/cart
+    body_cart = {
+        "context": "atc_payment_summary",
+        "identifier": "default",
+        "cart_session": cart_session or "",
+        "dest_pin": None,
+        "address_id": None,
+        "customerAmount": None,
+        "payment_modes": [],
+        "replaceable": False,
+        "item": None,
+        "payment_instrument": None,
+        "bank_offers": None,
+        "filter_products": True,
+        "is_self_pickup": None,
+        "self_pickup_address": None,
+        "is_emi": None,
+        "user_id": uid,
+    }
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            r_cart = client.post(f"{MEESHO_API}/8.0/cart", headers=h, json=body_cart)
+            if r_cart.status_code == 200:
+                d_cart = r_cart.json() or {}
+                cart_session = d_cart.get("cart_session") or cart_session
+    except Exception as e:
+        print(f"[PREORDER_REFRESH_CART] {e}", flush=True)
+
+    # Step 3: Payment info via /api/1.0/cart/paymentinfo
+    payment_instrument = None
+    if is_upi:
+        payment_instrument = {
+            "payment_method_type": "UPI",
+            "payment_method": "UPI",
+            "payment_aggregator": "JUSPAY",
+            "payment_provider": "JUSPAY",
+            "processor_id": "in.juspay.hyperapi",
+            "payment_card_type": "",
+            "payment_card_issuer": "",
+            "txn_type": "UPI_PAY",
+            "upi_app": target_upi_pkg,
+            "card_type": None,
+            "bank_code": None,
+            "card_bin": None,
+            "card_fingerprint": None,
+            "payment_method_fingerprint": None,
+            "issuing_card_bank": None,
+        }
+
+    body_pi = {
+        "context": "atc_payment_summary",
+        "identifier": "default",
+        "cart_session": cart_session or "",
+        "dest_pin": None,
+        "address_id": None,
+        "customerAmount": None,
+        "payment_modes": ["juspay"] if is_upi else ["cod"],
+        "replaceable": False,
+        "item": None,
+        "payment_instrument": payment_instrument,
+        "bank_offers": None,
+        "filter_products": None,
+        "is_self_pickup": None,
+        "self_pickup_address": None,
+        "is_emi": None,
+        "user_id": uid,
+    }
+
+    eff_total = customer_amount
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            r_pi = client.post(f"{MEESHO_API}/1.0/cart/paymentinfo", headers=h, json=body_pi)
+            if r_pi.status_code == 200:
+                d_pi = r_pi.json() or {}
+                cart_session = d_pi.get("cart_session") or cart_session
+                res_pi = d_pi.get("result") or {}
+                if is_upi:
+                    eff_total = res_pi.get("effective_total_with_ppd") or res_pi.get("effective_amount_all_payment") or res_pi.get("effective_total") or eff_total
+                else:
+                    eff_total = res_pi.get("effective_total_without_ppd") or res_pi.get("effective_total") or eff_total
+    except Exception as e:
+        print(f"[PREORDER_PI] {e}", flush=True)
+
+    if not eff_total:
+        eff_total = customer_amount or 100
+
+    # Step 4: Preorder placement via /api/4.0/preorders
     body = {
         "payment_method_type": "UPI" if is_upi else "COD",
         "identifier": "default",
@@ -1382,7 +1506,7 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD", customer_
         "vpa": None,
         "address_id": int(address_id),
         "direct_wallet_token": None,
-        "customer_amount": int(customer_amount) if customer_amount else 100,
+        "customer_amount": int(eff_total),
         "upi_package_name": target_upi_pkg if is_upi else None,
         "payment_flow_type": "intent" if is_upi else None,
         "sender_id": -1,
@@ -1396,39 +1520,60 @@ def real_preorder(acc, cart_session, address_id, payment_method="COD", customer_
 
     try:
         with httpx.Client(timeout=25.0) as client:
-            resp = client.post(f"{MEESHO_API}/4.0/preorders", headers=logged_in_headers(acc), json=body)
+            resp = client.post(f"{MEESHO_API}/4.0/preorders", headers=h, json=body)
             data = resp.json() or {}
             if resp.status_code == 200 and data.get("success"):
                 order_num = data.get("order_num")
-                juspay_data = data.get("juspay_transaction_params") or {}
-                payload = juspay_data.get("payload") or {}
-                j_order_id = payload.get("order_id") or order_num
-                j_token = payload.get("client_auth_token")
+
+                # Parse Juspay transaction params safely (can be dict or json string)
+                juspay_raw = data.get("juspay_transaction_params") or {}
+                if isinstance(juspay_raw, str):
+                    try:
+                        juspay_raw = json.loads(juspay_raw)
+                    except Exception:
+                        juspay_raw = {}
+                payload = juspay_raw.get("payload") if isinstance(juspay_raw, dict) else {}
+                if isinstance(payload, str):
+                    try:
+                        payload = json.loads(payload)
+                    except Exception:
+                        payload = {}
+
+                j_order_id = payload.get("order_id") or juspay_raw.get("order_id") or order_num
+                j_token = payload.get("client_auth_token") or juspay_raw.get("client_auth_token") or data.get("client_auth_token")
                 j_offers = (payload.get("offer") or {}).get("offer_ids") or []
 
                 upi_intent_url = None
-                qr_base64 = None
                 if is_upi:
-                    # 1. Call real Juspay WAPI for live NPCI intent URL
-                    wapi = real_juspay_wapi_intent(
-                        order_id=j_order_id,
-                        client_auth_token=j_token,
-                        upi_app=target_upi_pkg,
-                        offers=j_offers,
-                        amount=customer_amount,
-                    )
-                    if wapi.get("ok"):
-                        upi_intent_url = wapi.get("upi_link")
-                    else:
-                        upi_intent_url = real_juspay_fallback_link(j_order_id, customer_amount)
+                    # Step 5: Juspay WAPI for live NPCI intent URL
+                    if j_order_id and j_token:
+                        wapi = real_juspay_wapi_intent(
+                            order_id=j_order_id,
+                            client_auth_token=j_token,
+                            upi_app=target_upi_pkg,
+                            offers=j_offers,
+                            amount=eff_total,
+                        )
+                        if wapi.get("ok"):
+                            upi_intent_url = wapi.get("upi_link")
+
+                    # Fallback 1: direct payment_url from Meesho response
+                    if not upi_intent_url and data.get("payment_url") and str(data["payment_url"]).startswith("upi://"):
+                        upi_intent_url = data["payment_url"]
+
+                    # Fallback 2: static MEESHOONLINEPG@axl Axis Bank VPA
+                    if not upi_intent_url:
+                        upi_intent_url = real_juspay_fallback_link(j_order_id or order_num, eff_total)
 
                 return {
                     "ok": True,
                     "order_num": order_num,
+                    "meesho_order_num": order_num,
                     "juspay_order_id": j_order_id,
-                    "customer_amount": customer_amount,
+                    "customer_amount": eff_total,
+                    "upi_amount": eff_total,
+                    "cart_session": cart_session,
                     "upi_intent_url": upi_intent_url,
-                    "qr_base64": qr_base64,
                     "payment_url": data.get("payment_url"),
                     "response": data,
                 }
