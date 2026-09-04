@@ -134,10 +134,21 @@ def sync_local_cart(uid, cart, acc):
         except (TypeError, ValueError):
             continue
 
-    # Auto-push any local items that are missing on Meesho
+    # Auto-push any local items that are missing on Meesho (skip tombstones)
     pushed_any = False
+    active_tombstones = tombstone_recent(uid)
+    if active_tombstones:
+        from database import get_db
+        conn = get_db()
+        for t_pid in active_tombstones:
+            conn.execute("DELETE FROM cart WHERE user_id=? AND product_id=?", (uid, t_pid))
+        conn.commit()
+        conn.close()
+
     for c in cart:
         pid = int(c.get("product_id") or 0)
+        if pid and pid in active_tombstones:
+            continue
         if pid and pid not in mmap:
             logger.info(f"[CartSync] User {uid}: Pushing local product {pid} ('{c.get('name')}', qty={c.get('qty', 1)}) to Meesho remote cart.")
             add_res = real_cart_add(
@@ -396,6 +407,17 @@ def api_cart_add():
     name = data.get("name") or f"Product {pid}"
     image = data.get("image") or ""
 
+    # Clear any active tombstones for this product because user explicitly re-added it
+    try:
+        from database import get_db
+        conn = get_db()
+        conn.execute("DELETE FROM cart_tombstones WHERE user_id=? AND product_id=?", (uid, pid))
+        conn.execute("DELETE FROM recently_removed WHERE user_id=? AND product_id=?", (uid, pid))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"[api_cart_add] clear tombstone failed: {e}")
+
     acc = get_active_meesho_account(uid)
     cs = get_cart_session(uid) or ""
     if acc:
@@ -423,8 +445,30 @@ def api_cart_add():
         mrp=mrp,
     )
 
-    # Return updated cart immediately without waiting for redundant review
-    return jsonify({"ok": True, "success": True, "cart": get_cart(uid), "cart_session": cs})
+    # Reconcile with Meesho backend state to ensure consistency before confirming success
+    if acc:
+        sync_res = sync_local_cart(uid, get_cart(uid), acc)
+        if sync_res.get("cart_session"):
+            cs = sync_res["cart_session"]
+            set_cart_session(uid, cs)
+
+    updated_cart = get_cart(uid)
+    total_qty = sum(int(c.get("qty") or 1) for c in updated_cart)
+    effective_total = sum(int(c.get("price") or 0) * int(c.get("qty") or 1) for c in updated_cart)
+
+    return jsonify({
+        "ok": True,
+        "success": True,
+        "cart": updated_cart,
+        "items": updated_cart,
+        "cart_session": cs,
+        "total_quantity": total_qty,
+        "effective_total": effective_total,
+        "result": {
+            "effective_total": effective_total,
+            "total_quantity": total_qty,
+        },
+    })
 
 
 @app.route("/api/cart/update", methods=["POST"])
@@ -432,7 +476,8 @@ def api_cart_update():
     """
     Updates quantity or deletes item.
     Crucial: When qty=0, item is deleted AND added to tombstone with 300s TTL.
-    This strictly prevents sync/pull from re-importing it.
+    Invokes real_cart_add or meesho_remove_verified immediately upon receiving a mutation request.
+    Ensures that the updated cart object returned to the frontend is consistent with the Meesho backend state before confirming success.
     """
     uid = get_uid()
     data = request.get_json(silent=True) or {}
@@ -466,34 +511,117 @@ def api_cart_update():
 
         if target_cid:
             update_cart_qty(target_cid, 0)
+        elif target_pid:
+            from database import get_db
+            conn = get_db()
+            conn.execute("DELETE FROM cart WHERE user_id=? AND product_id=?", (uid, target_pid))
+            conn.commit()
+            conn.close()
 
-        # Call verified removal on Meesho (fast non-blocking return)
+        # Call verified removal on Meesho immediately
         if acc and target_pid:
             rem_res = meesho_remove_verified(acc, target_pid, cs, variation_id=target_vid)
             if rem_res.get("cart_session"):
-                set_cart_session(uid, rem_res["cart_session"])
+                cs = rem_res["cart_session"]
+                set_cart_session(uid, cs)
 
-        return jsonify({"ok": True, "success": True, "deleted": True, "cart": get_cart(uid)})
+            # Ensure local DB is completely clean of the deleted item
+            from database import get_db
+            conn = get_db()
+            conn.execute("DELETE FROM cart WHERE user_id=? AND product_id=?", (uid, target_pid))
+            conn.commit()
+            conn.close()
+
+            # Reconcile remaining items with Meesho backend state
+            remaining_cart = get_cart(uid)
+            if remaining_cart:
+                sync_res = sync_local_cart(uid, remaining_cart, acc)
+                if sync_res.get("cart_session"):
+                    cs = sync_res["cart_session"]
+                    set_cart_session(uid, cs)
+
+        updated_cart = get_cart(uid)
+        total_qty = sum(int(c.get("qty") or 1) for c in updated_cart)
+        effective_total = sum(int(c.get("price") or 0) * int(c.get("qty") or 1) for c in updated_cart)
+
+        return jsonify({
+            "ok": True,
+            "success": True,
+            "deleted": True,
+            "cart": updated_cart,
+            "items": updated_cart,
+            "cart_session": cs,
+            "total_quantity": total_qty,
+            "effective_total": effective_total,
+            "result": {
+                "effective_total": effective_total,
+                "total_quantity": total_qty,
+            },
+        })
     else:
-        # INCREMENT (+ button):
-        delta = max(1, qty - current_qty)
-        if target_cid:
-            update_cart_qty(target_cid, qty)
+        # QUANTITY CHANGE:
+        if qty > current_qty:
+            delta = qty - current_qty
+            if acc and target_pid:
+                add_res = real_cart_add(
+                    acc,
+                    target_pid,
+                    target.get("supplier_id", 0),
+                    target_vid,
+                    target.get("variation_name", "Free Size"),
+                    delta,
+                    cs,
+                )
+                if add_res.get("cart_session"):
+                    cs = add_res["cart_session"]
+                    set_cart_session(uid, cs)
+            if target_cid:
+                update_cart_qty(target_cid, qty)
+        elif qty < current_qty:
+            # Decrement on Meesho by removing line and adding desired qty
+            if acc and target_pid:
+                rem = real_cart_remove(acc, target.get("identifier") or {"product_id": target_pid}, cs)
+                if rem.get("cart_session"):
+                    cs = rem["cart_session"]
+                add_res = real_cart_add(
+                    acc,
+                    target_pid,
+                    target.get("supplier_id", 0),
+                    target_vid,
+                    target.get("variation_name", "Free Size"),
+                    qty,
+                    cs,
+                )
+                if add_res.get("cart_session"):
+                    cs = add_res["cart_session"]
+                    set_cart_session(uid, cs)
+            if target_cid:
+                update_cart_qty(target_cid, qty)
 
-        if acc and target_pid:
-            add_res = real_cart_add(
-                acc,
-                target_pid,
-                target.get("supplier_id", 0),
-                target_vid,
-                target.get("variation_name", "Free Size"),
-                delta,
-                cs,
-            )
-            if add_res.get("cart_session"):
-                set_cart_session(uid, add_res["cart_session"])
+        # Reconcile with Meesho backend state to ensure consistency before confirming success
+        if acc:
+            sync_res = sync_local_cart(uid, get_cart(uid), acc)
+            if sync_res.get("cart_session"):
+                cs = sync_res["cart_session"]
+                set_cart_session(uid, cs)
 
-        return jsonify({"ok": True, "success": True, "cart": get_cart(uid)})
+        updated_cart = get_cart(uid)
+        total_qty = sum(int(c.get("qty") or 1) for c in updated_cart)
+        effective_total = sum(int(c.get("price") or 0) * int(c.get("qty") or 1) for c in updated_cart)
+
+        return jsonify({
+            "ok": True,
+            "success": True,
+            "cart": updated_cart,
+            "items": updated_cart,
+            "cart_session": cs,
+            "total_quantity": total_qty,
+            "effective_total": effective_total,
+            "result": {
+                "effective_total": effective_total,
+                "total_quantity": total_qty,
+            },
+        })
 
 
 @app.route("/api/cart/clear", methods=["POST"])
@@ -512,12 +640,12 @@ def api_cart_clear():
 def api_cart_sync_pull():
     """
     Reconciles Meesho remote cart into local database.
-    Tombstone Check: Skips any product in recently_removed to avoid zombie re-imports.
+    Tombstone Check: Skips and purges any product in recently_removed to avoid zombie re-imports.
     """
     uid = get_uid()
     acc = get_active_meesho_account(uid)
     if not acc:
-        return jsonify({"ok": False, "error": "no_account_linked"})
+        return jsonify({"ok": False, "error": "no_account_linked", "cart": get_cart(uid)})
 
     cs = get_cart_session(uid) or ""
     review = real_cart_review(acc, cs)
@@ -525,13 +653,21 @@ def api_cart_sync_pull():
         review = real_cart_review(acc, "")
 
     if not review.get("ok"):
-        return jsonify({"ok": False, "error": review.get("error")})
+        return jsonify({"ok": False, "error": review.get("error"), "cart": get_cart(uid)})
 
     new_cs = review.get("cart_session") or cs
     set_cart_session(uid, new_cs)
 
     meesho_items = review.get("items", [])
     active_tombstones = tombstone_recent(uid)
+
+    from database import get_db
+    conn = get_db()
+
+    # Purge any tombstoned items from local DB
+    for t_pid in active_tombstones:
+        conn.execute("DELETE FROM cart WHERE user_id=? AND product_id=?", (uid, t_pid))
+    conn.commit()
 
     imported_count = 0
     updated_count = 0
@@ -551,15 +687,11 @@ def api_cart_sync_pull():
 
         if mpid in local_pids:
             # Update existing line item
-            from database import get_db
-            conn = get_db()
             conn.execute(
                 """UPDATE cart SET price=?, qty=?, variation_name=?, variation_id=?, identifier=?
                    WHERE user_id=? AND product_id=?""",
                 (mprice, mqty, mvar, mvid, mi.get("identifier") or "", uid, mpid),
             )
-            conn.commit()
-            conn.close()
             updated_count += 1
         else:
             # Import new product
@@ -579,13 +711,17 @@ def api_cart_sync_pull():
             )
             imported_count += 1
 
+    conn.commit()
+    conn.close()
+
+    refreshed_cart = get_cart(uid)
     return jsonify({
         "ok": True,
         "cart_session": new_cs,
         "imported": imported_count,
         "updated": updated_count,
         "meesho_items": meesho_items,
-        "cart": get_cart(uid),
+        "cart": refreshed_cart,
     })
 
 

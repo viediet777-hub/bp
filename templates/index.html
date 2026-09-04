@@ -860,6 +860,7 @@ async function addToCart(buyNow){
   toast('Added to Cart ✓', 'ok');
   closeSheet();
   if(buyNow) go('cart');
+  schedulePull(500);
 
   try{
     const d = await api('/api/cart/add', {
@@ -879,11 +880,12 @@ async function addToCart(buyNow){
     if(d && d.ok){
       if(d.cart) S.cart = d.cart;
       updateCartBadges();
-      schedulePull(500);
     }
   }catch(e){
     toast('Failed to add to cart', 'err');
     await loadCart();
+  }finally{
+    schedulePull(500);
   }
 }
 
@@ -969,6 +971,7 @@ async function incCartItem(i){
   item.qty = newQty;
   updateCartBadges();
   paintCartItems();
+  schedulePull(500);
 
   try{
     const d = await api('/api/cart/update', {
@@ -977,13 +980,14 @@ async function incCartItem(i){
     });
     if(d && d.ok){
       if(d.cart) S.cart = d.cart;
-      schedulePull(500);
       refreshCartSummary();
     }
   }catch(e){
     toast('Failed to update quantity', 'err');
     await loadCart();
     paintCartItems();
+  }finally{
+    schedulePull(500);
   }
 }
 
@@ -997,6 +1001,7 @@ async function deleteCartItem(i){
   updateCartBadges();
   paintCartItems();
   toast('Item removed', 'ok');
+  schedulePull(500);
 
   try{
     const d = await api('/api/cart/update', {
@@ -1005,13 +1010,14 @@ async function deleteCartItem(i){
     });
     if(d && d.ok){
       if(d.cart) S.cart = d.cart;
-      schedulePull(500);
       refreshCartSummary();
     }
   }catch(e){
     toast('Failed to remove item', 'err');
     await loadCart();
     paintCartItems();
+  }finally{
+    schedulePull(500);
   }
 }
 
@@ -1020,8 +1026,13 @@ function schedulePull(ms = 500){
   if(_pullTimer) clearTimeout(_pullTimer);
   _pullTimer = setTimeout(async () => {
     try{
-      await api('/api/cart/sync/pull', {method: 'POST'});
-      await loadCart();
+      const d = await api('/api/cart/sync/pull', {method: 'POST'});
+      if(d && d.cart){
+        S.cart = d.cart;
+        updateCartBadges();
+      } else {
+        await loadCart();
+      }
       const activeView = document.querySelector('.view.active');
       if(activeView && activeView.id === 'view-cart'){
         paintCartItems();
