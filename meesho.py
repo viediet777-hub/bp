@@ -1342,8 +1342,7 @@ def real_cart_refresh_8(acc, cart_session):
         return {"ok": False, "error": str(e)}
 
 
-def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True, cod=False, info=None,
-                         local_items=None):
+def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True, cod=False, info=None):
     """Run review -> bind address -> 8.0/cart refresh -> paymentinfo, with fresh sessions.
     Mirrors checkout_method.txt place_order Steps 1-3.
     cod=False (default): UPI mode — paymentinfo ["juspay"] + instrument,
@@ -1353,8 +1352,7 @@ def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True, cod=Fals
     Pass info={} to get the exact failure stage when None is returned:
     stages: review_fail (both sessions), auth_expired, meesho_empty,
     no_address, bind_fail, zero_amount.
-    local_items: caller's local cart rows. Used ONLY when the Meesho cart
-    reviews empty — one-way add (no removal, so no doubling) to recover."""
+    NEVER adds items — checkout is review + bind only (re-adding doubled qty)."""
     if info is None:
         info = {}
     info["stage"] = ""
@@ -1388,39 +1386,16 @@ def fresh_checkout_state(acc, cart_session=None, need_paymentinfo=True, cod=Fals
             return None
     info["new_cs"] = review.get("cart_session")
     cs = review["cart_session"]
-    # Also handle case where review succeeds but items empty (cart not synced).
-    # Recovery: ONE-WAY add of the caller's local items — no removal first, so
-    # doubling is impossible on an empty cart. This is the "Could not load
-    # Meesho cart" fix for sessions that rotated server-side.
+    # Review ok but items empty: the Meesho cart genuinely has nothing under
+    # any reachable session. Checkout NEVER re-adds (that caused the 1 -> 2
+    # doubling) — return the honest meesho_empty stage so the caller reports
+    # exactly what to do instead of a wrong order.
     items = review.get("items") or []
     if not items:
         print(f"[FRESH_CHECKOUT] review_ok_but_empty_items: {review}", flush=True)
-        recovered = False
-        if local_items:
-            try:
-                print(f"[FRESH_CHECKOUT] one-way sync {len(local_items)} local items to empty Meesho cart", flush=True)
-                add_r = real_cart_add_many(acc, local_items, cs or "")
-                if add_r.get("ok"):
-                    if add_r.get("cart_session"):
-                        cs = add_r["cart_session"]
-                    re2 = real_cart_review(acc, cs)
-                    if re2.get("ok") and (re2.get("items") or []):
-                        review = re2
-                        items = review.get("items") or []
-                        if review.get("cart_session"):
-                            cs = review["cart_session"]
-                        recovered = True
-                        print(f"[FRESH_CHECKOUT] recovered: {len(items)} items after one-way sync", flush=True)
-                    else:
-                        print(f"[FRESH_CHECKOUT] re-review still empty after sync: {re2}", flush=True)
-                else:
-                    print(f"[FRESH_CHECKOUT] one-way sync failed: {add_r}", flush=True)
-            except Exception as e:
-                print(f"[FRESH_CHECKOUT] one-way sync exc: {e}", flush=True)
-        if not recovered:
-            info["stage"] = "meesho_empty"
-            info["items"] = 0
-            return None
+        info["stage"] = "meesho_empty"
+        info["items"] = 0
+        return None
     info["items"] = len(items)
     addr = review.get("address") or {}
     if not addr.get("id") and addr.get("address_id"):

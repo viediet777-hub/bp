@@ -416,51 +416,15 @@ def api_place_order():
     except Exception:
         user_mode = "free"
 
-    # Get persisted cart_session, or sync local cart to real Meesho cart
+    # Checkout NEVER re-adds (that doubled qty 1 -> 2 when the pre-remove
+    # missed). The Meesho cart is synced live by add/update flows — just use
+    # the stored session; fresh_checkout_state reviews + binds it.
     cart_session = get_cart_session(uid)
 
-    # Push local cart to real Meesho cart via multi-item add
-    # If no session yet, start fresh (Meesho expects null, not stale string)
-    valid_items = [c for c in cart if c.get("product_id")]
-    if valid_items:
-        # Clear any existing real cart items first so stale items don't mix
-        try:
-            existing_review = real_cart_review(acc, cart_session)
-            if existing_review.get("ok") and existing_review.get("items"):
-                cs_for_remove = existing_review.get("cart_session") or cart_session
-                for ei in existing_review["items"]:
-                    ident = ei.get("identifier")
-                    if ident and cs_for_remove:
-                        real_cart_remove(acc, ident, cs_for_remove)
-                # After clearing, start with empty session (captured flow uses "" for new cart)
-                cart_session = ""
-        except Exception as e:
-            print(f"[PLACE_ORDER] clear_existing failed: {e}", flush=True)
-        # Push the full bag in one call (tries pdp then pdl, plus basic price fallback)
-        add_r = real_cart_add_many(acc, valid_items, cart_session or "")
-        print(f"[PLACE_ORDER] add_many result: {str(add_r)[:400]}", flush=True)
-        if add_r.get("ok"):
-            cart_session = add_r.get("cart_session", cart_session)
-            if cart_session:
-                set_cart_session(uid, cart_session)
-        else:
-            # If multi-add fails, try single adds as fallback
-            print(f"[PLACE_ORDER] add_many failed, trying single adds", flush=True)
-            for it in valid_items:
-                sr = real_cart_add(acc, it.get("product_id"), it.get("supplier_id"),
-                                   it.get("variation_id"), it.get("variation_name") or "Free Size",
-                                   it.get("qty", 1), cart_session or "")
-                if sr.get("ok") and sr.get("cart_session"):
-                    cart_session = sr["cart_session"]
-                    set_cart_session(uid, cart_session)
-            # Verify at least one item made it
-            verify = real_cart_review(acc, cart_session)
-            print(f"[PLACE_ORDER] verify after single adds: {str(verify)[:400]}", flush=True)
-            if not verify.get("ok") or not verify.get("items"):
-                if user_mode == "paid":
-                    add_wallet(uid, fee)
-                return jsonify({"error": "Cart sync failed. Meesho rejected items - check supplier/variation ids.",
-                                "details": add_r}), 400
+    # No re-add here either (legacy single-add fallback removed — it doubled
+    # qty the same way). If the Meesho cart is unreachable/empty,
+    # fresh_checkout_state below returns None and the honest error path
+    # refunds wallet + reports the review for debugging.
 
     # Use fresh_checkout_state to run review -> bind -> paymentinfo in one flow
     st = fresh_checkout_state(acc, cart_session, need_paymentinfo=(payment_method != "COD"))
@@ -593,29 +557,15 @@ def api_create_pending():
         try: set_default_address(uid, addr.get("id"))
         except: pass
 
-    # Get real Meesho prices via checkout flow
+    # Get real Meesho prices via checkout flow. Checkout NEVER re-adds (the
+    # old remove-all + add_many here doubled qty 1 -> 2) — review + bind only.
     cart_session = get_cart_session(uid)
-    valid_items = [c for c in cart if c.get("product_id")]
-    if valid_items:
-        try:
-            existing_review = real_cart_review(acc, cart_session)
-            if existing_review.get("ok") and existing_review.get("items"):
-                cs_for_remove = existing_review.get("cart_session") or cart_session
-                for ei in existing_review["items"]:
-                    ident = ei.get("identifier")
-                    if ident and cs_for_remove:
-                        real_cart_remove(acc, ident, cs_for_remove)
-                cart_session = ""
-        except: pass
-        add_r = real_cart_add_many(acc, valid_items, cart_session or "")
-        if add_r.get("ok"):
-            cart_session = add_r.get("cart_session", cart_session)
-            if cart_session:
-                set_cart_session(uid, cart_session)
 
-    st = fresh_checkout_state(acc, cart_session, need_paymentinfo=True)
+    ck2 = {}
+    st = fresh_checkout_state(acc, cart_session, need_paymentinfo=True, info=ck2)
     if not st:
-        return jsonify({"ok": False, "error": "Could not load Meesho cart. Check login/items."}), 400
+        print(f"[CREATE_PENDING] stage={ck2.get('stage')} info={ck2}", flush=True)
+        return jsonify(_checkout_fail(ck2)), 400
 
     cart_session = st["cs"]
     upi_amt = st.get("upi_amount") or st.get("order_total") or 0
@@ -2653,10 +2603,10 @@ def adapter_place_cod():
     cart_session = get_cart_session(uid) or ""
 
     ck_info = {}
-    # local_items: if the Meesho cart reviews empty (rotated session), recover
-    # with a ONE-WAY add (no removal -> no doubling possible).
+    # Checkout NEVER re-adds (that doubled qty 1 -> 2). Review + bind only;
+    # a genuinely empty Meesho cart returns the honest meesho_empty stage.
     st = fresh_checkout_state(acc, cart_session, need_paymentinfo=True, cod=True,
-                              info=ck_info, local_items=cart)
+                              info=ck_info)
     if not st:
         print(f"[PLACE_COD] uid={uid} cs_len={len(cart_session)} addr_id={address_id} "
               f"stage={ck_info.get('stage')} info={ck_info}", flush=True)
@@ -2717,8 +2667,9 @@ def adapter_pay_online():
     cart_session = get_cart_session(uid) or ""
 
     ck_info = {}
+    # Same as COD: review + bind only, never re-add.
     st = fresh_checkout_state(acc, cart_session, need_paymentinfo=True,
-                              info=ck_info, local_items=cart)
+                              info=ck_info)
     if not st:
         print(f"[PAY_ONLINE] uid={uid} cs_len={len(cart_session)} addr_id={address_id} "
               f"stage={ck_info.get('stage')} info={ck_info}", flush=True)
