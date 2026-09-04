@@ -17,3 +17,14 @@ handlers/
 xos/
 .bottoken
 .cookies*.json
+
+# runtime + secrets (never push)
+data/
+*.db
+*.sqlite*
+__pycache__/
+*.pyc
+handlers/
+xos/
+.bottoken
+.cookies*.json

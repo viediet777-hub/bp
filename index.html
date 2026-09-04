@@ -7,30 +7,39 @@
         var hasBeenSet = false;
         var overriddenValue = undefined;
         var originalDefineProperty = Object.defineProperty;
-        Object.defineProperty = function(obj, prop, descriptor) {
-          if ((obj === window || obj === globalThis) && prop === 'fetch' && descriptor) {
-            var origGet = descriptor.get;
-            var origSet = descriptor.set;
-            var val = descriptor.value;
-            return originalDefineProperty.call(Object, obj, prop, {
-              configurable: true,
-              enumerable: descriptor.enumerable !== undefined ? descriptor.enumerable : true,
-              get: function() {
-                if (hasBeenSet) return overriddenValue;
-                if (origGet) return origGet.call(this);
-                return val !== undefined ? val : window.fetch;
-              },
-              set: function(newVal) {
-                hasBeenSet = true;
-                overriddenValue = newVal;
-                if (origSet) {
-                  try { origSet.call(this, newVal); } catch (_) {}
-                }
+
+        var origFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch : (typeof globalThis !== 'undefined' ? globalThis.fetch : undefined);
+
+        function patchDescriptor(obj, descriptor) {
+          if (!descriptor) return descriptor;
+          var origGet = descriptor.get;
+          var origSet = descriptor.set;
+          var val = descriptor.value;
+          return {
+            configurable: true,
+            enumerable: descriptor.enumerable !== undefined ? descriptor.enumerable : true,
+            get: function() {
+              if (hasBeenSet) return overriddenValue;
+              if (origGet) return origGet.call(this);
+              return val !== undefined ? val : origFetch;
+            },
+            set: function(newVal) {
+              hasBeenSet = true;
+              overriddenValue = newVal;
+              if (origSet) {
+                try { origSet.call(this, newVal); } catch (_) {}
               }
-            });
+            }
+          };
+        }
+
+        Object.defineProperty = function(obj, prop, descriptor) {
+          if ((obj === window || obj === globalThis) && prop === 'fetch') {
+            return originalDefineProperty.call(Object, obj, prop, patchDescriptor(obj, descriptor));
           }
           return originalDefineProperty.call(Object, obj, prop, descriptor);
         };
+
         var originalDefineProperties = Object.defineProperties;
         if (originalDefineProperties) {
           Object.defineProperties = function(obj, props) {
@@ -43,14 +52,21 @@
             return originalDefineProperties.call(Object, obj, props);
           };
         }
+
+        try {
+          var desc = Object.getOwnPropertyDescriptor(window, 'fetch');
+          if (desc && !desc.set) {
+            originalDefineProperty.call(Object, window, 'fetch', patchDescriptor(window, desc));
+          }
+        } catch (_) {}
       })();
     </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#0B0C10" />
     <title>VIEDDET ORDER BOT</title>
-    <meta name="description" content="Production-ready Telegram Mini App shopping assistant integrating with Meesho APIs for real-time cart, checkout, offer rolling, and orders by VIEDDETX SINGH." />
+    <meta name="description" content="Telegram Mini App shopping assistant with Meesho product search, first-order discount rolling, live cart, address manager, and COD or UPI checkout." />
     <meta property="og:title" content="VIEDDET ORDER BOT" />
-    <meta property="og:description" content="Production-ready Telegram Mini App shopping assistant integrating with Meesho APIs for real-time cart, checkout, offer rolling, and orders by VIEDDETX SINGH." />
+    <meta property="og:description" content="Telegram Mini App shopping assistant with Meesho product search, first-order discount rolling, live cart, address manager, and COD or UPI checkout." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />

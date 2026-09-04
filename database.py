@@ -628,7 +628,18 @@ def sync_meesho_orders_to_db(user_id, meesho_orders):
         ).fetchone()
 
         status = str(o.get("sub_order_status") or o.get("status") or o.get("order_status") or "placed").lower()
-        total = int(o.get("total_price") or o.get("amount") or o.get("total") or o.get("price") or 0)
+        total = int(
+            o.get("total_price")
+            or o.get("order_amount")
+            or o.get("total_amount")
+            or o.get("selling_price")
+            or (o.get("payment_details") or {}).get("total_amount")
+            or (o.get("payment_details") or {}).get("order_total")
+            or o.get("amount")
+            or o.get("total")
+            or o.get("price")
+            or 0
+        )
 
         items_name = o.get("product_title") or o.get("product_name") or o.get("item_title") or ""
         if not items_name and o.get("sub_orders"):
@@ -927,14 +938,15 @@ def get_meesho_accounts(user_id):
 
 def get_active_meesho_account(user_id):
     conn = get_db()
+    u_str = str(user_id or '')
     row = conn.execute(
-        "SELECT * FROM meesho_accounts WHERE user_id=? AND is_active=1 ORDER BY created_at DESC LIMIT 1",
-        (user_id,),
+        "SELECT * FROM meesho_accounts WHERE (user_id=? OR meesho_user_id=?) AND is_active=1 ORDER BY created_at DESC LIMIT 1",
+        (u_str, u_str),
     ).fetchone()
     if not row:
         row = conn.execute(
-            "SELECT * FROM meesho_accounts WHERE user_id=? ORDER BY created_at DESC LIMIT 1",
-            (user_id,),
+            "SELECT * FROM meesho_accounts WHERE (user_id=? OR meesho_user_id=?) ORDER BY created_at DESC LIMIT 1",
+            (u_str, u_str),
         ).fetchone()
     conn.close()
     return dict(row) if row else None

@@ -7,30 +7,38 @@
     var hasBeenSet = false;
     var overriddenValue = undefined;
     var originalDefineProperty = Object.defineProperty;
+    var origFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch : (typeof globalThis !== 'undefined' ? globalThis.fetch : undefined);
+
+    function patchDescriptor(obj, descriptor) {
+      if (!descriptor) return descriptor;
+      var origGet = descriptor.get;
+      var origSet = descriptor.set;
+      var val = descriptor.value;
+      return {
+        configurable: true,
+        enumerable: descriptor.enumerable !== undefined ? descriptor.enumerable : true,
+        get: function() {
+          if (hasBeenSet) return overriddenValue;
+          if (origGet) return origGet.call(this);
+          return val !== undefined ? val : origFetch;
+        },
+        set: function(newVal) {
+          hasBeenSet = true;
+          overriddenValue = newVal;
+          if (origSet) {
+            try { origSet.call(this, newVal); } catch (_) {}
+          }
+        }
+      };
+    }
+
     Object.defineProperty = function(obj, prop, descriptor) {
       if ((obj === window || obj === globalThis) && prop === 'fetch' && descriptor) {
-        var origGet = descriptor.get;
-        var origSet = descriptor.set;
-        var val = descriptor.value;
-        return originalDefineProperty.call(Object, obj, prop, {
-          configurable: true,
-          enumerable: descriptor.enumerable !== undefined ? descriptor.enumerable : true,
-          get: function() {
-            if (hasBeenSet) return overriddenValue;
-            if (origGet) return origGet.call(this);
-            return val !== undefined ? val : window.fetch;
-          },
-          set: function(newVal) {
-            hasBeenSet = true;
-            overriddenValue = newVal;
-            if (origSet) {
-              try { origSet.call(this, newVal); } catch (_) {}
-            }
-          }
-        });
+        return originalDefineProperty.call(Object, obj, prop, patchDescriptor(obj, descriptor));
       }
       return originalDefineProperty.call(Object, obj, prop, descriptor);
     };
+
     var originalDefineProperties = Object.defineProperties;
     if (originalDefineProperties) {
       Object.defineProperties = function(obj, props) {
@@ -43,6 +51,13 @@
         return originalDefineProperties.call(Object, obj, props);
       };
     }
+
+    try {
+      var desc = Object.getOwnPropertyDescriptor(window, 'fetch');
+      if (desc && !desc.set) {
+        originalDefineProperty.call(Object, window, 'fetch', patchDescriptor(window, desc));
+      }
+    } catch (_) {}
   })();
 </script>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
@@ -536,18 +551,29 @@ function getUid(){
     return d;
   }catch(e){ return '1'; }
 }
-const UID = getUid();
-document.getElementById('uidChip').textContent = 'ID ' + String(UID).slice(-6);
+let UID = getUid();
+window.UID = UID;
+const uidChipEl = document.getElementById('uidChip');
+if(uidChipEl) uidChipEl.textContent = 'ID ' + String(UID).slice(-6);
 
 /* --- API Fetch Wrapper with X-User-Id --- */
 async function api(path, opts){
   opts = opts || {};
-  const r = await fetch(path, {
-    method: opts.method || 'GET',
-    headers: {'Content-Type': 'application/json', 'X-User-Id': UID},
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined
-  });
-  return await r.json();
+  const currentUid = window.UID || UID;
+  try{
+    const r = await fetch(path, {
+      method: opts.method || 'GET',
+      headers: Object.assign({'Content-Type': 'application/json', 'X-User-Id': currentUid}, opts.headers || {}),
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined
+    });
+    if(!r.ok){
+      const errText = await r.text();
+      try{ return JSON.parse(errText); }catch(_){ return {ok:false, error: 'Server returned ' + r.status}; }
+    }
+    return await r.json();
+  }catch(e){
+    return {ok: false, error: e.message || 'Request failed'};
+  }
 }
 
 function toast(msg, kind){
@@ -994,7 +1020,6 @@ async function incCartItem(i){
 async function deleteCartItem(i){
   const item = S.cart[i];
   if(!item) return;
-  if(!confirm(`Remove "${item.name}" from cart?`)) return;
 
   // Optimistic UI update
   S.cart.splice(i, 1);
@@ -1241,7 +1266,11 @@ function setPayMethod(m){
 }
 
 async function placeOrder(){
-  if(!coAddrId) return toast('Please select a delivery address', 'err');
+  if(!coAddrId){
+    toast('Please select or add a delivery address', 'err');
+    openAddrSheet(true);
+    return;
+  }
   const btn = document.getElementById('placeBtn');
   btn.innerHTML = 'Placing Order…';
   btn.classList.add('btn--dim');
@@ -1602,8 +1631,20 @@ async function loginJSON(){
       st.textContent = 'Session Connected!';
       st.className = 'fstatus ok';
       document.getElementById('jInput').value = '';
+      if(parsed.user_id){
+        try{
+          const newUid = String(parsed.user_id);
+          localStorage.setItem('device_uid', newUid);
+          window.UID = newUid;
+          UID = newUid;
+          const uChip = document.getElementById('uidChip');
+          if(uChip) uChip.textContent = 'ID ' + newUid.slice(-6);
+        }catch(e){}
+      }
       await loadAccount();
+      await loadAddresses();
       await loadOrders();
+      await loadCart();
       toast('Session connected ✓', 'ok');
 
       if(window._pendingApplyOffer){
