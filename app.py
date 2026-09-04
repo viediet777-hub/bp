@@ -2550,6 +2550,62 @@ def adapter_order_prices():
     return jsonify({"cod": cod_amount, "online": upi_amount})
 
 
+def sync_local_cart(uid, cart, acc):
+    """Idempotent READ-ONLY sync of local cart rows from the Meesho review
+    (Gemini fix #1 helper). Updates local price/qty/variation to Meesho truth
+    and refreshes the stored cart_session. NEVER calls add/remove on either
+    side, so it cannot double quantities — safe to run right before checkout.
+    Returns {"ok", "synced", "cart_session", "error"}."""
+    from database import get_db
+    if not cart:
+        return {"ok": False, "error": "empty"}
+    cs = get_cart_session(uid) or ""
+    review = real_cart_review(acc, cs)
+    if not review.get("ok"):
+        review = real_cart_review(acc, "")
+    if not review.get("ok"):
+        return {"ok": False, "error": str(review.get("error"))[:150]}
+    if review.get("cart_session"):
+        cs = review["cart_session"]
+        set_cart_session(uid, cs)
+    mmap = {}
+    for mi in (review.get("items") or []):
+        try:
+            mmap[int(mi.get("product_id"))] = mi
+        except (TypeError, ValueError):
+            continue
+    synced = 0
+    try:
+        conn = get_db()
+        for c in cart:
+            try:
+                pid = int(c.get("product_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            m = mmap.get(pid)
+            if not m:
+                continue
+            try:
+                conn.execute(
+                    "UPDATE cart SET price=?, qty=?, variation_name=?, variation_id=? "
+                    "WHERE user_id=? AND product_id=?",
+                    (int(m.get("price") or m.get("mrp") or c.get("price") or 0),
+                     int(m.get("quantity") or m.get("qty") or c.get("qty") or 1),
+                     m.get("variation") or c.get("variation_name") or "Free Size",
+                     int(m.get("variation_id") or c.get("variation_id") or 0),
+                     uid, pid))
+                synced += 1
+            except (TypeError, ValueError):
+                continue
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[SYNC_LOCAL_CART] exc: {e}", flush=True)
+        return {"ok": False, "error": str(e)[:150]}
+    print(f"[SYNC_LOCAL_CART] uid={uid} synced={synced}/{len(cart)} cs={cs[:20] if cs else ''}", flush=True)
+    return {"ok": True, "synced": synced, "cart_session": cs}
+
+
 def _checkout_fail(info):
     """Map fresh_checkout_state failure stage -> specific error code + honest
     message, so 'Could not load Meesho cart' stops hiding the real cause."""
@@ -2601,6 +2657,14 @@ def adapter_place_cod():
     # whenever the pre-remove missed, and churned cart_session stale. Just use
     # the stored session; fresh_checkout_state reviews + binds it.
     cart_session = get_cart_session(uid) or ""
+
+    # Idempotent read-only sync (price/qty/session refresh, never add/remove)
+    # before the authoritative checkout review.
+    try:
+        sync_local_cart(uid, cart, acc)
+        cart_session = get_cart_session(uid) or cart_session
+    except Exception as e:
+        print(f"[PLACE_COD] sync_local_cart exc (continuing): {e}", flush=True)
 
     ck_info = {}
     # Checkout NEVER re-adds (that doubled qty 1 -> 2). Review + bind only;
@@ -2665,6 +2729,12 @@ def adapter_pay_online():
     # BUG-1 FIX (same as COD): NO re-add during checkout — Meesho already has
     # the cart. Re-adding doubled qty and expired the session mid-checkout.
     cart_session = get_cart_session(uid) or ""
+
+    try:
+        sync_local_cart(uid, cart, acc)
+        cart_session = get_cart_session(uid) or cart_session
+    except Exception as e:
+        print(f"[PAY_ONLINE] sync_local_cart exc (continuing): {e}", flush=True)
 
     ck_info = {}
     # Same as COD: review + bind only, never re-add.

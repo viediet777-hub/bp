@@ -861,7 +861,7 @@ async function deleteCartItem(i){
     if(v === true) toast('Removed ✓ Meesho synced', 'ok');
     else if(v === false) toast('Removed locally — Meesho retry pending', 'ok');
     else toast('Removed', 'ok');
-    schedulePull(5000);
+    schedulePull(4000);
   }catch(e){ toast('Network error — try again', 'err'); }
   finally{ cartBusy = false; }
 }
