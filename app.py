@@ -2621,29 +2621,12 @@ def adapter_place_cod():
         return jsonify({"ok": False, "error": "no_address", "message": "Select a delivery address"}), 400
 
     subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
+    # BUG-1 FIX: NO re-add during checkout. The Meesho cart already holds these
+    # items (add/update flows sync live). Re-adding here doubled qty (1 -> 2)
+    # whenever the pre-remove missed, and churned cart_session stale. Just use
+    # the stored session; fresh_checkout_state reviews + binds it.
     cart_session = get_cart_session(uid) or ""
 
-    # Sync cart to Meesho
-    valid_items = [c for c in cart if c.get("product_id")]
-    if valid_items:
-        try:
-            existing_review = real_cart_review(acc, cart_session)
-            if existing_review.get("ok") and existing_review.get("items"):
-                cs_for_remove = existing_review.get("cart_session") or cart_session
-                for ei in existing_review["items"]:
-                    ident = ei.get("identifier")
-                    if ident:
-                        real_cart_remove(acc, ident, cs_for_remove)
-                cart_session = ""
-        except: pass
-        add_r = real_cart_add_many(acc, valid_items, cart_session or "")
-        if add_r.get("ok"):
-            cart_session = add_r.get("cart_session", cart_session)
-            if cart_session:
-                set_cart_session(uid, cart_session)
-
-    # COD (checkout_method.txt Steps 1-3 with ["cod"]): customer_amount MUST be
-    # the without_ppd total — a single correct amount, no guessing loop.
     st = fresh_checkout_state(acc, cart_session, need_paymentinfo=True, cod=True)
     if not st:
         return jsonify({"ok": False, "error": "checkout failed", "message": "Could not load Meesho cart"}), 400
@@ -2698,26 +2681,9 @@ def adapter_pay_online():
         return jsonify({"ok": False, "error": "no_address", "message": "Select a delivery address"}), 400
 
     subtotal = sum(c.get("price", 0) * c.get("qty", 1) for c in cart)
+    # BUG-1 FIX (same as COD): NO re-add during checkout — Meesho already has
+    # the cart. Re-adding doubled qty and expired the session mid-checkout.
     cart_session = get_cart_session(uid) or ""
-
-    # Sync cart
-    valid_items = [c for c in cart if c.get("product_id")]
-    if valid_items:
-        try:
-            existing_review = real_cart_review(acc, cart_session)
-            if existing_review.get("ok") and existing_review.get("items"):
-                cs_for_remove = existing_review.get("cart_session") or cart_session
-                for ei in existing_review["items"]:
-                    ident = ei.get("identifier")
-                    if ident:
-                        real_cart_remove(acc, ident, cs_for_remove)
-                cart_session = ""
-        except: pass
-        add_r = real_cart_add_many(acc, valid_items, cart_session or "")
-        if add_r.get("ok"):
-            cart_session = add_r.get("cart_session", cart_session)
-            if cart_session:
-                set_cart_session(uid, cart_session)
 
     st = fresh_checkout_state(acc, cart_session, need_paymentinfo=True)
     if not st:
