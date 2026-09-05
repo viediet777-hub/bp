@@ -1,1 +1,1 @@
-worker: python viediet_shop.py
+worker: python main.py
