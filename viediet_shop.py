@@ -17,7 +17,7 @@ import urllib.parse
 # ============================================================
 # CONFIG - edit these
 # ============================================================
-TOKEN = os.environ.get("BOT_TOKEN", "8656548047:AAGS_dZfB4vlRrocZeYMC7v0n7P2kgm6fuQ")  # @BotFather se token
+TOKEN = os.environ.get("BOT_TOKEN", "")  # @BotFather se token
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "1364476174"))            # tera Telegram user id
 CURRENCY = "₹"
 SUPPORT_LINK = "https://t.me/viedietlooterschat"   # support group link
