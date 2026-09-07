@@ -1,0 +1,7 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python g2.py"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
