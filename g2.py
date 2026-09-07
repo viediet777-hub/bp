@@ -13,7 +13,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 # ==========================================
 # CONFIGURATION
 # ==========================================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8232062513:AAFdRySb9fe2lmEm9r7rBWJ0QVyy0XNGqgQ")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8232062513:AAHBgxpOPBrRVO8OlhayOYsqBJAbICa0pa0")
 ADMIN_ID = os.getenv("ADMIN_ID", "8139558808")
 BOT_USERNAME = "@papukhelu_bot"
 
@@ -474,6 +474,12 @@ def process_single_number(phone, chat_id, first_name, fb_url, device_id):
         "Origin": "https://www.jio.com",
         "Referer": "https://www.jio.com/selfcare/login/",
     })
+
+    # Visit login page first to get cookies (avoids CAPTCHA_REQUIRED)
+    try:
+        jio.get("https://www.jio.com/selfcare/login/", timeout=15)
+    except Exception:
+        pass
 
     # 1. Send OTP via Direct Jio API
     print(f"  [Step 1] Sending OTP via Jio API...")
@@ -949,6 +955,11 @@ def async_send_otp(chat_id, number, first_name):
             "Origin": "https://www.jio.com",
             "Referer": "https://www.jio.com/selfcare/login/",
         })
+        # Visit login page first to get cookies (avoids CAPTCHA_REQUIRED)
+        try:
+            jio.get("https://www.jio.com/selfcare/login/", timeout=15)
+        except Exception:
+            pass
         res = jio.post(JIO_SEND_OTP_URL,
                        json={"mobileNumber": number, "loginFlowType": "MOBILE", "alternateNumber": ""},
                        timeout=20)
@@ -976,6 +987,11 @@ def async_verify_otp(chat_id, number, otp, first_name):
             "Origin": "https://www.jio.com",
             "Referer": "https://www.jio.com/selfcare/login/",
         })
+        # Visit login page first to get cookies
+        try:
+            jio.get("https://www.jio.com/selfcare/login/", timeout=15)
+        except Exception:
+            pass
         res = jio.post(JIO_VERIFY_OTP_URL,
                        json={"mobileNumber": number, "otp": otp},
                        timeout=20)
