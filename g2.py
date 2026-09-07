@@ -13,8 +13,8 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 # ==========================================
 # CONFIGURATION
 # ==========================================
-BOT_TOKEN = "8232062513:AAFdRySb9fe2lmEm9r7rBWJ0QVyy0XNGqgQ"
-ADMIN_ID = "8139558808"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8232062513:AAFdRySb9fe2lmEm9r7rBWJ0QVyy0XNGqgQ")
+ADMIN_ID = os.getenv("ADMIN_ID", "8139558808")
 BOT_USERNAME = "@papukhelu_bot"
 
 # Direct Jio API (no looters.shop)
