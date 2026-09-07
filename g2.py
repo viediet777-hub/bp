@@ -453,20 +453,96 @@ def check_link_status(url):
         return "ERROR"
 
 # ==========================================
-# CHECK JIO NUMBER
+# JIO SESSION MANAGER (shared, cached)
 # ==========================================
-def is_jio_number(session, phone):
-    try:
-        r = session.get(JIO_CHECK_URL.format(mobile=phone), timeout=15)
-        data = r.json()
-        if data.get("primaryService"):
-            return True
-        return False
-    except Exception:
-        return False
+class JioSession:
+    def __init__(self):
+        self._session = None
+        self._lock = threading.Lock()
+        self._jio_cache = {}  # phone -> bool
+
+    def get_session(self):
+        with self._lock:
+            if self._session is None:
+                self._session = requests.Session()
+                self._session.headers.update({
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Origin": "https://www.jio.com",
+                    "Referer": "https://www.jio.com/selfcare/login/",
+                })
+                try:
+                    self._session.get("https://www.jio.com/selfcare/login/", timeout=10)
+                except Exception:
+                    pass
+            return self._session
+
+    def is_jio(self, phone):
+        if phone in self._jio_cache:
+            return self._jio_cache[phone]
+        try:
+            s = self.get_session()
+            r = s.get(JIO_CHECK_URL.format(mobile=phone), timeout=10)
+            data = r.json()
+            result = bool(data.get("primaryService"))
+            self._jio_cache[phone] = result
+            return result
+        except Exception:
+            return False
+
+    def send_otp(self, phone):
+        s = self.get_session()
+        r = s.post(JIO_SEND_OTP_URL,
+                   json={"mobileNumber": phone, "loginFlowType": "MOBILE", "alternateNumber": ""},
+                   timeout=15)
+        return r.json()
+
+    def verify_otp(self, phone, otp):
+        s = self.get_session()
+        r = s.post(JIO_VERIFY_OTP_URL,
+                   json={"mobileNumber": phone, "otp": otp},
+                   timeout=15)
+        return r.json()
+
+    def get_activation(self):
+        s = self.get_session()
+        try:
+            s.get(JIO_AUTH_URL, headers={"Referer": "https://www.jio.com/selfcare/dashboard/"}, timeout=15)
+            s.get(JIO_NAVIGATE_URL, headers={"Referer": "https://www.jio.com/selfcare/dashboard/"}, timeout=15)
+            act = s.get(JIO_ACTIVATE_URL, headers={"Referer": "https://www.jio.com/selfcare/googleai/"}, timeout=15).json()
+            if str(act.get("errorCode", "200")) != "200":
+                return None, act.get("errorMessage", "Activate failed")
+            if "already" in str(act.get("errorMessage", "")).lower():
+                return None, "already_active"
+            google = s.get(JIO_GOOGLE_URL, headers={"Referer": "https://www.jio.com/selfcare/googleai/"}, timeout=15).json()
+            if "already" in str(google.get("errorMessage", "")).lower():
+                return None, "already_claimed"
+            redirect = str(google.get("redirectionURL", ""))
+            import html as html_mod
+            from urllib.parse import unquote
+            text = html_mod.unescape(redirect)
+            for _ in range(4):
+                decoded = unquote(text)
+                if decoded == text:
+                    break
+                text = decoded
+            m = re.search(r"https?://serviceactivation[.]google[.]com/subscription/new/([A-Za-z0-9_-]{50,})(={0,2})", text, re.I)
+            if m:
+                link = "https://serviceactivation.google.com/subscription/new/" + m.group(1) + m.group(2)
+                try:
+                    s.get(JIO_SUBMIT_URL, headers={"Referer": "https://www.jio.com/selfcare/googleai/"}, timeout=10)
+                except Exception:
+                    pass
+                return link, None
+            return None, "no_link_found"
+        except Exception as e:
+            return None, str(e)
+
+jio_mgr = JioSession()
 
 # ==========================================
-# PROCESS SINGLE NUMBER (stockgro_auto.py style)
+# PROCESS SINGLE NUMBER (optimized)
 # ==========================================
 def process_single_number(phone, chat_id, first_name, fb_url, device_id):
     print(f"\n{'='*50}")
@@ -478,64 +554,39 @@ def process_single_number(phone, chat_id, first_name, fb_url, device_id):
         print(f"  Already used. Skipping.")
         return False
 
-    # Create Jio session
-    jio = requests.Session()
-    jio.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Origin": "https://www.jio.com",
-        "Referer": "https://www.jio.com/selfcare/login/",
-    })
-
-    # Visit login page first to get cookies (avoids CAPTCHA_REQUIRED)
-    try:
-        jio.get("https://www.jio.com/selfcare/login/", timeout=15)
-    except Exception:
-        pass
-
-    # Check if Jio number first
-    print(f"  Checking if Jio number...")
-    if not is_jio_number(jio, phone):
-        print(f"  Not a Jio number. Skipping.")
+    # Check Jio number (cached)
+    if not jio_mgr.is_jio(phone):
+        print(f"  Not Jio. Skip.")
         save_used(phone)
         return False
 
-    # 1. Send OTP via Direct Jio API
-    print(f"  [Step 1] Sending OTP via Jio API...")
+    # 1. Send OTP
+    print(f"  [Step 1] Sending OTP...")
     try:
-        res = jio.post(JIO_SEND_OTP_URL,
-                       json={"mobileNumber": phone, "loginFlowType": "MOBILE", "alternateNumber": ""},
-                       timeout=20)
-        data = res.json()
-        if str(data.get("responseCode")) != "200" or data.get("responseMessage") != "SUCCESS":
-            print(f"  OTP send failed: {data}")
+        data = jio_mgr.send_otp(phone)
+        if str(data.get("responseCode")) != "200":
+            print(f"  OTP failed: {data.get('responseMessage', 'Error')}")
             save_used(phone)
             return False
-        print(f"  OTP Sent! Masked: {data.get('maskedValue', 'N/A')}")
+        print(f"  OTP Sent! {data.get('maskedValue', '')}")
     except Exception as e:
-        print(f"  OTP send error: {e}")
+        print(f"  OTP error: {e}")
         save_used(phone)
         return False
 
-    # 2. Get last message key from Firebase
+    # 2. Poll OTP from Firebase
     last_key = get_last_message_key(fb_url, device_id)
-
-    # 3. Poll OTP from Firebase
-    print(f"  [Step 2] Waiting for OTP from Firebase...")
+    print(f"  [Step 2] Waiting OTP...")
     otp = poll_otp(fb_url, device_id, last_key, timeout=30)
     if not otp:
         print(f"  No OTP received")
         save_used(phone)
         return False
 
-    # 4. Verify OTP via Direct Jio API
-    print(f"  [Step 3] Verifying OTP...")
+    # 3. Verify OTP
+    print(f"  [Step 3] Verifying...")
     try:
-        res = jio.post(JIO_VERIFY_OTP_URL,
-                       json={"mobileNumber": phone, "otp": otp},
-                       timeout=20)
-        v_data = res.json()
+        v_data = jio_mgr.verify_otp(phone, otp)
         if str(v_data.get("responseCode")) != "200":
             print(f"  Verify failed: {v_data}")
             save_used(phone)
@@ -546,83 +597,18 @@ def process_single_number(phone, chat_id, first_name, fb_url, device_id):
         save_used(phone)
         return False
 
-    # 5. Get Activation Link
-    print(f"  [Step 4] Getting activation link...")
-    try:
-        # Check auth
-        auth_resp = jio.get(JIO_AUTH_URL, headers={"Referer": "https://www.jio.com/selfcare/dashboard/"}, timeout=20)
-        auth_data = auth_resp.json()
-        if str(auth_data.get("loginFlag", "")).lower() != "true":
-            print(f"  Auth failed: {auth_data}")
-            save_used(phone)
-            return False
-
-        # Navigate
-        jio.get(JIO_NAVIGATE_URL, headers={"Referer": "https://www.jio.com/selfcare/dashboard/"}, timeout=20)
-
-        # Activate
-        act_resp = jio.get(JIO_ACTIVATE_URL, headers={"Referer": "https://www.jio.com/selfcare/googleai/"}, timeout=20)
-        act_data = act_resp.json()
-        act_msg = str(act_data.get("errorMessage", "") or act_data.get("responseMessage", "")).lower()
-        if "already" in act_msg:
-            print(f"  Already active: {act_msg}")
-            save_used(phone)
-            return False
-        if str(act_data.get("errorCode", "200")) != "200":
-            print(f"  Activate failed: {act_data}")
-            save_used(phone)
-            return False
-
-        # Get Google URL
-        google_resp = jio.get(JIO_GOOGLE_URL, headers={"Referer": "https://www.jio.com/selfcare/googleai/"}, timeout=20)
-        google_data = google_resp.json()
-        google_msg = str(google_data.get("errorMessage", "") or google_data.get("responseMessage", "")).lower()
-        if "already" in google_msg:
-            print(f"  Already claimed: {google_msg}")
-            save_used(phone)
-            return False
-
-        # Extract link
-        redirect_url = str(google_data.get("redirectionURL", ""))
-        link = ""
-        import html as html_mod
-        from urllib.parse import unquote
-        text = html_mod.unescape(redirect_url)
-        for _ in range(4):
-            decoded = unquote(text)
-            if decoded == text:
-                break
-            text = decoded
-        act_match = re.search(
-            r"https?://serviceactivation[.]google[.]com/subscription/new/"
-            r"([A-Za-z0-9_-]{50,})(={0,2})",
-            text, re.IGNORECASE
-        )
-        if act_match:
-            link = "https://serviceactivation.google.com/subscription/new/" + act_match.group(1) + act_match.group(2)
-
-        if not link:
-            print(f"  No activation link found")
-            save_used(phone)
-            return False
-
-        # Submit
-        try:
-            jio.get(JIO_SUBMIT_URL, headers={"Referer": "https://www.jio.com/selfcare/googleai/"}, timeout=20)
-        except Exception:
-            pass
-
-        print(f"  LINK FOUND: {link}")
-
-    except Exception as e:
-        print(f"  Activation error: {e}")
+    # 4. Get activation link
+    print(f"  [Step 4] Getting link...")
+    link, err = jio_mgr.get_activation()
+    if not link:
+        print(f"  Failed: {err}")
         save_used(phone)
         return False
 
-    # 6. Check link status
-    status = check_link_status(link)
+    print(f"  LINK: {link}")
 
-    # 7. Save
+    # 5. Check status & save
+    status = check_link_status(link)
     save_used(phone)
 
     time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -642,14 +628,11 @@ def process_single_number(phone, chat_id, first_name, fb_url, device_id):
         leaderboard_data[user_id_str]["count"] += 1
         save_leaderboard()
 
-    # 8. Send to Telegram
+    # 6. Send to Telegram
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("Open Link", url=link))
     bot.send_message(chat_id,
-        f"LINK FOUND!\n\n"
-        f"Phone: <code>{phone}</code>\n"
-        f"Status: {status}\n"
-        f"Link: <code>{link}</code>",
+        f"LINK FOUND!\n\nPhone: <code>{phone}</code>\nStatus: {status}\nLink: <code>{link}</code>",
         reply_markup=markup)
 
     try:
@@ -968,27 +951,11 @@ def process_number_step(message):
 
 def async_send_otp(chat_id, number, first_name):
     try:
-        jio = requests.Session()
-        jio.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Origin": "https://www.jio.com",
-            "Referer": "https://www.jio.com/selfcare/login/",
-        })
-        # Visit login page first to get cookies (avoids CAPTCHA_REQUIRED)
-        try:
-            jio.get("https://www.jio.com/selfcare/login/", timeout=15)
-        except Exception:
-            pass
-        # Check if Jio number first
-        if not is_jio_number(jio, number):
+        if not jio_mgr.is_jio(number):
             bot.send_message(chat_id, "Not a Jio number! /start")
             return
-        res = jio.post(JIO_SEND_OTP_URL,
-                       json={"mobileNumber": number, "loginFlowType": "MOBILE", "alternateNumber": ""},
-                       timeout=20)
-        data = res.json()
-        if str(data.get("responseCode")) == "200" and data.get("responseMessage") == "SUCCESS":
+        data = jio_mgr.send_otp(number)
+        if str(data.get("responseCode")) == "200":
             msg = bot.send_message(chat_id, "OTP Sent! Enter OTP:")
             bot.register_next_step_handler(msg, process_otp_step, number, first_name)
         else:
@@ -1004,69 +971,26 @@ def process_otp_step(message, number, first_name):
 
 def async_verify_otp(chat_id, number, otp, first_name):
     try:
-        jio = requests.Session()
-        jio.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Origin": "https://www.jio.com",
-            "Referer": "https://www.jio.com/selfcare/login/",
-        })
-        # Visit login page first to get cookies
-        try:
-            jio.get("https://www.jio.com/selfcare/login/", timeout=15)
-        except Exception:
-            pass
-        res = jio.post(JIO_VERIFY_OTP_URL,
-                       json={"mobileNumber": number, "otp": otp},
-                       timeout=20)
-        data = res.json()
+        data = jio_mgr.verify_otp(number, otp)
         if str(data.get("responseCode")) == "200":
-            # Get activation link
-            try:
-                jio.get(JIO_AUTH_URL, headers={"Referer": "https://www.jio.com/selfcare/dashboard/"}, timeout=20)
-                jio.get(JIO_NAVIGATE_URL, headers={"Referer": "https://www.jio.com/selfcare/dashboard/"}, timeout=20)
-                act_resp = jio.get(JIO_ACTIVATE_URL, headers={"Referer": "https://www.jio.com/selfcare/googleai/"}, timeout=20)
-                act_data = act_resp.json()
-                if str(act_data.get("errorCode", "200")) != "200":
-                    bot.send_message(chat_id, f"Activation failed: {act_data.get('errorMessage', 'Error')}")
-                    return
-                google_resp = jio.get(JIO_GOOGLE_URL, headers={"Referer": "https://www.jio.com/selfcare/googleai/"}, timeout=20)
-                google_data = google_resp.json()
-                redirect_url = str(google_data.get("redirectionURL", ""))
-                import html as html_mod
-                from urllib.parse import unquote
-                text = html_mod.unescape(redirect_url)
-                for _ in range(4):
-                    decoded = unquote(text)
-                    if decoded == text:
-                        break
-                    text = decoded
-                act_match = re.search(
-                    r"https?://serviceactivation[.]google[.]com/subscription/new/"
-                    r"([A-Za-z0-9_-]{50,})(={0,2})",
-                    text, re.IGNORECASE
-                )
-                if act_match:
-                    link = "https://serviceactivation.google.com/subscription/new/" + act_match.group(1) + act_match.group(2)
-                    status = check_link_status(link)
-                    save_used(number)
-                    markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("Open Link", url=link))
-                    markup.add(InlineKeyboardButton("Generate More", callback_data="start_generate"))
-                    bot.send_message(chat_id,
-                        f"DONE!\n\n{status}\n<code>{link}</code>", reply_markup=markup)
-                    user_id_str = str(chat_id)
-                    with FILE_LOCK:
-                        with open(LINKS_FILE, "a") as f:
-                            f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {first_name} | {number} | {status} | {link}\n")
-                        if user_id_str not in leaderboard_data:
-                            leaderboard_data[user_id_str] = {"name": first_name, "count": 0}
-                        leaderboard_data[user_id_str]["count"] += 1
-                        save_leaderboard()
-                else:
-                    bot.send_message(chat_id, "No activation link found")
-            except Exception as e:
-                bot.send_message(chat_id, f"Error: {e}")
+            link, err = jio_mgr.get_activation()
+            if link:
+                status = check_link_status(link)
+                save_used(number)
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("Open Link", url=link))
+                markup.add(InlineKeyboardButton("Generate More", callback_data="start_generate"))
+                bot.send_message(chat_id, f"DONE!\n\n{status}\n<code>{link}</code>", reply_markup=markup)
+                user_id_str = str(chat_id)
+                with FILE_LOCK:
+                    with open(LINKS_FILE, "a") as f:
+                        f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {first_name} | {number} | {status} | {link}\n")
+                    if user_id_str not in leaderboard_data:
+                        leaderboard_data[user_id_str] = {"name": first_name, "count": 0}
+                    leaderboard_data[user_id_str]["count"] += 1
+                    save_leaderboard()
+            else:
+                bot.send_message(chat_id, f"Failed: {err}")
         else:
             bot.send_message(chat_id, f"Invalid OTP: {data.get('responseMessage', 'Error')}")
     except Exception:
