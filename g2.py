@@ -444,13 +444,26 @@ def check_link_status(url):
         r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         if r.status_code == 200:
             if "already been used" in r.text.lower() or "redeemed" in r.text.lower():
-                return "🔴 REDEEMED"
-            return "🟢 FRESH"
+                return "REDEEMED"
+            return "FRESH"
         elif r.status_code == 404:
-            return "❌ NOT FOUND"
-        return f"⚠️ Status {r.status_code}"
+            return "NOT FOUND"
+        return f"Status {r.status_code}"
     except Exception:
-        return "❌ ERROR"
+        return "ERROR"
+
+# ==========================================
+# CHECK JIO NUMBER
+# ==========================================
+def is_jio_number(session, phone):
+    try:
+        r = session.get(JIO_CHECK_URL.format(mobile=phone), timeout=15)
+        data = r.json()
+        if data.get("primaryService"):
+            return True
+        return False
+    except Exception:
+        return False
 
 # ==========================================
 # PROCESS SINGLE NUMBER (stockgro_auto.py style)
@@ -480,6 +493,13 @@ def process_single_number(phone, chat_id, first_name, fb_url, device_id):
         jio.get("https://www.jio.com/selfcare/login/", timeout=15)
     except Exception:
         pass
+
+    # Check if Jio number first
+    print(f"  Checking if Jio number...")
+    if not is_jio_number(jio, phone):
+        print(f"  Not a Jio number. Skipping.")
+        save_used(phone)
+        return False
 
     # 1. Send OTP via Direct Jio API
     print(f"  [Step 1] Sending OTP via Jio API...")
@@ -960,6 +980,10 @@ def async_send_otp(chat_id, number, first_name):
             jio.get("https://www.jio.com/selfcare/login/", timeout=15)
         except Exception:
             pass
+        # Check if Jio number first
+        if not is_jio_number(jio, number):
+            bot.send_message(chat_id, "Not a Jio number! /start")
+            return
         res = jio.post(JIO_SEND_OTP_URL,
                        json={"mobileNumber": number, "loginFlowType": "MOBILE", "alternateNumber": ""},
                        timeout=20)
