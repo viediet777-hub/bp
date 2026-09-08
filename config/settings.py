@@ -7,7 +7,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Settings:
-    BOT_TOKEN: str = os.getenv("BOT_TOKEN", "8773133018:AAEJoWff77I7k-6w4CA12g-SlOzPDSRbHuI")
+    BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
     ADMIN_IDS: list = [int(x.strip()) for x in os.getenv("ADMIN_IDS", "1364476174").split(",") if x.strip()]
     VC_API_KEY: str = os.getenv("VC_API_KEY", "PAY3C0023FD16FC822035173195")
     UPI_ID: str = os.getenv("UPI_ID", "paytm.s1dw5n0@pty")
