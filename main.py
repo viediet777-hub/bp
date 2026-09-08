@@ -1,6 +1,9 @@
 import logging
 import sys
+import os
+import threading
 from pathlib import Path
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -12,6 +15,24 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is running!")
+
+    def log_message(self, format, *args):
+        pass
+
+
+def start_health_server():
+    port = int(os.getenv("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    logger.info(f"Health server started on port {port}")
+    server.serve_forever()
+
+
 def main():
     if not settings.BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN missing! .env file banao.")
@@ -19,6 +40,10 @@ def main():
         raise RuntimeError("ADMIN_IDS missing! .env file banao.")
 
     set_token(settings.BOT_TOKEN)
+
+    if os.getenv("RAILWAY_STATIC_URL"):
+        thread = threading.Thread(target=start_health_server, daemon=True)
+        thread.start()
 
     from telegram import Update
     from telegram.ext import (Application, CommandHandler, CallbackQueryHandler,
