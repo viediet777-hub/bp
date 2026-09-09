@@ -8,6 +8,10 @@ if DATABASE_URL:
     import psycopg2
     import psycopg2.extras
 
+    def _pg_query(query, params=()):
+        """Convert ? placeholders to %s for psycopg2."""
+        return query.replace("?", "%s")
+
     class Database:
         def __init__(self, database_url):
             self.database_url = database_url
@@ -35,7 +39,7 @@ if DATABASE_URL:
                 """)
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS products (
-                        SERIAL PRIMARY KEY,
+                        id SERIAL PRIMARY KEY,
                         name TEXT NOT NULL,
                         description TEXT DEFAULT '',
                         price REAL DEFAULT 0,
@@ -47,7 +51,7 @@ if DATABASE_URL:
                 """)
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS orders (
-                        SERIAL PRIMARY KEY,
+                        id SERIAL PRIMARY KEY,
                         order_id TEXT UNIQUE,
                         user_id BIGINT,
                         product_id INTEGER,
@@ -60,7 +64,7 @@ if DATABASE_URL:
                 """)
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS stock_codes (
-                        SERIAL PRIMARY KEY,
+                        id SERIAL PRIMARY KEY,
                         product_id INTEGER,
                         code TEXT,
                         is_used INTEGER DEFAULT 0,
@@ -70,7 +74,7 @@ if DATABASE_URL:
                 """)
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS deposits (
-                        SERIAL PRIMARY KEY,
+                        id SERIAL PRIMARY KEY,
                         user_id BIGINT,
                         amount REAL,
                         order_id TEXT,
@@ -88,17 +92,17 @@ if DATABASE_URL:
 
         def execute(self, query, params=()):
             with self.conn.cursor() as cur:
-                cur.execute(query, params)
+                cur.execute(_pg_query(query), params)
             self.conn.commit()
 
         def fetchone(self, query, params=()):
             with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(query, params)
+                cur.execute(_pg_query(query), params)
                 return cur.fetchone()
 
         def fetchall(self, query, params=()):
             with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(query, params)
+                cur.execute(_pg_query(query), params)
                 return cur.fetchall()
 
     db = Database(DATABASE_URL)

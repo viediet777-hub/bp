@@ -5,6 +5,19 @@ from bot.services.api_helpers import (send_msg, edit_msg, answer_cb, send_doc,
                                        sbtn, sbtn_url, ICON)
 from bot.keyboards.keyboards import back_kb, admin_panel_kb
 from config.settings import settings
+from bot.database.database import db
+
+
+def _load_force_channel():
+    """Load force-join channel from database on startup."""
+    try:
+        row = db.fetchone("SELECT value FROM settings WHERE key = 'force_join_channel'")
+        if row and row['value']:
+            settings.FORCE_JOIN_CHANNEL = row['value']
+    except Exception:
+        pass
+
+_load_force_channel()
 
 
 def is_admin(user_id):
@@ -389,9 +402,14 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if context.user_data.get('awaiting_set_channel'):
-        channel = text.replace("@", "").replace("https://t.me/", "")
+        channel = text.replace("@", "").replace("https://t.me/", "").strip()
+        if not channel:
+            return await send_msg(user_id, "❌ Channel username dalo!")
         settings.FORCE_JOIN_CHANNEL = channel
-        context.user_data['awaiting_set_channel'] = False
+        from bot.database.database import db
+        db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                   ("force_join_channel", channel))
+        context.user_data.pop('awaiting_set_channel', None)
         await send_msg(user_id, f"✅ <b>Force Channel Set!</b>\n\n@{channel}", admin_panel_kb())
         return
 
@@ -400,6 +418,9 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         product = Product.get(product_id)
         if not product:
             return
+        # Guard: reject text that looks like channel/URL (not a code)
+        if text.startswith("@") or "t.me/" in text:
+            return await send_msg(user_id, "❌ Ye channel username hai, code nahi!\nCode paste karo ya /done dabao.")
         codes = [c.strip() for c in text.split("\n") if c.strip()]
         if codes:
             StockCode.add_bulk(product.id, codes)

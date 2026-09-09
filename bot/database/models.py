@@ -104,7 +104,16 @@ class Product:
             db.execute("INSERT INTO products (name, description, price, category, stock, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                        (self.name, self.description, self.price, self.category, self.stock, self.status,
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-            self.id = db.fetchone("SELECT last_insert_rowid() as id")['id']
+            # Works for both SQLite and PostgreSQL
+            try:
+                row = db.fetchone("SELECT last_insert_rowid() as id")
+                if row:
+                    self.id = row['id']
+            except Exception:
+                # PostgreSQL fallback
+                row = db.fetchone("SELECT currval(pg_get_serial_sequence('products', 'id')) as id")
+                if row:
+                    self.id = row['id']
         return self
 
     def reduce_stock(self, qty):
